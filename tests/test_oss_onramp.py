@@ -24,6 +24,10 @@ class MinimalInitTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse((target / "01-strategy").exists())
             self.assertTrue((target / "notes" / "README.md").is_file())
+            self.assertIn(
+                "https://github.com/CometWeb-io/whykit",
+                (target / "README.md").read_text(encoding="utf-8"),
+            )
             lint = run("lint", "--root", str(target))
             self.assertEqual(lint.returncode, 0, lint.stdout + lint.stderr)
             self.assertIn("0 error", lint.stdout)

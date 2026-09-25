@@ -1,8 +1,10 @@
 # Publishing WhyKit
 
-This checklist covers a source release and the first public release. Complete it
-against the exact commit and tag intended for publication. A local green test
-run does not substitute for successful GitHub checks on that revision.
+This checklist covers two separate events: making the GitHub source repository
+public and, later, publishing the first package to PyPI. Verify the exact commit
+before changing repository visibility; a tag is needed only for the package
+release. A local green test run does not substitute for successful GitHub checks
+on the revision being published.
 
 ## Before making the repository public
 
@@ -21,8 +23,10 @@ run does not substitute for successful GitHub checks on that revision.
   fictional. Use reserved domains such as `example.com`, `.example`, `.invalid`
   or `.test`; do not attach invented claims to real organizations.
 - Confirm the contact channels in `SECURITY.md` and `CODE_OF_CONDUCT.md` are
-  monitored. Enable GitHub private vulnerability reporting before inviting
-  security reports.
+  monitored. The email fallback must work before changing visibility. GitHub
+  private vulnerability reporting can be enabled only after the repository is
+  public; enable it immediately after the visibility change and verify that
+  the reporting form is available.
 - Require successful CI for the exact `main` commit that will become public.
   Resolve failures and review the final Actions logs before changing visibility.
 - Decide how to handle any sensitive history or hosted records with the
@@ -36,9 +40,10 @@ Changing repository visibility is an external, hard-to-reverse action. Review
 GitHub's [visibility-change consequences](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/setting-repository-visibility)
 and obtain maintainer approval before proceeding.
 
-After the repository is public, configure a `main` ruleset: require pull
-requests, block force-pushes and branch deletion, and require the checks from a
-successful run of the release candidate's CI workflow. Keep the optional
+After the repository is public, enable private vulnerability reporting and
+configure a `main` ruleset: require pull requests, block force-pushes and branch
+deletion, and require the checks from a successful run of the release
+candidate's CI workflow. Keep the optional
 Explorer check non-blocking. Verify the saved ruleset in GitHub; do not infer
 that protection is active from this checklist.
 

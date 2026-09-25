@@ -4,7 +4,7 @@ This repository holds the reasoning behind how this company operates: durable
 context, the evidence behind claims, and the decisions that were actually taken —
 with the rationale that made them make sense at the time.
 
-It is built on [WhyKit](https://github.com/cometweb/whykit).
+It is built on [WhyKit](https://github.com/CometWeb-io/whykit).
 
 ## Start here
 
