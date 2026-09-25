@@ -457,6 +457,7 @@ class ContractTests(unittest.TestCase):
         self.assertNotIn("upload-artifact", release)
         self.assertNotIn("download-artifact", release)
 
+    @unittest.skipIf(os.name == "nt", "release Bash helper runs only in Linux CI")
     def test_release_baseline_uses_previous_release_or_fails_closed(self) -> None:
         script = ROOT / "scripts" / "release-baseline.sh"
 
