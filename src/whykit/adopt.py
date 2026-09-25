@@ -338,7 +338,7 @@ def adopt(
         batch = today.isoformat()
         staging = safe_vault_dir(vault, Path(".import-staging") / batch)
         for candidate in candidates:
-            if candidate.assessment in ("empty", "duplicate"):
+            if candidate.assessment != "useful":
                 continue
             relative = Path(".import-staging") / batch / candidate.relative
             target = safe_vault_target(vault, relative)

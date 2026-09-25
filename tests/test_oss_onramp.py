@@ -129,10 +129,11 @@ class AdoptScoreTests(unittest.TestCase):
                        "source_of_truth: false\nsensitivity: internal\n---\n\n# Note\n\n"
                        + "A sentence with enough words to count as useful source material. " * 3)
             (source / "note.md").write_text(content, encoding="utf-8")
+            data = (source / "note.md").read_bytes()
             with patch.object(Path, "read_text", side_effect=AssertionError("unexpected second read")):
                 item = scan(source)[0]
             self.assertTrue(item.whykit_ready)
-            self.assertEqual(item.sha256, hashlib.sha256(content.encode("utf-8")).hexdigest())
+            self.assertEqual(item.sha256, hashlib.sha256(data).hexdigest())
 
     def test_adopt_warns_about_incompatible_registers_and_non_markdown_scope(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -192,7 +193,8 @@ class AdoptScoreTests(unittest.TestCase):
             result = run("adopt", str(source), "--into", str(vault), "--write", "--json")
             self.assertEqual(result.returncode, 0, result.stderr)
             record = vault / json.loads(result.stdout)["ingestion_record"]
-            self.assertIn(hashlib.sha256(content.encode("utf-8")).hexdigest(), record.read_text(encoding="utf-8"))
+            source_digest = hashlib.sha256((source / "note.md").read_bytes()).hexdigest()
+            self.assertIn(source_digest, record.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

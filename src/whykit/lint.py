@@ -307,6 +307,10 @@ def _parse_front_matter(raw: str) -> dict:
 def load_note(path: Path, *, text: str | None = None) -> Note:
     if text is None:
         text = path.read_text(encoding="utf-8")
+    else:
+        # Path.read_text() uses universal newlines; callers with decoded bytes
+        # (notably adopt's hash-preserving scan) must see the same parser input.
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
     note = Note(path=path, text=text)
     if not text.startswith("---\n"):
         return note

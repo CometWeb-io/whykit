@@ -200,6 +200,22 @@ class AdoptTests(unittest.TestCase):
         # Staging must never make the vault fail its own checks.
         self.assertEqual(run("lint", cwd=self.vault).returncode, 0)
 
+    def test_adr_only_write_stages_decisions_not_unsupported_or_stubs(self) -> None:
+        result = run(
+            "adopt", str(self.legacy), "--into", str(self.vault),
+            "--profile", "adr-only", "--write", "--owner", "Test owner", "--json",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["score"]["useful"], 1)
+        staging = self.vault / ".import-staging"
+        self.assertEqual(
+            [path.name for path in staging.rglob("*.md") if path.name != "MIGRATION.md"],
+            ["0001-use-postgres.md"],
+        )
+        record = self.vault / payload["ingestion_record"]
+        self.assertIn("unsupported", record.read_text(encoding="utf-8"))
+
     def test_adopting_the_vault_into_itself_is_refused(self) -> None:
         result = run("adopt", str(self.vault), "--into", str(self.vault))
         self.assertEqual(result.returncode, 2)

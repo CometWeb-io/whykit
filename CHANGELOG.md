@@ -20,10 +20,14 @@ CLI and the lint rule codes.
   explains that its score is not a full vault lint, flags known incompatible
   register/log tables, and reports non-Markdown or unreadable files omitted from
   its scan.
+- `adopt --write` stages only useful files; `adr-only` no longer copies hundreds
+  of files classified as unsupported, nor heading-only stubs marked for discard.
 - Permanent ingestion records retain complete SHA-256 digests instead of only
   16-character prefixes; readiness assessment uses the same bytes as hashing.
 - Invalid list-valued lifecycle metadata produces lint findings instead of a
   `TypeError` traceback.
+- Adoption now parses CRLF source front matter consistently with normal
+  `Path.read_text()` linting, including on Windows.
 - Numbered `AGENTS.md` TODO items are now counted, so the starter vault surfaces
   all four unanswered agent-contract questions.
 

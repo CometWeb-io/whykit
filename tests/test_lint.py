@@ -67,6 +67,21 @@ class VaultTestCase(unittest.TestCase):
 
 
 class LintRegressionTests(VaultTestCase):
+    def test_crlf_front_matter_parses_and_scores_ready(self) -> None:
+        from whykit.adopt import scan
+
+        path = self.root / "notes" / "crlf.md"
+        path.parent.mkdir(parents=True)
+        content = front("CRLF note", status="draft") + "\n" + ("A substantive sentence for this portable document. " * 4)
+        path.write_bytes(content.replace("\n", "\r\n").encode("utf-8"))
+
+        note = lint_mod.load_note(path)
+        self.assertTrue(note.has_front)
+        self.assertEqual(note.front["status"], "draft")
+        self.assertNotIn("frontmatter.invalid", self.codes())
+        self.assertNotIn("frontmatter.missing", self.codes())
+        self.assertTrue(scan(self.root)[0].whykit_ready)
+
     def test_numbered_agent_contract_todo_is_reported(self) -> None:
         self.write("AGENTS.md", "1. TODO: choose a branching rule.\n")
         self.assertEqual(self.codes().count("agents.unconfigured"), 1)
