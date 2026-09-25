@@ -1,0 +1,39 @@
+# Local staging for raw platform exports, before normalization.
+# Never commit raw exports — normalize them into a workstream first.
+.import-staging/
+
+# Secrets. This repository holds knowledge and tooling, never credentials.
+.env
+*.key
+*.pem
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Local vault machine artifacts (snapshots, scratch). Keep out of git.
+.whykit/
+.ci-snapshot.json
+**/.ci-snapshot.json
+
+# Explorer build artifacts
+apps/explorer/node_modules/
+apps/explorer/dist/
+apps/explorer/src/generated/vault.json
