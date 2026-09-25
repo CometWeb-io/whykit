@@ -67,7 +67,10 @@ Before tagging, confirm all of the following:
   release profile.
 - GitHub reports successful required checks for that exact tag.
 - The GitHub `pypi` environment is restricted to release tags and has an
-  independent reviewer configured.
+  independent reviewer configured. Do not push a release tag while that
+  environment is absent: a workflow referencing a missing environment can
+  create it without protection rules. See GitHub's
+  [environment guidance](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
 
 ## Configure PyPI publishing
 

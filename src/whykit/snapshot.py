@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .graph import build_graph
-from .io import atomic_write_text
+from .io import atomic_write_text, safe_vault_target
 from .lint import collect_markdown, find_vault_root, is_vault_root, load_note, rel
 from .status import build_status
 
@@ -158,7 +158,8 @@ def main_snapshot(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", help="write JSON to this path instead of stdout")
     parser.add_argument("--compact", action="store_true", help="emit compact JSON")
     args = parser.parse_args(argv)
-    root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
+    requested_root = Path(args.root).expanduser().absolute() if args.root else find_vault_root()
+    root = requested_root.resolve() if requested_root is not None else None
     if root is None or not is_vault_root(root):
         print("no WhyKit vault found", file=sys.stderr)
         return 2
@@ -173,15 +174,18 @@ def main_snapshot(argv: list[str] | None = None) -> int:
     rendered = json.dumps(payload, ensure_ascii=False, indent=None if args.compact else 2, sort_keys=args.compact)
     if args.output:
         target = Path(args.output).expanduser()
-        if not target.is_absolute():
-            target = root / target
-        target = target.resolve()
         try:
-            target.relative_to(root.resolve())
-        except ValueError:
-            print("--output must stay inside the vault", file=sys.stderr)
+            if target.is_absolute():
+                try:
+                    relative = target.relative_to(root)
+                except ValueError:
+                    relative = target.relative_to(requested_root)
+            else:
+                relative = target
+            target = safe_vault_target(root, relative)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"--output must be a safe path inside the vault: {exc}", file=sys.stderr)
             return 2
-        target.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_text(target, rendered + "\n")
         print(f"snapshot {payload['snapshot_id']}: {rel(root, target)}")
     else:

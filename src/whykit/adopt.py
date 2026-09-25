@@ -335,7 +335,12 @@ def adopt(
         return candidates, None, None, score
 
     with vault_mutation_lock(vault):
+        staging_root = safe_vault_dir(vault, ".import-staging")
         batch = today.isoformat()
+        suffix = 1
+        while (staging_root / batch).exists() or (staging_root / batch).is_symlink():
+            suffix += 1
+            batch = f"{today.isoformat()}-{suffix}"
         staging = safe_vault_dir(vault, Path(".import-staging") / batch)
         for candidate in candidates:
             if candidate.assessment != "useful":
@@ -361,7 +366,12 @@ def adopt(
             record = sources_dir / record_name
         record = safe_vault_target(vault, record.relative_to(vault.resolve()))
         atomic_write_text(record, _ingestion_record(batch, today, source, candidates, owner, profile))
-        migration = safe_vault_target(vault, Path(".import-staging") / batch / "MIGRATION.md")
+        migration_name = "MIGRATION.md"
+        suffix = 1
+        while (staging / migration_name).exists() or (staging / migration_name).is_symlink():
+            suffix += 1
+            migration_name = f"MIGRATION-{suffix}.md"
+        migration = safe_vault_target(vault, Path(".import-staging") / batch / migration_name)
         atomic_write_text(migration, _migration_md(source, candidates, score, profile))
         return candidates, record, migration, score
 

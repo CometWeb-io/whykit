@@ -200,6 +200,44 @@ class AdoptTests(unittest.TestCase):
         # Staging must never make the vault fail its own checks.
         self.assertEqual(run("lint", cwd=self.vault).returncode, 0)
 
+    def test_repeated_write_keeps_each_batch_and_receipt_intact(self) -> None:
+        first = run("adopt", str(self.legacy), "--into", str(self.vault), "--write", "--json")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        first_payload = json.loads(first.stdout)
+        first_migration = self.vault / first_payload["migration"]
+        first_staged = first_migration.parent / "adr" / "0001-use-postgres.md"
+        first_bytes = first_staged.read_bytes()
+        first_record = (self.vault / first_payload["ingestion_record"]).read_bytes()
+
+        source_file = self.legacy / "adr" / "0001-use-postgres.md"
+        source_file.write_text(source_file.read_text(encoding="utf-8") + "\nNew evidence arrived.\n", encoding="utf-8")
+        second = run("adopt", str(self.legacy), "--into", str(self.vault), "--write", "--json")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        second_payload = json.loads(second.stdout)
+        second_migration = self.vault / second_payload["migration"]
+        second_staged = second_migration.parent / "adr" / "0001-use-postgres.md"
+
+        self.assertNotEqual(first_migration.parent, second_migration.parent)
+        self.assertEqual(first_staged.read_bytes(), first_bytes)
+        self.assertEqual((self.vault / first_payload["ingestion_record"]).read_bytes(), first_record)
+        self.assertEqual(second_staged.read_bytes(), source_file.read_bytes())
+
+    def test_source_migration_note_is_not_replaced_by_generated_report(self) -> None:
+        source_note = self.legacy / "MIGRATION.md"
+        source_note.write_text(
+            "# Historical migration\n\n" + "This document records the original migration decisions and their context. " * 4,
+            encoding="utf-8",
+        )
+        result = run("adopt", str(self.legacy), "--into", str(self.vault), "--write", "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        generated_report = self.vault / payload["migration"]
+        staged_source = generated_report.parent / "MIGRATION.md"
+
+        self.assertNotEqual(generated_report, staged_source)
+        self.assertEqual(staged_source.read_bytes(), source_note.read_bytes())
+        self.assertIn("## Bring into the vault", generated_report.read_text(encoding="utf-8"))
+
     def test_adr_only_write_stages_decisions_not_unsupported_or_stubs(self) -> None:
         result = run(
             "adopt", str(self.legacy), "--into", str(self.vault),

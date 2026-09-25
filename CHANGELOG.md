@@ -16,6 +16,9 @@ CLI and the lint rule codes.
 
 ### Fixed
 
+- Repeated same-day `adopt --write` runs keep separate staging batches and
+  ingestion receipts; a source `MIGRATION.md` is no longer replaced by the
+  generated migration report.
 - `adopt` now checks front matter through the linter's actual parser/rules,
   explains that its score is not a full vault lint, flags known incompatible
   register/log tables, and reports non-Markdown or unreadable files omitted from
@@ -30,9 +33,17 @@ CLI and the lint rule codes.
   `Path.read_text()` linting, including on Windows.
 - Numbered `AGENTS.md` TODO items are now counted, so the starter vault surfaces
   all four unanswered agent-contract questions.
+- `init` reports a non-directory target as a usage error instead of raising a
+  traceback, including with `--force`.
+- `init --force` now preserves existing vault files instead of replacing
+  colliding template paths. It retains custom `.gitignore` rules and appends
+  WhyKit's protective patterns when missing.
 
 ### Security
 
+- `init --force` refuses symlinked destination directories and `.gitignore`, and `graph` /
+  `snapshot --output` refuse symlinked targets instead of resolving them to
+  another file inside or outside the vault.
 - Vault mutation lock uses OS advisory `flock` / Windows file locking on
   `.whykit/mutation.lock` instead of a directory lock, so crash/SIGKILL cannot
   leave the vault permanently unwritable.

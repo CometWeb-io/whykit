@@ -36,6 +36,7 @@ Thumbs.db
 .obsidian/workspace.json
 .obsidian/workspace-mobile.json
 """
+VAULT_GITIGNORE_MARKER = "# WhyKit protective defaults (managed by whykit init)"
 # Points at the repository when running from a checkout; harmless in a wheel.
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
 
@@ -70,7 +71,7 @@ def _stamp_vault_dates(target: Path, today: dt.date | None = None) -> None:
 def cmd_init(args: argparse.Namespace) -> int:
     import tempfile
 
-    from .io import atomic_write_bytes, atomic_write_text
+    from .io import atomic_write_bytes, atomic_write_text, safe_vault_dir, safe_vault_target
 
     if getattr(args, "minimal", False) and getattr(args, "full", False):
         print("--minimal and --full cannot be used together", file=sys.stderr)
@@ -78,6 +79,9 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     minimal_layout = not getattr(args, "full", False)
     target = Path(args.target).expanduser().resolve()
+    if target.exists() and not target.is_dir():
+        print(f"refusing to initialize a non-directory target: {target}", file=sys.stderr)
+        return 2
     if target.exists() and any(target.iterdir()) and not args.force:
         print(f"refusing to write into non-empty directory: {target}", file=sys.stderr)
         print("use --force only when you have reviewed the destination", file=sys.stderr)
@@ -98,29 +102,55 @@ def cmd_init(args: argparse.Namespace) -> int:
         _stamp_vault_dates(prepared)
 
         target.mkdir(parents=True, exist_ok=True)
+        try:
+            gitignore = safe_vault_target(target, ".gitignore")
+            if gitignore.exists() and not gitignore.is_file():
+                raise RuntimeError(f"expected a regular .gitignore file: {gitignore}")
+            existing_ignore = gitignore.read_text(encoding="utf-8") if gitignore.exists() else None
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"refusing unsafe init destination: {exc}", file=sys.stderr)
+            return 2
+        preserved = 0
         for source in sorted(prepared.rglob("*")):
             relative = source.relative_to(prepared)
-            destination = target / relative
-            if source.is_dir():
-                destination.mkdir(parents=True, exist_ok=True)
-                continue
-            if destination.exists() and not args.force:
-                # Empty-destination init should never hit this; --force is
-                # required for any overwrite of an existing path.
-                print(f"refusing to overwrite existing file: {destination}", file=sys.stderr)
+            try:
+                if source.is_dir():
+                    safe_vault_dir(target, relative)
+                    continue
+                destination = safe_vault_target(target, relative)
+            except (OSError, RuntimeError, ValueError) as exc:
+                print(f"refusing unsafe init destination: {exc}", file=sys.stderr)
                 return 2
             if destination.is_symlink():
                 print(f"refusing to overwrite symlink: {destination}", file=sys.stderr)
                 return 2
+            if destination.exists():
+                if not destination.is_file():
+                    print(f"refusing to replace a non-file destination: {destination}", file=sys.stderr)
+                    return 2
+                if not args.force:
+                    print(f"refusing to overwrite existing file: {destination}", file=sys.stderr)
+                    return 2
+                preserved += 1
+                continue
             destination.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_bytes(destination, source.read_bytes())
 
     # Deliberately no LICENSE: the vault holds the adopter's own knowledge, and
     # copying WhyKit's Apache-2.0 text into it would appear to license their
     # company's strategy and decisions under it.
-    atomic_write_text(target / ".gitignore", VAULT_GITIGNORE)
+    if existing_ignore is None:
+        atomic_write_text(gitignore, VAULT_GITIGNORE)
+    elif not existing_ignore.endswith(VAULT_GITIGNORE):
+        separator = "" if not existing_ignore or existing_ignore.endswith("\n") else "\n"
+        atomic_write_text(
+            gitignore,
+            existing_ignore + separator + "\n" + VAULT_GITIGNORE_MARKER + "\n" + VAULT_GITIGNORE,
+        )
 
     print(f"WhyKit vault created: {target}")
+    if preserved:
+        print(f"Preserved {preserved} existing template file(s); only missing files were added.")
     if minimal_layout:
         print("Layout: vendor-neutral (default)")
     else:
@@ -635,7 +665,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     init = sub.add_parser("init", help="create a new vault")
     init.add_argument("target")
-    init.add_argument("--force", action="store_true", help="write into a non-empty directory")
+    init.add_argument("--force", action="store_true", help="add missing template files in a non-empty directory without replacing existing files")
     init.add_argument(
         "--minimal",
         action="store_true",

@@ -60,6 +60,10 @@ if you specifically want the optional GTM-oriented workstream scaffold.
 `--minimal` remains as a compatibility alias. The example creates the vault
 beside the source checkout so private notes are not accidentally written into
 the WhyKit repository.
+For a non-empty destination, `init --force` adds missing starter files without
+replacing existing notes, policies, or agent instructions. It retains custom
+`.gitignore` rules and appends WhyKit's protective defaults where needed; it
+is not a reset or template-upgrade command.
 
 Already have Markdown? Inventory it first, then decide what to adopt:
 
@@ -68,10 +72,13 @@ uv run whykit adopt ../old-docs --into ../my-ledger --profile obsidian-loose --j
 uv run whykit adopt ../old-docs --into ../my-ledger --profile generic --write
 ```
 
-The first command is a dry run. `--write` copies selected notes into the vault's
-`.import-staging/` area and writes `MIGRATION.md`; it does not silently turn the
-inventory into canonical decisions. The readiness percentage checks front matter
-against WhyKit's linter, **not** links, evidence, decision integrity or approval.
+The first command is a dry run. `--write` copies selected notes into a new
+dated batch under the vault's `.import-staging/` area and writes a migration
+report there. Repeated imports keep separate batches, and a source file named
+`MIGRATION.md` is preserved instead of being replaced by the report. It does
+not silently turn the inventory into canonical decisions. The readiness
+percentage checks front matter against WhyKit's linter, **not** links, evidence,
+decision integrity or approval.
 The time estimate is heuristic. Adoption scans UTF-8 `*.md` only; review other
 assets separately. It flags known evidence-register and decision-log table
 layouts that require manual mapping. The permanent ingestion record includes

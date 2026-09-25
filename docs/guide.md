@@ -53,6 +53,10 @@ workstream starter. `--minimal` remains as a compatibility alias. Any warnings
 point to unanswered questions in `AGENTS.md`, the contract agents work under;
 answer those before relying on agents. The exact warning count and line numbers
 can change as the template evolves.
+If the destination already contains files, `init --force` adds only missing
+starter files. It preserves existing notes, configuration and agent rules, and
+keeps custom `.gitignore` patterns while adding WhyKit's protective defaults.
+It does not reset or upgrade existing files.
 
 ### Already have a pile of Markdown
 
@@ -64,9 +68,11 @@ whykit adopt ../old-docs          # dry run
 whykit adopt ../old-docs --write  # stage it + write an ingestion record
 ```
 
-It never writes into a workstream. Raw exports are staged under
-`.import-staging/` with a SHA-256 for each source, and a person decides what
-becomes canonical. The inventory is the boring half, and the half everybody skips.
+It never writes into a workstream. Raw exports are staged in a separate dated
+batch under `.import-staging/` for each import, with a SHA-256 for each source.
+The command reports the exact migration-report path, and a person decides what
+becomes canonical. The inventory is the boring half, and the half everybody
+skips.
 
 ### Establish repository policy
 
