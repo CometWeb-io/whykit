@@ -32,6 +32,9 @@
 | `delivery_status.invalid` | error | delivery_status has an unsupported value. | Use draft, ready_to_send or sent. |
 | `delivery_status.sent_at` | error | A sent document has no sent_at timestamp/date field. | Record sent_at when setting delivery_status: sent. |
 | `evidence.date` | error | An evidence date or accessed date is invalid. | Use real YYYY-MM-DD dates. |
+| `evidence.access_missing` | warning | An active source covered by an access-age policy has no Accessed date. | Record when the source was last accessed, or remove the policy for historical source types. |
+| `evidence.access_future` | warning | An active source has an Accessed date after the lint date. | Correct the Accessed date or run lint with the intended --today date. |
+| `evidence.access_stale` | warning | An active source has not been accessed within its configured age window. | Revisit the source and update Accessed after review; do not treat access alone as claim approval. |
 | `evidence.duplicate` | error | An E-NNN identifier is reused. | Allocate a new E-NNN. |
 | `evidence.id_format` | error | source_ids contains a malformed evidence ID. | Use E- followed by at least three digits. |
 | `embed.missing` | error | An Obsidian embed target cannot be resolved. | Fix the ![[target]] path or restore the note. |

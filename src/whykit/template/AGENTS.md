@@ -41,6 +41,8 @@ decisions. It is not a task tracker, not a CRM, and not a place for credentials.
 4. Attach a source link, file reference, interview reference or evidence-register
    ID to every important factual claim.
 5. Treat public-facing claims as unapproved until evidence and wording are reviewed.
+   A source ID or recent access date is not publication approval; record that
+   separately in the owner's claims or review workflow.
 6. When a measurement and a hypothesis disagree, write down that the hypothesis
    failed. A rejected hypothesis is a finding, not a mistake to hide.
 
@@ -140,26 +142,12 @@ rather than stacking a correction on top.
 
 ## Learned Workspace Facts
 
-Facts about this company's systems that are true but not discoverable from this
-repository alone: hostnames, property IDs, which tool owns which surface, known
-broken things and the constraint behind each.
-
-This section is what makes an agent useful in session two rather than starting
-from zero every time. Add a fact when you had to discover it the hard way.
-
-Rules for entries:
-
-- State the fact and the constraint, not the story of finding it.
-- Name the identifier exactly — a paraphrased hostname is worse than none.
-- When a fact expires, delete it. A stale workspace fact is actively harmful,
-  because it will be trusted without checking.
-- Never put credentials, tokens or passwords here. Record where a secret lives,
-  never the secret.
-
-<!-- Example of the shape, delete when the first real entry lands:
-- Production runs on <host>; staging on <host>. Deploys go through <pipeline>
-  only — never a manual deploy, because <reason>.
--->
+Keep this file for durable working rules, not a growing cache of mutable facts.
+Put hostnames, property IDs, ownership boundaries, outages and other changing
+facts in governed notes with an owner, a source or code pointer, and `review_by`.
+Maintain a small systems-of-record map there (for example, which system owns
+contacts, tasks, decisions and actual product behavior). Link to that note from
+here once it exists. Never put credentials, tokens or passwords in either place.
 
 ## Safety rules for agents
 

@@ -16,6 +16,7 @@ FORMAT_VERSION = 1
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "format_version": FORMAT_VERSION,
+    "evidence_access_age_days": {},
     "defaults": {
         "owner": "TODO",
         "sensitivity": "internal",
@@ -61,6 +62,7 @@ _ALLOWED_SENSITIVITY = {"public", "internal", "confidential", "restricted"}
 _ALLOWED_HISTORY = {"off", "optional", "required"}
 _TOP_LEVEL_KEYS = {
     "format_version",
+    "evidence_access_age_days",
     "defaults",
     "profiles",
 }
@@ -99,6 +101,15 @@ def _validate(config: dict[str, Any]) -> None:
     version = config.get("format_version")
     if version != FORMAT_VERSION:
         raise ConfigError(f"unsupported whykit.toml format_version: {version!r}; expected {FORMAT_VERSION}")
+
+    access_age = config.get("evidence_access_age_days")
+    if not isinstance(access_age, dict):
+        raise ConfigError("[evidence_access_age_days] must be a table")
+    for source_type, days in access_age.items():
+        if not isinstance(source_type, str) or not source_type.strip():
+            raise ConfigError("evidence_access_age_days source type must be non-empty")
+        if not isinstance(days, int) or isinstance(days, bool) or days < 0:
+            raise ConfigError(f"evidence_access_age_days.{source_type} must be an integer >= 0")
 
     defaults = config.get("defaults")
     if not isinstance(defaults, dict):

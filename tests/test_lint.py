@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import tempfile
 import unittest
 import sys
@@ -66,6 +67,86 @@ class VaultTestCase(unittest.TestCase):
 
 
 class LintRegressionTests(VaultTestCase):
+    def test_numbered_agent_contract_todo_is_reported(self) -> None:
+        self.write("AGENTS.md", "1. TODO: choose a branching rule.\n")
+        self.assertEqual(self.codes().count("agents.unconfigured"), 1)
+
+    def test_list_where_scalar_metadata_expected_reports_errors_without_crashing(self) -> None:
+        self.write(
+            "notes/invalid.md",
+            front("Invalid", status="[draft]", doc_type="[guide]")
+            .replace("sensitivity: internal", "sensitivity: [internal]"),
+        )
+        codes = self.codes()
+        self.assertIn("status.invalid", codes)
+        self.assertIn("type.invalid", codes)
+        self.assertIn("sensitivity.invalid", codes)
+
+    def test_evidence_access_age_is_opt_in_and_as_of_today(self) -> None:
+        self.write(
+            "00-context/evidence-register.md",
+            front("Evidence register", doc_type="reference", status="draft")
+            + "\n| ID | Source | Type | Date | Accessed | Location | Claims it supports |\n"
+              "|---|---|---|---|---|---|---|\n"
+              "| E-001 | Example measurements | analytics | 2026-01-01 | 2026-01-01 | https://example.com | Example claim |\n"
+              "| E-002 | Old report | report | 2020-01-01 | 2020-01-01 | https://example.com/report | History |\n",
+        )
+        _, before = lint_mod.lint(self.root, orphans=False, secrets=False, today=dt.date(2026, 2, 2))
+        self.assertNotIn("evidence.access_stale", [f.code for f in before])
+        self.write("whykit.toml", 'format_version = 1\n[evidence_access_age_days]\nanalytics = 30\n')
+        _, after = lint_mod.lint(self.root, orphans=False, secrets=False, today=dt.date(2026, 2, 2))
+        stale = [f for f in after if f.code == "evidence.access_stale"]
+        self.assertEqual(len(stale), 1)
+        self.assertIn("E-001", stale[0].message)
+        self.assertEqual(stale[0].level, "warning")
+
+    def test_evidence_access_age_requires_a_real_access_date(self) -> None:
+        self.write("whykit.toml", 'format_version = 1\n[evidence_access_age_days]\nanalytics = 30\n')
+        self.write(
+            "00-context/evidence-register.md",
+            front("Evidence register", doc_type="reference", status="draft")
+            + "\n| ID | Source | Type | Date | Accessed | Location | Claims it supports |\n"
+              "|---|---|---|---|---|---|---|\n"
+              "| E-001 | Example measurements | analytics | 2026-01-01 |  | https://example.com | Example claim |\n",
+        )
+        _, findings = lint_mod.lint(self.root, orphans=False, secrets=False, today=dt.date(2026, 2, 2))
+        self.assertIn("evidence.access_missing", [f.code for f in findings])
+
+    def test_fresh_access_and_retired_history_do_not_trigger_age_warning(self) -> None:
+        self.write("whykit.toml", 'format_version = 1\n[evidence_access_age_days]\nanalytics = 30\n')
+        self.write(
+            "00-context/evidence-register.md",
+            front("Evidence register", doc_type="reference", status="draft")
+            + "\n| ID | Source | Type | Date | Accessed | Location | Claims it supports |\n"
+              "|---|---|---|---|---|---|---|\n"
+              "| E-001 | Current measurements | analytics | 2026-01-15 | 2026-01-15 | https://example.com | Claim |\n"
+              "\n## Retired sources\n\n"
+              "| ID | Source | Retired on | Why | Replaced by |\n"
+              "|---|---|---|---|---|\n"
+              "| E-002 | Historic measurements | 2026-01-01 | Replaced | E-001 |\n",
+        )
+        _, findings = lint_mod.lint(self.root, orphans=False, secrets=False, today=dt.date(2026, 2, 2))
+        self.assertFalse([f for f in findings if f.code in {"evidence.access_stale", "evidence.access_missing"}])
+
+    def test_future_access_date_cannot_make_evidence_look_fresh(self) -> None:
+        self.write("whykit.toml", 'format_version = 1\n[evidence_access_age_days]\nanalytics = 30\n')
+        self.write(
+            "00-context/evidence-register.md",
+            front("Evidence register", doc_type="reference", status="draft")
+            + "\n| ID | Source | Type | Date | Accessed | Location | Claims it supports |\n"
+              "|---|---|---|---|---|---|---|\n"
+              "| E-001 | Example measurements | analytics | 2026-01-01 | 2026-03-01 | https://example.com | Claim |\n",
+        )
+        _, findings = lint_mod.lint(self.root, orphans=False, secrets=False, today=dt.date(2026, 2, 2))
+        self.assertIn("evidence.access_future", [f.code for f in findings])
+
+    def test_invalid_access_age_policy_fails_config_validation(self) -> None:
+        self.write("whykit.toml", 'format_version = 1\n[evidence_access_age_days]\nanalytics = -1\n')
+        _, findings = lint_mod.lint(self.root, orphans=False, secrets=False)
+        errors = [f.message for f in findings if f.code == "config.invalid"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("analytics", errors[0])
+
     def test_naming_file_without_front_matter_is_not_special_cased(self) -> None:
         self.write("NAMING.md", "# Naming notes\n\nUse a consistent vocabulary.\n")
 

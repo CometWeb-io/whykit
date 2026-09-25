@@ -70,7 +70,27 @@ uv run whykit adopt ../old-docs --into ../my-ledger --profile generic --write
 
 The first command is a dry run. `--write` copies selected notes into the vault's
 `.import-staging/` area and writes `MIGRATION.md`; it does not silently turn the
-inventory into canonical decisions.
+inventory into canonical decisions. The readiness percentage checks front matter
+against WhyKit's linter, **not** links, evidence, decision integrity or approval.
+The time estimate is heuristic. Adoption scans UTF-8 `*.md` only; review other
+assets separately. It flags known evidence-register and decision-log table
+layouts that require manual mapping. The permanent ingestion record includes
+full source SHA-256 hashes; staging itself is gitignored.
+
+Vaults with fast-changing evidence can opt into access-age warnings by source
+type in `whykit.toml`:
+
+```toml
+[evidence_access_age_days]
+analytics = 30
+"vendor doc" = 180
+```
+
+This checks the active register row's `Accessed` date as of `lint --today` (or
+today). It is a warning, not proof that the source is still correct. Historic
+types can be left out. Evidence being registered or recently accessed is also
+not permission to publish a claim; publication approval belongs to the owner's
+claims/review workflow.
 
 When WhyKit is published to PyPI, install it with `uv tool install whykit` (or
 `pipx install whykit`). Until then, use `uv run whykit` from the repository

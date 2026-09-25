@@ -67,7 +67,7 @@ class InitTests(unittest.TestCase):
             self.assertIn("0 error(s)", lint.stdout)
 
     def test_a_fresh_vault_warns_only_about_the_unanswered_agent_contract(self) -> None:
-        """Adopters owe the vault three answers. Nothing else should be outstanding."""
+        """Adopters owe the vault four answers. Nothing else should be outstanding."""
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "vault"
             run("init", str(target))
@@ -75,6 +75,7 @@ class InitTests(unittest.TestCase):
             codes = {f["code"] for f in report["findings"]}
             self.assertEqual(report["errors"], 0, report["findings"])
             self.assertEqual(codes, {"agents.unconfigured"}, codes)
+            self.assertEqual(report["warnings"], 4, report["findings"])
 
     def test_init_does_not_ship_development_assets(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -7,6 +7,26 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+### Added
+
+- Optional `[evidence_access_age_days]` policy warns (`evidence.access_missing`,
+  `evidence.access_stale`, `evidence.access_future`) when active sources of
+  configured types lack a recent `Accessed` date. The policy is off by default
+  and does not certify claim truth.
+
+### Fixed
+
+- `adopt` now checks front matter through the linter's actual parser/rules,
+  explains that its score is not a full vault lint, flags known incompatible
+  register/log tables, and reports non-Markdown or unreadable files omitted from
+  its scan.
+- Permanent ingestion records retain complete SHA-256 digests instead of only
+  16-character prefixes; readiness assessment uses the same bytes as hashing.
+- Invalid list-valued lifecycle metadata produces lint findings instead of a
+  `TypeError` traceback.
+- Numbered `AGENTS.md` TODO items are now counted, so the starter vault surfaces
+  all four unanswered agent-contract questions.
+
 ### Security
 
 - Vault mutation lock uses OS advisory `flock` / Windows file locking on

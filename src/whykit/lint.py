@@ -24,7 +24,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable
 
-from .config import CONFIG_FILE, load_config
+from .config import CONFIG_FILE, ConfigError, load_config
 
 VAULT_MARKERS = ("Home.md", "00-context")
 
@@ -304,8 +304,9 @@ def _parse_front_matter(raw: str) -> dict:
     return out
 
 
-def load_note(path: Path) -> Note:
-    text = path.read_text(encoding="utf-8")
+def load_note(path: Path, *, text: str | None = None) -> Note:
+    if text is None:
+        text = path.read_text(encoding="utf-8")
     note = Note(path=path, text=text)
     if not text.startswith("---\n"):
         return note
@@ -369,13 +370,13 @@ def check_front_matter(root: Path, note: Note, findings: list[Finding], today: d
             add(findings, root, note.path, 1, "error", "frontmatter.required", f"front matter is missing `{key}`")
 
     status = note.front.get("status")
-    if status is not None and status not in ALLOWED_STATUS:
+    if status is not None and (not isinstance(status, str) or status not in ALLOWED_STATUS):
         add(findings, root, note.path, 1, "error", "status.invalid", f"status `{status}` is not allowed")
     doc_type = note.front.get("type")
-    if doc_type is not None and doc_type not in ALLOWED_TYPE:
+    if doc_type is not None and (not isinstance(doc_type, str) or doc_type not in ALLOWED_TYPE):
         add(findings, root, note.path, 1, "error", "type.invalid", f"type `{doc_type}` is not allowed")
     sensitivity = note.front.get("sensitivity")
-    if sensitivity is not None and sensitivity not in ALLOWED_SENSITIVITY:
+    if sensitivity is not None and (not isinstance(sensitivity, str) or sensitivity not in ALLOWED_SENSITIVITY):
         add(findings, root, note.path, 1, "error", "sensitivity.invalid", f"sensitivity `{sensitivity}` is not allowed")
 
     if note.front.get("source_of_truth") is True and status != "approved":
@@ -416,7 +417,7 @@ def check_front_matter(root: Path, note: Note, findings: list[Finding], today: d
         add(findings, root, note.path, 1, "warning", "canonical.owner", "canonical document has no real owner")
 
     delivery_status = note.front.get("delivery_status")
-    if delivery_status and delivery_status not in ALLOWED_DELIVERY_STATUS:
+    if delivery_status and (not isinstance(delivery_status, str) or delivery_status not in ALLOWED_DELIVERY_STATUS):
         add(findings, root, note.path, 1, "error", "delivery_status.invalid", f"delivery_status `{delivery_status}` is not allowed")
     if delivery_status == "sent" and not note.front.get("sent_at"):
         add(findings, root, note.path, 1, "error", "delivery_status.sent_at", "delivery_status=sent requires sent_at")
@@ -595,11 +596,17 @@ def evidence_rows(root: Path) -> dict[str, dict[str, str]]:
     return evidence_register(root)[0]
 
 
-def check_evidence_register(root: Path, findings: list[Finding]) -> None:
+def check_evidence_register(root: Path, findings: list[Finding], today: dt.date) -> None:
     path = root / "00-context" / "evidence-register.md"
     if not path.exists():
         return
     active, retired, occurrences = evidence_register(root)
+    try:
+        config, _ = load_config(root)
+        access_age_policy = config["evidence_access_age_days"]
+    except ConfigError:
+        # check_config reports the malformed policy once, without extra findings.
+        access_age_policy = {}
     seen: dict[str, int] = {}
     for eid, line in occurrences:
         if eid in seen:
@@ -611,6 +618,16 @@ def check_evidence_register(root: Path, findings: list[Finding]) -> None:
             value = row.get(key, "")
             if value and _parse_date(value) is None:
                 add(findings, root, path, int(row["line"]), "error", "evidence.date", f"{eid} has invalid {key} date `{value}`")
+        max_age = access_age_policy.get(row["type"])
+        if max_age is not None:
+            accessed = row["accessed"]
+            if not accessed:
+                add(findings, root, path, int(row["line"]), "warning", "evidence.access_missing", f"{eid} has no Accessed date for its {row['type']} access-age policy")
+            elif (access_date := _parse_date(accessed)) is not None:
+                if access_date > today:
+                    add(findings, root, path, int(row["line"]), "warning", "evidence.access_future", f"{eid} has Accessed date {accessed} after the lint date {today.isoformat()}")
+                elif (today - access_date).days > max_age:
+                    add(findings, root, path, int(row["line"]), "warning", "evidence.access_stale", f"{eid} was last accessed {accessed}, more than {max_age} days ago")
     known = set(active) | set(retired)
     for eid, row in retired.items():
         value = row.get("retired_on", "")
@@ -823,7 +840,7 @@ def check_fact_evidence(root: Path, note: Note, findings: list[Finding]) -> None
         i += 1
 
 
-AGENTS_TODO_RE = re.compile(r"(?m)^\s*(?:[-*]\s*|#{1,6}\s*)?TODO\b[ :\u2014-]")
+AGENTS_TODO_RE = re.compile(r"(?m)^\s*(?:[-*]\s*|\d+[.)]\s*|#{1,6}\s*)?TODO\b[ :\u2014-]")
 
 
 def check_agents_configured(root: Path, findings: list[Finding]) -> None:
@@ -1085,7 +1102,7 @@ def lint(
         check_wikilinks(root, note, index, findings)
         check_markdown_links(root, note, findings)
         check_fact_evidence(root, note, findings)
-    check_evidence_register(root, findings)
+    check_evidence_register(root, findings, today)
     check_evidence_ids(root, notes, findings)
     check_decision_ids(root, notes, findings)
     check_decision_log(root, all_notes, findings)

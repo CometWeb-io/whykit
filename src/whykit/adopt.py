@@ -23,11 +23,14 @@ import hashlib
 import json
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .io import atomic_write_bytes, atomic_write_text, safe_vault_dir, safe_vault_target, vault_mutation_lock
-from .lint import find_vault_root, is_vault_root
+from .lint import (
+    EVIDENCE_ID_RE, DECISION_ID_RE, WIKILINK_RE, _split_table_row,
+    check_front_matter, find_vault_root, is_vault_root, load_note,
+)
 
 SKIP_DIRS = {
     ".git", ".obsidian", ".import-staging", "node_modules", "__pycache__",
@@ -55,6 +58,7 @@ class Candidate:
     looks_like_decision: bool
     duplicate_of: str | None = None
     whykit_ready: bool = False
+    format_warnings: list[str] = field(default_factory=list)
 
     def destination_for(self, profile: str) -> str:
         if self.assessment != "useful":
@@ -81,15 +85,42 @@ def _looks_like_decision(name: str, text: str) -> bool:
     return {"context", "decision"}.issubset(headings)
 
 
-def _whykit_ready(text: str) -> bool:
-    if not FRONT_MATTER_RE.match(text):
+def _whykit_ready(path: Path, source: Path, text: str) -> bool:
+    """Check front matter with the same parser and rules as `whykit lint`.
+
+    This does not certify links, evidence or the containing vault.
+    """
+    note = load_note(path, text=text)
+    if not note.has_front:
         return False
-    parts = text.split("---", 2)
-    if len(parts) < 3:
+    findings = []
+    try:
+        check_front_matter(source, note, findings, dt.date.today())
+    except (TypeError, ValueError):
+        # A malformed imported value must not crash a dry-run or score as ready.
         return False
-    front = parts[1]
-    required = ("title:", "type:", "status:", "owner:", "created:", "last_updated:")
-    return all(key in front for key in required)
+    return not any(f.level == "error" for f in findings)
+
+
+def _format_warnings(relative: str, text: str) -> list[str]:
+    """Point out known ledger-table layouts that `adopt` cannot normalize."""
+    name = Path(relative).name
+    warnings = []
+    if name not in {"evidence-register.md", "decision-log.md"}:
+        return warnings
+    for line in text.splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = _split_table_row(line)
+        if name == "evidence-register.md" and cells and EVIDENCE_ID_RE.fullmatch(cells[0]):
+            if len(cells) < 7:
+                warnings.append(f"{relative}: evidence row has {len(cells)} columns; WhyKit needs 7 (including Accessed and Location)")
+                break
+        elif name == "decision-log.md" and cells and DECISION_ID_RE.fullmatch(cells[0]):
+            if len(cells) < 6 or not WIKILINK_RE.search(cells[5]):
+                warnings.append(f"{relative}: decision row has no record wikilink in column 6; manual table mapping is required")
+                break
+    return warnings
 
 
 def _assess(text: str, *, profile: str, name: str) -> str:
@@ -145,7 +176,8 @@ def scan(source: Path, *, profile: str = "generic") -> list[Candidate]:
             has_front_matter=bool(FRONT_MATTER_RE.match(text)),
             looks_like_decision=_looks_like_decision(path.name, text),
             duplicate_of=duplicate_of,
-            whykit_ready=_whykit_ready(text),
+            whykit_ready=_whykit_ready(path, source, text),
+            format_warnings=_format_warnings(relative, text),
         ))
     return out
 
@@ -172,7 +204,8 @@ def score_adoption(candidates: list[Candidate]) -> dict:
         "empty_or_stub": sum(1 for c in candidates if c.assessment in {"empty", "heading-only"}),
         "unsupported": sum(1 for c in candidates if c.assessment == "unsupported"),
         "estimated_minutes_to_first_green_lint": minutes,
-        "readiness_pct": round(100.0 * len(ready) / total, 1) if total else 100.0,
+        "readiness_pct": round(100.0 * len(ready) / total, 1) if total else 0.0,
+        "format_warnings": [warning for c in candidates for warning in c.format_warnings],
     }
 
 
@@ -185,9 +218,15 @@ def _migration_md(source: Path, candidates: list[Candidate], score: dict, profil
         "## Score",
         "",
         f"- Files scanned: **{score['files']}**",
-        f"- Useful: **{score['useful']}** (WhyKit-ready front matter: **{score['whykit_ready']}**)",
+        f"- Useful: **{score['useful']}** (front matter passes WhyKit checks: **{score['whykit_ready']}**)",
         f"- Estimated human minutes to first green lint: **{score['estimated_minutes_to_first_green_lint']}**",
         f"- Readiness: **{score['readiness_pct']}%**",
+        "- Scope: UTF-8 `*.md` only. Other assets need separate review; this is not a full vault lint.",
+        "",
+        "## Format warnings",
+        "",
+        *(f"- {warning}" for warning in score["format_warnings"]),
+        *(["- None detected."] if not score["format_warnings"] else []),
         "",
         "## Bring into the vault",
         "",
@@ -226,7 +265,7 @@ def _ingestion_record(
     profile: str,
 ) -> str:
     rows = "\n".join(
-        f"| `{c.relative}` | `{c.sha256[:16]}…` | {c.assessment} |  | {c.destination_for(profile)} |"
+        f"| `{c.relative}` | `{c.sha256}` | {c.assessment} |  | {c.destination_for(profile)} |"
         for c in candidates
     ) or "|  |  |  |  |  |"
     useful = sum(1 for c in candidates if c.assessment == "useful")
@@ -361,6 +400,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"adoption failed: {exc}", file=sys.stderr)
         return 2
 
+    visible_files = [
+        path for path in source.rglob("*")
+        if path.is_file() and _within(source, path)
+        and not any(part in SKIP_DIRS for part in path.relative_to(source).parts)
+    ]
+    omitted = sorted(path.relative_to(source).as_posix() for path in visible_files if path.suffix != ".md")
+    scanned = {candidate.relative for candidate in candidates}
+    unreadable_markdown = sorted(
+        path.relative_to(source).as_posix()
+        for path in visible_files if path.suffix == ".md"
+        and path.relative_to(source).as_posix() not in scanned
+    )
+    scope_note = (
+        "Only UTF-8 *.md files were scanned; "
+        f"{len(omitted)} other file(s) excluded"
+        + (f" (e.g. {', '.join(omitted[:5])})" if omitted else "")
+        + f"; {len(unreadable_markdown)} Markdown file(s) unreadable or non-UTF-8"
+        + (f" (e.g. {', '.join(unreadable_markdown[:5])})" if unreadable_markdown else "")
+        + ". Front matter readiness is not full vault lint."
+    )
+
     if args.json:
         payload = {
             "contract_version": 1,
@@ -369,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
             "vault": str(vault),
             "write": bool(args.write),
             "score": score,
+            "scope_note": scope_note,
             "candidates": [
                 {
                     "path": c.relative,
@@ -392,6 +453,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not candidates:
         print(f"no Markdown found under {source}")
+        print(scope_note)
         return 0
 
     counts = {a: sum(1 for c in candidates if c.assessment == a) for a in ASSESSMENTS}
@@ -404,9 +466,12 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"\n{len(candidates)} file(s): " + ", ".join(f"{v} {k}" for k, v in counts.items() if v))
     print(
-        f"Score: {score['readiness_pct']}% WhyKit-ready; "
-        f"~{score['estimated_minutes_to_first_green_lint']} min to first green lint"
+        f"Score: {score['readiness_pct']}% front-matter-ready only; "
+        f"~{score['estimated_minutes_to_first_green_lint']} heuristic minutes to first green lint"
     )
+    print(scope_note)
+    for warning in score["format_warnings"]:
+        print(f"Format warning: {warning}")
     if decisions:
         print(f"{len(decisions)} look like existing decision records — they need D-NNN IDs and log rows.")
 
