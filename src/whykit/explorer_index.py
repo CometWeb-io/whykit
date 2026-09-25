@@ -220,7 +220,8 @@ def main(argv: list[str] | None = None) -> int:
             if item["level"] == "error":
                 print(f"- {item['path']}: {item['message']}", file=sys.stderr)
         return 1
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    # JSON escapes preserve Unicode content without requiring a UTF-8 console.
+    print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0
 
 

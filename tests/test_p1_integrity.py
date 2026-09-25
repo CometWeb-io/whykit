@@ -144,6 +144,27 @@ class SecretScanFailClosedTests(unittest.TestCase):
 
 
 class ExplorerIndexTests(unittest.TestCase):
+    def test_explorer_index_json_survives_legacy_console_encoding(self) -> None:
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "cp1252"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(CLI),
+                "explorer-index",
+                "--root",
+                str(ROOT / "examples" / "tiny"),
+                "--today",
+                "2026-09-17",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("docs", json.loads(result.stdout))
+
     def test_explorer_index_emits_python_contract(self) -> None:
         result = run("explorer-index", "--root", str(ROOT / "examples" / "tiny"), "--today", "2026-09-17")
         self.assertEqual(result.returncode, 0, result.stderr)
