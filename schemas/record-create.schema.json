@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CometWeb-io/whykit/raw/main/schemas/record-create.schema.json",
+  "title": "WhyKit record creation result",
+  "type": "object",
+  "required": ["contract_version", "kind", "path"],
+  "properties": {
+    "contract_version": { "const": 1 },
+    "kind": { "enum": ["decision", "evidence", "note"] },
+    "id": { "type": "string", "pattern": "^[DE]-[0-9]{3,}$" },
+    "path": { "type": "string", "minLength": 1 },
+    "linked_from": { "type": ["string", "null"] },
+    "strict_linked": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}

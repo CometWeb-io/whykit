@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/query-result.schema.json",
+  "title": "WhyKit query result",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "query",
+    "total",
+    "returned",
+    "results"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "query": {
+      "type": "string"
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "title",
+          "type",
+          "status",
+          "source_ids"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "sensitivity": {
+            "type": "string"
+          },
+          "source_of_truth": {
+            "type": "boolean"
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^E-[0-9]{3,}$"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "score": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "returned": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+
+  # The Explorer is optional and its CI job is non-blocking, so batch its
+  # updates rather than opening a pull request per transitive bump.
+  - package-ecosystem: npm
+    directory: /apps/explorer
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      explorer:
+        patterns: ["*"]

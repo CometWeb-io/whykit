@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/graph.schema.json",
+  "title": "WhyKit typed relationship graph",
+  "type": "object",
+  "required": ["contract_version", "nodes", "edges", "unresolved", "stats"],
+  "properties": {
+    "contract_version": {"const": 1},
+    "nodes": {"type": "array", "items": {"type": "object", "required": ["id", "kind", "title"]}},
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "type"],
+        "properties": {
+          "from": {"type": "string"},
+          "to": {"type": "string"},
+          "type": {"enum": ["wikilink", "evidence", "supersedes"]}
+        },
+        "additionalProperties": false
+      }
+    },
+    "unresolved": {"type": "array", "items": {"type": "object"}},
+    "stats": {"type": "object"}
+  },
+  "additionalProperties": false
+}

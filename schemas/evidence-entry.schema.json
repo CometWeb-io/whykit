@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/evidence-entry.schema.json",
+  "title": "WhyKit evidence entry",
+  "type": "object",
+  "required": ["id", "source", "type", "location"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^E-[0-9]{3,}$"},
+    "source": {"type": "string", "minLength": 1},
+    "type": {"type": "string", "minLength": 1},
+    "date": {"type": ["string", "null"]},
+    "accessed": {"type": ["string", "null"]},
+    "location": {"type": "string", "minLength": 1},
+    "claims": {"type": "string"},
+    "retired_on": {"type": ["string", "null"]},
+    "replaced_by": {"type": ["string", "null"], "pattern": "^E-[0-9]{3,}$"}
+  },
+  "additionalProperties": false
+}

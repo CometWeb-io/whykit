@@ -1,0 +1,111 @@
+name: WhyKit
+description: Check an evidence and decision ledger, including repository policy and append-only history.
+author: CometWeb
+branding:
+  icon: book-open
+  color: gray-dark
+
+inputs:
+  root:
+    description: Vault root, relative to the repository.
+    required: false
+    default: "."
+  profile:
+    description: >
+      Optional WhyKit policy profile from whykit.toml (for example ci or release).
+      When empty, the Action keeps the legacy lint + history behavior.
+    required: false
+    default: ""
+  strict:
+    description: >
+      Legacy lint-mode input. Treat warnings as failures when profile is empty.
+      Prefer profile: ci for repository-local policy.
+    required: false
+    default: "false"
+  base:
+    description: >
+      Optional Git baseline passed to `whykit check --base` in profile mode.
+      Pull requests automatically use the PR base SHA when this is empty and history is enabled.
+    required: false
+    default: ""
+  history:
+    description: >
+      On a pull request, verify that accepted decision reasoning and prior review
+      events were not rewritten. Requires fetch-depth 0 on actions/checkout.
+      When profile is set, the PR base is passed into `whykit check`.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Install the exact WhyKit action revision
+      shell: bash
+      env:
+        WHYKIT_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        python -m pip install --disable-pip-version-check --quiet "$WHYKIT_ACTION_PATH"
+
+    - name: Repository policy gate
+      if: inputs.profile != ''
+      shell: bash
+      env:
+        WHYKIT_ROOT: ${{ inputs.root }}
+        WHYKIT_PROFILE: ${{ inputs.profile }}
+        WHYKIT_HISTORY: ${{ inputs.history }}
+        WHYKIT_BASE: ${{ inputs.base }}
+        WHYKIT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        WHYKIT_EVENT: ${{ github.event_name }}
+      run: |
+        set -euo pipefail
+        case "$WHYKIT_HISTORY" in
+          true|false) ;;
+          *) echo "::error::history must be 'true' or 'false'"; exit 2 ;;
+        esac
+        args=(whykit check --root "$WHYKIT_ROOT" --profile "$WHYKIT_PROFILE")
+        base="$WHYKIT_BASE"
+        if [ -z "$base" ] && [ "$WHYKIT_HISTORY" = "true" ] && [ "$WHYKIT_EVENT" = "pull_request" ]; then
+          base="$WHYKIT_BASE_SHA"
+        fi
+        if [ -n "$base" ]; then
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            echo "::error::History check requires actions/checkout with fetch-depth: 0"
+            exit 2
+          fi
+          args+=(--base "$base" --head HEAD)
+        fi
+        "${args[@]}"
+
+    - name: Lint the vault (legacy mode)
+      if: inputs.profile == ''
+      shell: bash
+      env:
+        WHYKIT_ROOT: ${{ inputs.root }}
+        WHYKIT_STRICT: ${{ inputs.strict }}
+      run: |
+        set -euo pipefail
+        args=(whykit lint --root "$WHYKIT_ROOT")
+        case "$WHYKIT_STRICT" in
+          true) args+=(--strict) ;;
+          false) ;;
+          *) echo "::error::strict must be 'true' or 'false'"; exit 2 ;;
+        esac
+        "${args[@]}"
+
+    - name: Decision and review history is append-only (legacy mode)
+      if: inputs.profile == '' && inputs.history == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        WHYKIT_ROOT: ${{ inputs.root }}
+        WHYKIT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -euo pipefail
+        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+          echo "::error::History check requires actions/checkout with fetch-depth: 0"
+          exit 2
+        fi
+        whykit history \
+          --base "$WHYKIT_BASE_SHA" \
+          --head HEAD \
+          --root "$WHYKIT_ROOT"

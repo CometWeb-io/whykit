@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "whykit"
+dynamic = ["version"]
+description = "Git-native evidence and decision ledger for teams and AI agents"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.11"
+authors = [{ name = "CometWeb", email = "hello@cometweb.io" }]
+maintainers = [{ name = "CometWeb", email = "hello@cometweb.io" }]
+keywords = ["decision-records", "adr", "evidence", "provenance", "knowledge-base", "obsidian", "agents"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Documentation",
+  "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = []
+
+[project.optional-dependencies]
+mcp = ["mcp>=2,<3"]
+
+[project.urls]
+Homepage = "https://github.com/CometWeb-io/whykit"
+Documentation = "https://github.com/CometWeb-io/whykit#readme"
+Source = "https://github.com/CometWeb-io/whykit"
+Changelog = "https://github.com/CometWeb-io/whykit/blob/main/CHANGELOG.md"
+Issues = "https://github.com/CometWeb-io/whykit/issues"
+
+[project.scripts]
+whykit = "whykit.cli:main"
+whykit-mcp = "whykit.mcp_server:main"
+
+[tool.hatch.version]
+path = "src/whykit/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+# The template ships inside the package, so `whykit init` works from a wheel
+# with no checkout present. Do not add a force-include for it; `packages`
+# already carries every file under src/whykit/.
+packages = ["src/whykit"]
+
+[tool.hatch.build.targets.sdist]
+# The project test suite exercises checkout-only tooling and repository policy
+# files. Keep it in GitHub source checkouts, not in the installable sdist.
+include = ["src/whykit", "schemas", "examples", "README.md", "CHANGELOG.md", "LICENSE", "NOTICE"]
+
+# Dev/CI use Astral uv. Runtime stays dependency-free; the lockfile pins the
+# empty graph so `uv sync --locked` fails closed if someone adds a dependency
+# without refreshing uv.lock.
+[tool.uv]
+package = true

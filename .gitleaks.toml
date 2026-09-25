@@ -1,0 +1,16 @@
+title = "WhyKit"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = """
+One fixture in tests/test_lint.py is shaped like a credential on purpose: it is
+what the linter's own secret-detection rule is tested against, and a fixture that
+does not look like a secret tests nothing.
+
+Allowlisted by value rather than by path. Exempting the whole file would mean a
+real credential pasted into it would pass silently, which is exactly the failure
+this job exists to prevent.
+"""
+regexes = ['''abcdefghijklmnopqrstuvwx123456''']

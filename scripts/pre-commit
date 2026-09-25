@@ -1,0 +1,23 @@
+#!/bin/sh
+# Validate the vault before a commit using the repository-local WhyKit policy.
+set -e
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+run_whykit() {
+  if command -v whykit >/dev/null 2>&1; then
+    whykit "$@"
+  elif [ -f scripts/whykit.py ]; then
+    python3 scripts/whykit.py "$@"
+  else
+    echo "WhyKit is not installed and no checkout shim was found; skipping the pre-commit check." >&2
+    return 0
+  fi
+}
+
+if ! run_whykit check --profile local; then
+  echo ""
+  echo "WhyKit local policy failed. Fix the errors before committing."
+  echo "To commit anyway (and you should have a reason): git commit --no-verify"
+  exit 1
+fi

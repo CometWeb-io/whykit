@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/context-pack.schema.json",
+  "title": "WhyKit bounded context pack",
+  "type": "object",
+  "required": ["contract_version", "target", "exists"],
+  "properties": {
+    "contract_version": {"const": 1},
+    "target": {"type": "string"},
+    "exists": {"type": "boolean"},
+    "kind": {"type": "string"},
+    "path": {"type": ["string", "null"]},
+    "content": {"type": "string"},
+    "content_truncated": {"type": "boolean"},
+    "evidence": {"type": "array", "items": {"type": "object"}},
+    "incoming": {"type": "array", "items": {"type": "object"}},
+    "outgoing": {"type": "array", "items": {"type": "object"}},
+    "supersession": {"type": "object"},
+    "findings": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": true
+}

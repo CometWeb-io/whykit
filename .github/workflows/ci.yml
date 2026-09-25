@@ -1,0 +1,259 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The release workflow reuses the same gates against the exact tagged commit.
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Tests and vault checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.17"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install the package
+        run: uv sync --locked --no-dev
+      - name: Unit tests
+        run: uv run python -m unittest discover -s tests -v
+      - name: Lint the tiny example vault strictly
+        run: uv run whykit lint examples/tiny --strict --today 2026-09-17
+      - name: Lint the example vault strictly
+        # Pinned as-of date: review dates in the example are fixed, so the run
+        # stays reproducible instead of failing once those dates pass.
+        run: uv run whykit lint examples/northline --strict --today 2026-09-17
+      - name: Run the CI policy profile
+        run: uv run whykit check --root examples/northline --profile ci --today 2026-09-17
+      - name: Exercise the release policy profile
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base="$(bash scripts/release-baseline.sh)"
+          uv run whykit check --root examples/northline --profile release --base "$base" --today 2026-09-17
+      - name: Exercise versioned machine contracts
+        run: |
+          uv run whykit query "HubSpot" --root examples/northline --json > "$RUNNER_TEMP/query.json"
+          uv run whykit context D-007 --root examples/northline --no-body --json > "$RUNNER_TEMP/context.json"
+          uv run whykit pack D-007 --query "HubSpot" --root examples/northline --max-chars 4000 > "$RUNNER_TEMP/pack.json"
+          uv run whykit graph --root examples/northline --format json > "$RUNNER_TEMP/graph.json"
+          # --output is resolved relative to the vault root, not the process cwd.
+          uv run whykit snapshot --root examples/northline --today 2026-09-17 --output .whykit/ci-snapshot.json
+          uv run whykit verify-snapshot .whykit/ci-snapshot.json --root examples/northline --today 2026-09-17 --json
+          rm -rf examples/northline/.whykit
+      - name: Set up Python for the composite Action smoke test
+        if: matrix.python-version == '3.12'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Exercise the composite Action from this checkout
+        if: matrix.python-version == '3.12'
+        uses: ./
+        with:
+          root: examples/northline
+          profile: ci
+          history: "false"
+      - name: A fresh vault must lint clean
+        run: |
+          uv run whykit init "$RUNNER_TEMP/fresh-vault"
+          test -d "$RUNNER_TEMP/fresh-vault/00-context"
+          test -d "$RUNNER_TEMP/fresh-vault/06-decisions"
+          test -d "$RUNNER_TEMP/fresh-vault/notes"
+          test ! -d "$RUNNER_TEMP/fresh-vault/01-strategy"
+          # Warnings are expected and intended: the unanswered AGENTS.md
+          # questions every adopter has to answer. Errors are not.
+          uv run whykit lint --root "$RUNNER_TEMP/fresh-vault"
+          uv run whykit check --root "$RUNNER_TEMP/fresh-vault" --profile local
+          set +e
+          uv run whykit check --root "$RUNNER_TEMP/fresh-vault" --profile ci
+          check_status=$?
+          set -e
+          if [ "$check_status" -ne 1 ]; then
+            echo "fresh vault CI gate returned $check_status; expected policy-failure exit 1" >&2
+            exit 1
+          fi
+          uv run whykit lint --root "$RUNNER_TEMP/fresh-vault" --json > "$RUNNER_TEMP/fresh-vault-lint.json"
+          uv run python - "$RUNNER_TEMP/fresh-vault-lint.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          codes = {finding["code"] for finding in report["findings"]}
+          if (
+              report["errors"] != 0
+              or report["warnings"] != len(report["findings"])
+              or codes != {"agents.unconfigured"}
+          ):
+              raise SystemExit("fresh vault must have no lint errors and must fail only because its agent contract is unconfigured")
+          PY
+          uv run whykit init --full "$RUNNER_TEMP/fresh-full"
+          test -d "$RUNNER_TEMP/fresh-full/00-context"
+          test -d "$RUNNER_TEMP/fresh-full/01-strategy"
+          test -d "$RUNNER_TEMP/fresh-full/07-research"
+          uv run whykit lint --root "$RUNNER_TEMP/fresh-full"
+          uv run whykit init --minimal "$RUNNER_TEMP/fresh-minimal"
+          test ! -d "$RUNNER_TEMP/fresh-minimal/01-strategy"
+          uv run whykit lint --root "$RUNNER_TEMP/fresh-minimal"
+
+  package:
+    name: MCP SDK and wheel/source distribution smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.17"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install and exercise the optional MCP server against the SDK
+        run: |
+          uv sync --locked --extra mcp
+          uv run python -m unittest discover -s tests -p 'test_mcp_runtime.py' -v
+      - run: uv build
+      - name: Keep checkout-only tests out of the installable source distribution
+        run: |
+          set -euo pipefail
+          tar -tzf dist/*.tar.gz > "$RUNNER_TEMP/sdist-files.txt"
+          if grep -Eq '^whykit-[^/]+/tests/' "$RUNNER_TEMP/sdist-files.txt"; then
+            echo "source distribution must not contain checkout-only tests" >&2
+            exit 1
+          fi
+      - name: Install and smoke-test the wheel in a clean environment
+        run: |
+          set -euo pipefail
+          uv venv "$RUNNER_TEMP/wheel-venv"
+          uv pip install --python "$RUNNER_TEMP/wheel-venv/bin/python" dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/wheel-venv/bin/whykit" --version
+          "$RUNNER_TEMP/wheel-venv/bin/whykit" init packaged-wheel-vault
+          cd packaged-wheel-vault
+          "$RUNNER_TEMP/wheel-venv/bin/whykit" lint
+          "$RUNNER_TEMP/wheel-venv/bin/whykit" doctor
+      - name: Install and smoke-test the source distribution in a clean environment
+        run: |
+          set -euo pipefail
+          uv venv "$RUNNER_TEMP/sdist-venv"
+          uv pip install --python "$RUNNER_TEMP/sdist-venv/bin/python" dist/*.tar.gz
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/sdist-venv/bin/whykit" --version
+          "$RUNNER_TEMP/sdist-venv/bin/whykit" init packaged-sdist-vault
+          cd packaged-sdist-vault
+          "$RUNNER_TEMP/sdist-venv/bin/whykit" lint
+          "$RUNNER_TEMP/sdist-venv/bin/whykit" doctor
+
+  windows-portability:
+    name: Windows portability (Python 3.12)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.17"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install the package
+        run: uv sync --locked --no-dev
+      - name: Unit tests, including the Windows mutation-lock implementation
+        run: uv run python -m unittest discover -s tests -v
+      - name: Lint the tiny example vault strictly
+        run: uv run whykit lint examples/tiny --strict --today 2026-09-17
+      - name: Lint the Northline example vault strictly
+        run: uv run whykit lint examples/northline --strict --today 2026-09-17
+      - name: Run the CI policy profile
+        run: uv run whykit check --root examples/northline --profile ci --today 2026-09-17
+
+  decision-history:
+    name: Decision and review history is append-only
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.17"
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked --no-dev
+      - run: |
+          uv run whykit history \
+            --base "${{ github.event.pull_request.base.sha }}" --head HEAD \
+            --root examples/northline
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        # The gitleaks *binary* is MIT and free everywhere. The official Action
+        # requires a paid licence key for organisation-owned repositories, which
+        # would break this job the day the repo moves under an org.
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}" \
+            -o "$archive"
+          echo "${GITLEAKS_SHA256}  ${archive}" | sha256sum -c -
+          tar -xzf "$archive" gitleaks
+          # Verbose findings include commit author/email metadata; keep PII out
+          # of retained Actions logs. Maintainers can reproduce locally with -v.
+          ./gitleaks detect --source . --config .gitleaks.toml --redact --no-banner
+      - name: Reject AI-tool commit identities and attribution trailers
+        run: python3 scripts/check_commit_attribution.py
+
+  explorer:
+    name: Explorer (optional)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The Explorer is a convenience viewer, not part of the data contract.
+    # It must never be able to block a fix to the linter or the format.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.17"
+          python-version: "3.12"
+          enable-cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/explorer/package-lock.json
+      - run: uv sync --locked --no-dev
+      - run: npm ci --prefix apps/explorer
+      - name: Build from the Markdown example vault
+        run: npm run check --prefix apps/explorer

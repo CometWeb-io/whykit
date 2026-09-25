@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/provenance.schema.json",
+  "title": "WhyKit provenance block",
+  "description": "Optional front-matter block recording which system produced a note, without WhyKit having to model that system's internal state. Any producer may use it: a decision-support workflow, an agent framework, a migration script. Keys outside this list are allowed and ignored by the linter, so producers can extend it without a format change.",
+  "type": "object",
+  "properties": {
+    "producer": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable identifier of the producing system and its version, e.g. `example.decision-review/v1` or `whykit.adopt/0.2`."
+    },
+    "producer_run": {
+      "type": "string",
+      "description": "Identifier of the specific run, deliberation or import batch that produced this note."
+    },
+    "payload_ref": {
+      "type": "string",
+      "description": "Where the producer's own machine-readable record lives. WhyKit stores the durable human record; it deliberately does not mirror the producer's state machine."
+    },
+    "snapshot_hash": {
+      "type": "string",
+      "description": "Hash of the producer's immutable snapshot at the moment this note was written."
+    },
+    "recorded_at": {
+      "type": "string",
+      "description": "ISO 8601 timestamp at which the producer wrote this note."
+    },
+    "upstream": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Identifiers of upstream artifacts the producer consumed, such as evidence packs."
+    },
+    "human_reviewed": {
+      "type": "boolean",
+      "description": "Whether a person reviewed this note after the producer wrote it. Agent-generated content cannot approve itself."
+    }
+  },
+  "additionalProperties": true
+}

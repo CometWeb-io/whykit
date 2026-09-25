@@ -1,0 +1,13 @@
+# Raw exports, staged before normalization. Never commit these directly.
+.import-staging/
+
+# This repository holds knowledge, never credentials.
+.env
+*.key
+*.pem
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json

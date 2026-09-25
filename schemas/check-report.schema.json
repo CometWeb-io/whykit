@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/check-report.schema.json",
+  "title": "WhyKit policy gate report",
+  "type": "object",
+  "required": ["contract_version", "profile", "passed", "checks", "lint"],
+  "properties": {
+    "contract_version": {"const": 1},
+    "profile": {"type": "string", "minLength": 1},
+    "profile_config": {"type": "object"},
+    "config_source": {"type": "string"},
+    "as_of": {"type": "string"},
+    "passed": {"type": "boolean"},
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "passed", "detail"],
+        "properties": {
+          "name": {"type": "string"},
+          "passed": {"type": "boolean"},
+          "detail": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "lint": {"type": "object"}
+  },
+  "additionalProperties": true
+}

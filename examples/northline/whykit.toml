@@ -1,0 +1,34 @@
+format_version = 1
+
+[defaults]
+owner = "Revenue Operations"
+sensitivity = "internal"
+decision_review_days = 90
+status_due_days = 30
+
+[profiles.local]
+strict = false
+orphans = true
+secrets = true
+require_git = false
+require_clean_tree = false
+require_configured = false
+history = "optional"
+
+[profiles.ci]
+strict = true
+orphans = true
+secrets = true
+require_git = false
+require_clean_tree = false
+require_configured = true
+history = "optional"
+
+[profiles.release]
+strict = true
+orphans = true
+secrets = true
+require_git = true
+require_clean_tree = true
+require_configured = true
+history = "required"

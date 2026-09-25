@@ -1,0 +1,11 @@
+# Default: the maintainers at CometWeb review everything.
+# Kept as a user rather than @CometWeb-io/<team>: the organisation has no teams
+# yet, and GitHub ignores an unresolvable team here without reporting an error,
+# which would leave this file silently inert.
+*                       @MaciejZet
+
+# The data contract. Changing these changes every vault in existence,
+# so they need a deliberate second pair of eyes.
+/schemas/               @MaciejZet
+/src/whykit/lint.py   @MaciejZet
+/src/whykit/template/ @MaciejZet

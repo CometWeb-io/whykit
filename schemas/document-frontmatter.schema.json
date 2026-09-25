@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/document-frontmatter.schema.json",
+  "title": "WhyKit document front matter",
+  "type": "object",
+  "required": [
+    "title",
+    "type",
+    "status",
+    "owner",
+    "created",
+    "last_updated",
+    "source_of_truth",
+    "sensitivity"
+  ],
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "type": {
+      "enum": [
+        "strategy",
+        "research",
+        "framework",
+        "specification",
+        "decision",
+        "map-of-content",
+        "guide",
+        "reference"
+      ]
+    },
+    "status": {
+      "enum": [
+        "template",
+        "draft",
+        "in_review",
+        "approved",
+        "superseded",
+        "archived"
+      ]
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created": {
+      "type": "string",
+      "pattern": "^(YYYY-MM-DD|[0-9]{4}-[0-9]{2}-[0-9]{2})$"
+    },
+    "last_updated": {
+      "type": "string",
+      "pattern": "^(YYYY-MM-DD|[0-9]{4}-[0-9]{2}-[0-9]{2})$"
+    },
+    "source_of_truth": {
+      "type": "boolean"
+    },
+    "sensitivity": {
+      "enum": [
+        "public",
+        "internal",
+        "confidential",
+        "restricted"
+      ]
+    },
+    "source_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^E-[0-9]{3,}$"
+      },
+      "uniqueItems": true
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "reviewers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "review_by": {
+      "type": "string",
+      "pattern": "^(YYYY-MM-DD|[0-9]{4}-[0-9]{2}-[0-9]{2})$"
+    },
+    "decision_id": {
+      "type": "string",
+      "pattern": "^(D-XXX|D-[0-9]{3,})$"
+    },
+    "supersedes": {
+      "type": "string",
+      "pattern": "^D-[0-9]{3,}$"
+    },
+    "delivery_status": {
+      "enum": [
+        "draft",
+        "ready_to_send",
+        "sent"
+      ]
+    },
+    "sent_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "provenance": {
+      "$ref": "https://cometweb.io/schemas/whykit/provenance.schema.json"
+    },
+    "superseded_by": {
+      "type": "string",
+      "pattern": "^D-[0-9]{3,}$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "source_of_truth": {
+            "const": true
+          }
+        },
+        "required": [
+          "source_of_truth"
+        ]
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "approved"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "delivery_status": {
+            "const": "sent"
+          }
+        },
+        "required": [
+          "delivery_status"
+        ]
+      },
+      "then": {
+        "required": [
+          "sent_at"
+        ]
+      }
+    }
+  ],
+  "additionalProperties": true
+}
