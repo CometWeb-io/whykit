@@ -1,11 +1,12 @@
-# Default: the maintainers at CometWeb review everything.
-# Kept as a user rather than @CometWeb-io/<team>: the organisation has no teams
-# yet, and GitHub ignores an unresolvable team here without reporting an error,
-# which would leave this file silently inert.
+# One maintainer reviews everything. The organisation has no teams and no
+# second reviewer. Kept as a user rather than @CometWeb-io/<team>: GitHub
+# ignores an unresolvable team here without reporting an error, which would
+# leave this file silently inert. Listing a path below does not create a
+# second pair of eyes.
 *                       @MaciejZet
 
-# The data contract. Changing these changes every vault in existence,
-# so they need a deliberate second pair of eyes.
+# Data contract. A change here affects every existing vault, so review it
+# deliberately. The owner is still the same single maintainer.
 /schemas/               @MaciejZet
 /src/whykit/lint.py   @MaciejZet
 /src/whykit/template/ @MaciejZet

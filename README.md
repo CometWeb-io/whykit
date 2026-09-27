@@ -12,7 +12,7 @@ what is known, what was decided, and what still needs checking.
 
 **Python 3.11+ · No runtime dependencies · Apache-2.0**
 
-**Status:** preview; no public PyPI release yet. Install from a source checkout.
+**Status:** source preview `0.3.0.dev0`. No GitHub Release and no public PyPI release yet. Install from a source checkout. This checkout is newer than the internal 0.2.0 milestone and is not a tagged release.
 
 The checkout instructions require Python 3.11+ and [`uv`](https://docs.astral.sh/uv/getting-started/installation/).
 WhyKit itself has no runtime dependencies.

@@ -5,7 +5,12 @@ All notable changes to WhyKit are documented here. The format follows
 semantic versioning, where the **data contract** is the public API alongside the
 CLI and the lint rule codes.
 
-## [Unreleased]
+## [0.3.0.dev0] — source preview, not released
+
+`whykit --version` reports `0.3.0.dev0`. That string is this source preview,
+not a GitHub Release and not a PyPI release. Do not push a `v*` tag until the
+version is a final `X.Y.Z` and the PyPI environment is configured. The notes
+below are the delta after the internal 0.2.0 milestone.
 
 ### Added
 
@@ -205,8 +210,8 @@ CLI and the lint rule codes.
 
 ## [0.2.0] — 2026-09-17
 
-Candidate for the first public preview. The package has not been published to
-PyPI; install it from a source checkout as described in the README.
+Internal milestone. It was never tagged and never published. Current source
+checkouts are `0.3.0.dev0`, above.
 
 ### Added
 

@@ -37,8 +37,12 @@ Consequences scale with severity and repetition: a private word, a public
 correction, a temporary block, or a permanent ban. Maintainers who break these
 rules are held to them more strictly, not less.
 
-If a report concerns a maintainer, say so in the report; it will be handled by
-someone else.
+If a report concerns a maintainer, say so in the report. WhyKit has one
+maintainer, so that report is not routed to a second project member. Send it
+to **hello@cometweb.io** anyway, and state that it concerns the maintainer.
+The same person may be the only reader. This file will name an independent
+contact here if one is designated. Do not treat this paragraph as a promise
+that someone else already handles maintainer complaints.
 
 ## Attribution
 

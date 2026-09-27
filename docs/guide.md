@@ -10,8 +10,9 @@ Markdown, and enforces the parts that rot first: that evidence is cited, that
 accepted decisions are never quietly rewritten, and that somebody named a date on
 which each one gets re-checked.
 
-Developed by **[CometWeb](https://cometweb.io)**. WhyKit is in preview and has
-no public PyPI release yet. See the [release checklist](../.github/RELEASE.md).
+Developed by **[CometWeb](https://cometweb.io)**. WhyKit is source preview
+`0.3.0.dev0`: no GitHub Release and no public PyPI package yet. See the
+[release checklist](../.github/RELEASE.md).
 Apache-2.0.
 
 It is deliberately not a vector database, CRM, task manager or chat history.
