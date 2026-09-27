@@ -57,7 +57,7 @@ class CommitAttributionTests(unittest.TestCase):
             self.new_repo(repo)
             sha = self.commit(
                 repo,
-                "Add a feature\n\nCo-Authored-By: Claude Opus <noreply@anthropic.com>",
+                "Add a feature\n\nCo-Authored-By: Codex <codex@example.invalid>",
             )
             result = subprocess.run(
                 [sys.executable, str(SCRIPT)],
@@ -69,8 +69,8 @@ class CommitAttributionTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn(sha, result.stdout)
-        self.assertNotIn("Claude", result.stdout)
-        self.assertNotIn("anthropic.com", result.stdout)
+        self.assertNotIn("Codex", result.stdout)
+        self.assertNotIn("example.invalid", result.stdout)
 
     def test_ai_commit_identity_is_detected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
