@@ -65,7 +65,7 @@ For every batch of uploaded or imported material:
 
 1. Inspect every file before deciding where it belongs.
 2. Classify each as useful, duplicate, empty, unsupported, or needing an attachment.
-3. Create an ingestion record in `07-research/sources/` from
+3. Create an ingestion record (for example under `notes/` or `reports/`) from
    `templates/source-ingestion-template.md`.
 4. Record source names, SHA-256 hashes, import decisions, missing assets and
    destination notes.

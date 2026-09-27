@@ -24,6 +24,10 @@ hello@cometweb.io remains the contact. CometWeb is not the copyright holder.
 
 ### Fixed
 
+- `init` (and `init --minimal`) no longer leaves `AGENTS.md` telling people to
+  write an ingestion record in `07-research/sources/` after that directory has
+  been removed. The layout step rejects any remaining reference to a deleted
+  workstream.
 - Repeated same-day `adopt --write` runs keep separate staging batches and
   ingestion receipts; a source `MIGRATION.md` is no longer replaced by the
   generated migration report.
