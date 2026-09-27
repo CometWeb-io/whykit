@@ -1,6 +1,6 @@
 """WhyKit — a Git-native evidence and decision ledger.
 
-Built and maintained by CometWeb. Apache-2.0.
+Copyright 2026 Maciej Zmitrukiewicz. Apache-2.0.
 
     from whykit import lint_vault, find_vault_root, __version__
     from whykit import lint          # the module, not the function

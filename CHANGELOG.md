@@ -12,6 +12,9 @@ not a GitHub Release and not a PyPI release. Do not push a `v*` tag until the
 version is a final `X.Y.Z` and the PyPI environment is configured. The notes
 below are the delta after the internal 0.2.0 milestone.
 
+Copyright is Maciej Zmitrukiewicz. CometWeb remains the product name and
+hello@cometweb.io remains the contact. CometWeb is not the copyright holder.
+
 ### Added
 
 - Optional `[evidence_access_age_days]` policy warns (`evidence.access_missing`,

@@ -21,10 +21,11 @@ These limits are part of the product contract, not temporary disclaimers.
 
 ## Maintainer and usage claims
 
-WhyKit is built and maintained by CometWeb under Apache-2.0. The repository does
-not claim that CometWeb has verified the product on a real operating vault. Make
-that claim only after the dogfooding gate in the [release checklist](../.github/RELEASE.md)
-has actually been met.
+Copyright 2026 Maciej Zmitrukiewicz, released under Apache-2.0. CometWeb
+(https://cometweb.io) is the product name, not a company and not the copyright
+holder. The repository does not claim that a real operating vault has verified
+the product. Make that claim only after the dogfooding gate in the
+[release checklist](../.github/RELEASE.md) has actually been met.
 
 ## The name
 

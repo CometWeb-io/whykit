@@ -30,8 +30,9 @@ someone is representing the project.
 
 ## Enforcement
 
-Report problems to **hello@cometweb.io**. Reports go to the maintainers at
-CometWeb and stay confidential. We will respond within five working days.
+Report problems to **hello@cometweb.io**. Reports go to the maintainer,
+Maciej Zmitrukiewicz, and stay confidential. We will respond within five
+working days.
 
 Consequences scale with severity and repetition: a private word, a public
 correction, a temporary block, or a permanent ban. Maintainers who break these

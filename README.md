@@ -158,5 +158,5 @@ exposes only read-only query, context, and impact operations.
 | Read the community expectations | [Code of Conduct](CODE_OF_CONDUCT.md) |
 | Understand the project boundary | [Positioning](docs/project-positioning.md) |
 
-Built and maintained by [CometWeb](https://cometweb.io). See the [Apache-2.0
+Copyright 2026 Maciej Zmitrukiewicz (hello@cometweb.io). [CometWeb](https://cometweb.io) is the product name, not the copyright holder. See the [Apache-2.0
 license](LICENSE), [security policy](SECURITY.md), and [release checklist](.github/RELEASE.md).

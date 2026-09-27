@@ -10,8 +10,8 @@ readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
-authors = [{ name = "CometWeb", email = "hello@cometweb.io" }]
-maintainers = [{ name = "CometWeb", email = "hello@cometweb.io" }]
+authors = [{ name = "Maciej Zmitrukiewicz", email = "hello@cometweb.io" }]
+maintainers = [{ name = "Maciej Zmitrukiewicz", email = "hello@cometweb.io" }]
 keywords = ["decision-records", "adr", "evidence", "provenance", "knowledge-base", "obsidian", "agents"]
 classifiers = [
   "Development Status :: 3 - Alpha",
