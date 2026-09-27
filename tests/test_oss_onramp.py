@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "scripts" / "whykit.py"
 sys.path.insert(0, str(ROOT / "src"))
 
+from whykit.init_layout import removed_workstream_mentions  # noqa: E402
+
 
 def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run([sys.executable, str(CLI), *args], cwd=cwd, text=True, capture_output=True, timeout=30)
@@ -33,6 +35,13 @@ class MinimalInitTests(unittest.TestCase):
             lint = run("lint", "--root", str(target))
             self.assertEqual(lint.returncode, 0, lint.stdout + lint.stderr)
             self.assertIn("0 error", lint.stdout)
+            self.assertEqual(removed_workstream_mentions(target), [])
+            agents = (target / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn("notes/` or `reports/`", agents)
+            self.assertNotIn("07-research/", agents)
+
+    def test_checked_in_tiny_example_matches_minimal_layout(self) -> None:
+        self.assertEqual(removed_workstream_mentions(ROOT / "examples" / "tiny"), [])
 
 
 class TinyExampleTests(unittest.TestCase):

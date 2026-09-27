@@ -174,10 +174,32 @@ def apply_minimal_layout(target: Path, *, today: dt.date | None = None) -> None:
             "decisions. It is not a task tracker, not a CRM, and not a place for credentials.\n",
             "",
         )
-        text = text.replace(
-            "2. Create an ingestion record in `07-research/sources/` from\n"
+        text = re.sub(
+            r"\d+\. Create an ingestion record in `07-research/sources/` from\n"
+            r"   `templates/source-ingestion-template.md`\.\n",
+            "3. Create an ingestion record (for example under `notes/` or `reports/`) from\n"
             "   `templates/source-ingestion-template.md`.\n",
-            "2. Create an ingestion record (for example under `notes/` or `reports/`) from\n"
-            "   `templates/source-ingestion-template.md`.\n",
+            text,
+            count=1,
         )
         agents.write_text(text, encoding="utf-8")
+
+    leftovers = removed_workstream_mentions(target)
+    if leftovers:
+        raise RuntimeError(
+            "minimal layout still points at a removed workstream: " + "; ".join(leftovers)
+        )
+
+
+def removed_workstream_mentions(root: Path) -> list[str]:
+    """Paths of generated files that still name a workstream minimal layout deletes."""
+    needles = tuple(f"{name}/" for name in GTM_WORKSTREAMS)
+    hits: list[str] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix not in {".md", ".toml", ".txt", ".yml", ".yaml"}:
+            continue
+        text = path.read_text(encoding="utf-8")
+        found = [needle for needle in needles if needle in text]
+        if found:
+            hits.append(f"{path.relative_to(root)} ({', '.join(found)})")
+    return hits
