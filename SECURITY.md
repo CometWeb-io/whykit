@@ -47,7 +47,6 @@ Review them manually or with an appropriate DLP/scanning tool before committing.
 ## Vulnerability reports
 
 Do not open a public issue containing credentials, private vault content or a live
-exploit against a third party. While this repository is private, GitHub private
-vulnerability reporting is not available. Email **hello@cometweb.io** without
-attaching sensitive vault data. After the repository is public, enable private
-vulnerability reporting and prefer that channel once the reporting form exists.
+exploit against a third party. Email **hello@cometweb.io** without attaching
+sensitive vault data. Prefer GitHub private vulnerability reporting when that
+channel is available for this repository.

@@ -351,10 +351,13 @@ class ContractTests(unittest.TestCase):
 
     def test_guide_checkout_commands_match_the_real_repository_layout(self) -> None:
         guide = (ROOT / "docs" / "guide.md").read_text(encoding="utf-8")
-        self.assertIn("uv tool install --editable .", guide)
-        self.assertRegex(guide, r"git clone[^\n]+\ncd whykit\nuv tool install")
-        self.assertIn("whykit init ../my-company-context", guide)
-        self.assertIn("cd ../my-company-context", guide)
+        self.assertIn("uv sync --locked", guide)
+        self.assertRegex(guide, r"git clone[^\n]+\ncd whykit\nuv sync --locked")
+        self.assertIn("uv run whykit init ../my-ledger", guide)
+        self.assertIn("uv run whykit lint --root ../my-ledger", guide)
+        self.assertNotIn("uv tool install --editable .", guide)
+        self.assertIn("not on PyPI yet", guide)
+        self.assertIn("do not run", guide.casefold())
         self.assertIn("--workstream notes", guide)
         with tempfile.TemporaryDirectory() as td:
             minimal_vault = Path(td) / "minimal"
@@ -362,6 +365,8 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(init.returncode, 0, init.stderr)
             self.assertTrue((minimal_vault / "notes").is_dir())
             self.assertFalse((minimal_vault / "07-research").exists())
+            self.assertIn(f"uv run whykit lint --root {minimal_vault}", init.stdout)
+            self.assertNotIn("&& whykit lint", init.stdout)
         self.assertNotIn("whykit/scripts/whykit.py", guide)
         self.assertNotIn("warning:32", guide)
         self.assertNotIn("warning:56", guide)

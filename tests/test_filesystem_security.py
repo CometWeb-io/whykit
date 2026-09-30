@@ -93,6 +93,73 @@ class InitSafetyTests(unittest.TestCase):
             self.assertTrue((target / "Home.md").exists())
             self.assertTrue((target / "notes").is_dir())
 
+    def test_init_refuses_symlinked_target_without_writing_through(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            real = base / "real-outside"
+            named = base / "named-vault"
+            real.mkdir()
+            sentinel = real / "pre-existing.txt"
+            sentinel.write_text("outside must stay unchanged\n", encoding="utf-8")
+            try:
+                named.symlink_to(real, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks are unavailable on this platform")
+
+            before = {path.name for path in real.iterdir()}
+            result = run("init", "--minimal", str(named))
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("symlink", result.stderr.casefold())
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "outside must stay unchanged\n")
+            self.assertEqual({path.name for path in real.iterdir()}, before)
+            self.assertFalse((real / "Home.md").exists())
+            self.assertFalse((real / "00-context").exists())
+
+    def test_init_refuses_symlink_ancestor_without_writing_through(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            outside = base / "outside"
+            link = base / "link"
+            outside.mkdir()
+            try:
+                link.symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks are unavailable on this platform")
+
+            target = link / "new-vault"
+            result = run("init", "--minimal", str(target))
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("symlink", result.stderr.casefold())
+            self.assertFalse(target.exists())
+            self.assertFalse((outside / "new-vault").exists())
+            self.assertFalse((outside / "Home.md").exists())
+
+    def test_init_force_refuses_package_source_root_but_allows_normal_directories(self) -> None:
+        self.assertFalse((ROOT / "Home.md").exists())
+        self.assertFalse((ROOT / "00-context").exists())
+        self.assertFalse((ROOT / "06-decisions").exists())
+
+        refused = run("init", "--force", str(ROOT))
+        self.assertEqual(refused.returncode, 2, refused.stderr)
+        self.assertIn("package source tree", refused.stderr)
+        self.assertFalse((ROOT / "Home.md").exists())
+        self.assertFalse((ROOT / "00-context").exists())
+        self.assertFalse((ROOT / "06-decisions").exists())
+
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "adopter-project"
+            target.mkdir()
+            keep = target / "keep.txt"
+            keep.write_text("adopter content\n", encoding="utf-8")
+            # A normal non-empty directory (including foreign git checkouts) is fine.
+            subprocess.run(["git", "init", "-q", str(target)], check=True, capture_output=True)
+            result = run("init", "--force", str(target))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(keep.read_text(encoding="utf-8"), "adopter content\n")
+            self.assertTrue((target / "Home.md").exists())
+            self.assertTrue((target / "00-context").is_dir())
+            self.assertTrue((target / "06-decisions").is_dir())
+
     def test_init_force_does_not_write_through_parent_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)
