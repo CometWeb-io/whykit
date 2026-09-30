@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -39,6 +40,11 @@ Thumbs.db
 VAULT_GITIGNORE_MARKER = "# WhyKit protective defaults (managed by whykit init)"
 # Points at the repository when running from a checkout; harmless in a wheel.
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
+_PROJECT_NAME_RE = re.compile(r"(?m)^name\s*=\s*[\"']whykit[\"']")
+# macOS (and similar) expose these as root-level directory aliases. Following
+# them does not redirect a user-named vault into a different tree; it is how
+# the OS spells the same path. Refuse every other symlink on the init path.
+_ROOT_DIR_ALIASES = frozenset({"var", "tmp", "etc", "private"})
 
 
 def _resolve_vault(explicit: str | None) -> Path | None:
@@ -48,10 +54,61 @@ def _resolve_vault(explicit: str | None) -> Path | None:
     return find_vault_root()
 
 
+def _absolute_without_following_symlinks(raw: str) -> Path:
+    """Expand ``~`` and make the path absolute without resolving symlinks."""
+    return Path(os.path.abspath(os.path.expanduser(raw)))
+
+
+def _first_symlink_on_path(path: Path) -> Path | None:
+    """Return the first refused symlink from the filesystem root through ``path``.
+
+    Root-level OS aliases such as macOS ``/var`` → ``/private/var`` are allowed
+    when they appear as an ancestor. The named target itself is never followed
+    when it is a symlink, and any non-alias ancestor symlink is refused so
+    init cannot write through a redirect into another directory.
+    """
+    path = Path(path)
+    if not path.is_absolute():
+        raise ValueError(f"path must be absolute: {path}")
+    anchor = Path(path.anchor)
+    current = anchor
+    for part in path.parts[1:]:
+        current = current / part
+        try:
+            if not current.is_symlink():
+                continue
+        except OSError:
+            return None
+        is_root_alias_ancestor = (
+            current.parent == anchor
+            and current.name in _ROOT_DIR_ALIASES
+            and current != path
+        )
+        if is_root_alias_ancestor:
+            continue
+        return current
+    return None
+
+
+def _is_whykit_package_source_root(path: Path) -> bool:
+    """True when ``path`` is a WhyKit package checkout (``src/whykit`` + project pyproject)."""
+    pyproject = path / "pyproject.toml"
+    package_dir = path / "src" / "whykit"
+    if pyproject.is_symlink() or package_dir.is_symlink():
+        return False
+    if not pyproject.is_file() or not package_dir.is_dir():
+        return False
+    if not (package_dir / "cli.py").is_file() and not (package_dir / "__init__.py").is_file():
+        return False
+    try:
+        text = pyproject.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return _PROJECT_NAME_RE.search(text) is not None
+
 
 def _stamp_vault_dates(target: Path, today: dt.date | None = None) -> None:
     """Make a newly generated vault honest about when its starter files were created."""
-    import re
     value = (today or dt.date.today()).isoformat()
     for path in target.rglob("*.md"):
         try:
@@ -78,7 +135,20 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 2
 
     minimal_layout = not getattr(args, "full", False)
-    target = Path(args.target).expanduser().resolve()
+    # Do not Path.resolve(): that follows symlinks and can write outside the
+    # path the user named. Expand ~ and absolutize only.
+    target = _absolute_without_following_symlinks(args.target)
+    linked = _first_symlink_on_path(target)
+    if linked is not None:
+        print(f"refusing to initialize through a symlink: {linked}", file=sys.stderr)
+        return 2
+    if _is_whykit_package_source_root(target):
+        print(
+            "refusing to initialize inside WhyKit's own package source tree: "
+            f"{target}",
+            file=sys.stderr,
+        )
+        return 2
     if target.exists() and not target.is_dir():
         print(f"refusing to initialize a non-directory target: {target}", file=sys.stderr)
         return 2
@@ -159,7 +229,9 @@ def cmd_init(args: argparse.Namespace) -> int:
     print("Next, in order:")
     print("  1. Answer every TODO in AGENTS.md - that file is the contract agents work under.")
     print("  2. Replace the starter content in 00-context/ before treating anything as canonical.")
-    print(f"  3. cd {target} && whykit lint")
+    # Match the README cold-install path (`uv sync` + `uv run whykit` from the
+    # checkout). Bare `whykit` is not on PATH after that install.
+    print(f"  3. From the WhyKit checkout: uv run whykit lint --root {target}")
     return 0
 
 

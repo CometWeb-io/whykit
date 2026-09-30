@@ -32,26 +32,27 @@ people and by the agents now writing half of this material.
 ## Quick start
 
 WhyKit requires Python 3.11 or newer and has no runtime dependencies. Install
-[uv](https://docs.astral.sh/uv/getting-started/installation/), then install the
-editable CLI from the checkout:
+[uv](https://docs.astral.sh/uv/getting-started/installation/), then use the
+checkout commands below. WhyKit is not on PyPI yet; do not run
+`uv tool install whykit` or `pipx install whykit` until a release is announced.
 
 ```bash
 git clone https://github.com/CometWeb-io/whykit.git
 cd whykit
-uv tool install --editable .
-whykit init ../my-company-context
-cd ../my-company-context
-whykit lint
+uv sync --locked
+uv run whykit init ../my-ledger
+uv run whykit lint --root ../my-ledger
 ```
 
-The examples below assume this editable tool install and that commands run from
-the vault root. If `whykit` is not found, add uv's tool executable directory to
-your `PATH`. You can instead run commands through the checkout with `uv run
---project /path/to/whykit whykit ...` and pass `--root` when the target vault is
-not the current directory.
+The examples later in this guide assume the same checkout install. Run commands
+with `uv run whykit ...` from the WhyKit repository (or pass
+`uv run --project /path/to/whykit whykit ...` from elsewhere). When the target
+vault is not the current directory, pass `--root`. After a future PyPI release,
+`uv tool install whykit` will put a `whykit` binary on your `PATH` and the bare
+command form will work.
 
 A fresh vault has zero lint errors and uses the vendor-neutral default layout.
-Use `whykit init --full ../my-company-context` for the optional GTM-oriented
+Use `uv run whykit init --full ../my-ledger` for the optional GTM-oriented
 workstream starter. `--minimal` remains as a compatibility alias. Any warnings
 point to unanswered questions in `AGENTS.md`, the contract agents work under;
 answer those before relying on agents. The exact warning count and line numbers

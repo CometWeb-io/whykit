@@ -24,6 +24,10 @@ hello@cometweb.io remains the contact. CometWeb is not the copyright holder.
 
 ### Fixed
 
+- `init` refuses a symlink on the path you named, and refuses the WhyKit package
+  source tree even with `--force`. The printed next step is `uv run whykit` from
+  the checkout, which is the install path the README documents. `SECURITY.md`
+  matches a public repository.
 - `init` (and `init --minimal`) no longer leaves `AGENTS.md` telling people to
   write an ingestion record in `07-research/sources/` after that directory has
   been removed. The layout step rejects any remaining reference to a deleted
