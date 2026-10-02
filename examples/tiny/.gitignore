@@ -11,3 +11,7 @@
 Thumbs.db
 .obsidian/workspace.json
 .obsidian/workspace-mobile.json
+
+# WhyKit's own write lock and crash-recovery journal. Machine state, not knowledge.
+.whykit/mutation.lock
+.whykit/transactions/

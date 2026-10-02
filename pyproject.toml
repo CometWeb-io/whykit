@@ -29,6 +29,19 @@ dependencies = []
 [project.optional-dependencies]
 mcp = ["mcp>=2,<3"]
 
+# Contributor tooling only; never installed with the package. Exact pins keep
+# the gates reproducible, and uv.lock adds hashes. CI installs the core package
+# with --no-dev, so none of this reaches the runtime dependency graph.
+[dependency-groups]
+dev = [
+  "mypy==2.4.0",
+  "ruff==0.16.10",
+  "zizmor==1.30.1",
+]
+# Distribution metadata check (`twine check`). Kept out of `dev` so a normal
+# contributor sync stays small; CI's package job opts in with --group dist.
+dist = ["twine==7.0.0"]
+
 [project.urls]
 Homepage = "https://github.com/CometWeb-io/whykit"
 Documentation = "https://github.com/CometWeb-io/whykit#readme"
@@ -59,3 +72,60 @@ include = ["src/whykit", "schemas", "examples", "README.md", "CHANGELOG.md", "LI
 # without refreshing uv.lock.
 [tool.uv]
 package = true
+
+[tool.ruff]
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+extend-exclude = ["apps", "src/whykit/template", "examples"]
+
+[tool.ruff.lint]
+# Correctness-focused baseline. Long lines are a deliberate style here (prose
+# messages, test fixtures), and import order is not enforced, to avoid a
+# repository-wide churn commit. Tighten by adding rules with their fixes.
+select = ["E", "F", "W", "B", "UP", "PLE"]
+ignore = [
+  "E501",   # line length: messages and fixtures are intentionally long
+  "UP017",  # datetime.timezone.utc is kept for readability
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Baseline: typing.Iterable import predates the rule. Remove when touched.
+"src/whykit/lint.py" = ["UP035"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/whykit"]
+warn_unused_configs = true
+warn_redundant_casts = true
+# The optional MCP SDK is not installed in the default dev environment.
+[[tool.mypy.overrides]]
+module = ["mcp.*", "mcp_types.*", "pydantic.*"]
+ignore_missing_imports = true
+
+# Baseline of findings that predate the type gate, narrowed to the exact error
+# codes per module so a new kind of error in these modules still fails CI.
+# Delete an entry when its module is fixed; never add one for new code.
+[[tool.mypy.overrides]]
+module = "whykit.lint"
+disable_error_code = ["union-attr"]
+
+[[tool.mypy.overrides]]
+module = "whykit.explorer_index"
+disable_error_code = ["arg-type", "return-value", "dict-item", "assignment"]
+
+[[tool.mypy.overrides]]
+# msvcrt locking constants exist only in the Windows stub branch.
+module = "whykit.io"
+disable_error_code = ["attr-defined"]
+
+[[tool.mypy.overrides]]
+module = "whykit.graph"
+disable_error_code = ["assignment", "arg-type"]
+
+[[tool.mypy.overrides]]
+module = "whykit.adopt"
+disable_error_code = ["var-annotated"]
+
+[[tool.mypy.overrides]]
+module = "whykit.snapshot"
+disable_error_code = ["arg-type"]

@@ -19,6 +19,8 @@ from pathlib import Path
 
 from . import __version__
 from .lint import find_vault_root, is_vault_root, lint as run_lint, rel
+from .completion import SHELLS, render_completion
+from .messages import print_no_vault
 from .vault_index import VaultIndex
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "template"
@@ -36,6 +38,10 @@ VAULT_GITIGNORE = """# Raw exports, staged before normalization. Never commit th
 Thumbs.db
 .obsidian/workspace.json
 .obsidian/workspace-mobile.json
+
+# WhyKit's own write lock and crash-recovery journal. Machine state, not knowledge.
+.whykit/mutation.lock
+.whykit/transactions/
 """
 VAULT_GITIGNORE_MARKER = "# WhyKit protective defaults (managed by whykit init)"
 # Points at the repository when running from a checkout; harmless in a wheel.
@@ -218,6 +224,15 @@ def cmd_init(args: argparse.Namespace) -> int:
             existing_ignore + separator + "\n" + VAULT_GITIGNORE_MARKER + "\n" + VAULT_GITIGNORE,
         )
 
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps({
+            "contract_version": 1,
+            "root": str(target),
+            "layout": "minimal" if minimal_layout else "full",
+            "preserved": preserved,
+        }, ensure_ascii=False, indent=2))
+        return 0
     print(f"WhyKit vault created: {target}")
     if preserved:
         print(f"Preserved {preserved} existing template file(s); only missing files were added.")
@@ -307,12 +322,26 @@ def cmd_status(args: argparse.Namespace) -> int:
     return status_main(argv)
 
 
+def _json_format(args: argparse.Namespace, command: str) -> str | None:
+    """Fold the shared ``--json`` flag into a command's ``--format`` choice."""
+    if not getattr(args, "json", False):
+        return args.format or "json"
+    if args.format not in (None, "json"):
+        print(f"--json conflicts with --format {args.format}", file=sys.stderr)
+        print(f"hint: pass one of them to `whykit {command}`", file=sys.stderr)
+        return None
+    return "json"
+
+
 def cmd_graph(args: argparse.Namespace) -> int:
     from .graph import main as graph_main
+    fmt = _json_format(args, "graph")
+    if fmt is None:
+        return 2
     argv: list[str] = []
     if args.root:
         argv += ["--root", args.root]
-    argv += ["--format", args.format]
+    argv += ["--format", fmt]
     if args.canonical_only:
         argv.append("--canonical-only")
     if getattr(args, "output", None):
@@ -338,6 +367,24 @@ def cmd_impact(args: argparse.Namespace) -> int:
     if args.json:
         argv.append("--json")
     return impact_main(argv)
+
+
+def cmd_trace(args: argparse.Namespace) -> int:
+    from .trace import main as trace_main
+    argv: list[str] = []
+    if args.root:
+        argv += ["--root", args.root]
+    if args.decision:
+        argv += ["--decision", args.decision]
+    if args.today:
+        argv += ["--today", args.today]
+    if args.max_age_days is not None:
+        argv += ["--max-age-days", str(args.max_age_days)]
+    for flag in ("gaps_only", "strict", "json"):
+        if getattr(args, flag):
+            argv.append("--" + flag.replace("_", "-"))
+    return trace_main(argv)
+
 
 def cmd_query(args: argparse.Namespace) -> int:
     from .query import main as query_main
@@ -371,12 +418,15 @@ def cmd_context(args: argparse.Namespace) -> int:
 
 def cmd_pack(args: argparse.Namespace) -> int:
     from .pack import main as pack_main
+    fmt = _json_format(args, "pack")
+    if fmt is None:
+        return 2
     argv: list[str] = list(args.targets)
     if args.root:
         argv += ["--root", args.root]
     if args.query:
         argv += ["--query", args.query]
-    argv += ["--max-docs", str(args.max_docs), "--max-chars", str(args.max_chars), "--format", args.format]
+    argv += ["--max-docs", str(args.max_docs), "--max-chars", str(args.max_chars), "--format", fmt]
     if args.canonical_only:
         argv.append("--canonical-only")
     if getattr(args, "agent", None):
@@ -459,7 +509,7 @@ def cmd_policy(args: argparse.Namespace) -> int:
     from .config import ConfigError, config_summary
     vault = _resolve_vault(args.root)
     if vault is None:
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
     try:
         payload = config_summary(vault)
@@ -524,6 +574,8 @@ def cmd_history(args: argparse.Namespace) -> int:
     argv = ["--base", args.base, "--head", args.head]
     if args.root:
         argv += ["--root", args.root]
+    if args.json:
+        argv.append("--json")
     return immutability_main(argv)
 
 
@@ -550,7 +602,7 @@ fi
 def cmd_install_hooks(args: argparse.Namespace) -> int:
     vault = _resolve_vault(args.root)
     if vault is None:
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
     hooks = vault / ".git" / "hooks"
     if not hooks.is_dir():
@@ -604,8 +656,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     record("python", sys.version_info >= (3, 11), sys.version.split()[0])
     record("whykit", True, __version__)
     if vault is None:
-        record("vault_root", False, "no vault found - run `whykit init <dir>`")
-        payload = {"contract_version": 1, "passed": False, "checks": checks}
+        record("vault_root", False, "no vault found - run `whykit init <dir>` or pass --root")
+        payload: dict[str, object] = {"contract_version": 1, "root": None, "passed": False, "checks": checks}
         if args.json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
@@ -730,13 +782,34 @@ def cmd_serve(args: argparse.Namespace) -> int:
                           cwd=explorer, env=env).returncode
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="whykit", description="WhyKit - evidence and decision ledger")
-    parser.add_argument("--version", action="version", version=f"whykit {__version__}")
-    sub = parser.add_subparsers(dest="command", required=True)
+ROOT_HELP = "vault root (default: nearest vault at or above the working directory)"
+TODAY_HELP = "evaluate review dates as of this YYYY-MM-DD date instead of today"
+JSON_HELP = "emit machine-readable JSON on stdout"
+SENSITIVITIES = ("public", "internal", "confidential", "restricted")
 
-    init = sub.add_parser("init", help="create a new vault")
-    init.add_argument("target")
+EPILOG = """\
+exit codes:
+  0    success (no errors; no warnings under --strict)
+  1    the check ran and found problems that should fail the build
+  2    the tool could not run: no vault, invalid input or configuration
+  130  interrupted
+
+Run `whykit <command> -h` for a command's options.
+Docs: https://github.com/CometWeb-io/whykit#readme"""
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="whykit",
+        description="WhyKit - a Git-native evidence and decision ledger.",
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("-V", "--version", action="version", version=f"whykit {__version__}")
+    sub = parser.add_subparsers(dest="command", metavar="<command>", title="commands")
+
+    init = sub.add_parser("init", help="create a new vault", description="Create a new WhyKit vault from the bundled template.")
+    init.add_argument("target", help="directory to create (must be empty unless --force)")
     init.add_argument("--force", action="store_true", help="add missing template files in a non-empty directory without replacing existing files")
     init.add_argument(
         "--minimal",
@@ -748,206 +821,218 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="include the optional GTM workstreams (strategy, website, research, etc.)",
     )
+    init.add_argument("--json", action="store_true", help=JSON_HELP)
     init.set_defaults(func=cmd_init)
 
-    lint_cmd = sub.add_parser("lint", help="check a vault")
-    lint_cmd.add_argument("paths", nargs="*")
-    lint_cmd.add_argument("--root")
-    lint_cmd.add_argument("--strict", action="store_true")
-    lint_cmd.add_argument("--quiet", action="store_true")
-    lint_cmd.add_argument("--json", action="store_true")
-    lint_cmd.add_argument("--no-orphans", action="store_true")
-    lint_cmd.add_argument("--no-secrets", action="store_true")
-    lint_cmd.add_argument("--today", help="evaluate review dates as of this ISO date")
+    lint_cmd = sub.add_parser("lint", help="check a vault", description="Check vault structure, links, evidence and decisions.")
+    lint_cmd.add_argument("paths", nargs="*", help="Markdown files or directories to check, relative to the vault root (default: whole vault)")
+    lint_cmd.add_argument("--root", help=ROOT_HELP)
+    lint_cmd.add_argument("--strict", action="store_true", help="treat warnings as failures (exit 1)")
+    lint_cmd.add_argument("--quiet", action="store_true", help="print only the summary line")
+    lint_cmd.add_argument("--json", action="store_true", help=JSON_HELP)
+    lint_cmd.add_argument("--no-orphans", action="store_true", help="skip orphan-note warnings")
+    lint_cmd.add_argument("--no-secrets", action="store_true", help="skip the secret scan")
+    lint_cmd.add_argument("--today", help=TODAY_HELP)
     lint_cmd.set_defaults(func=cmd_lint)
 
-
-    new = sub.add_parser("new", help="create a decision, evidence row or note")
-    new.add_argument("--root")
-    new_sub = new.add_subparsers(dest="new_kind", required=True)
+    new = sub.add_parser("new", help="create a decision, evidence row or note", description="Create a record and keep the vault indexes in sync.")
+    new.add_argument("--root", help=ROOT_HELP)
+    new_sub = new.add_subparsers(dest="new_kind", required=True, metavar="<kind>", title="kinds")
     new_decision = new_sub.add_parser("decision", help="create a decision record and index row")
-    new_decision.add_argument("title")
-    new_decision.add_argument("--owner", help="default: policy defaults.owner")
-    new_decision.add_argument("--status", choices=("draft", "in_review", "approved", "superseded", "archived"), default="draft")
-    new_decision.add_argument("--sensitivity", choices=("public", "internal", "confidential", "restricted"), help="default: policy defaults.sensitivity")
-    new_decision.add_argument("--source", action="append", default=[], dest="source_ids")
-    new_decision.add_argument("--review-by")
-    new_decision.add_argument("--supersedes")
-    new_decision.add_argument("--json", action="store_true")
+    new_decision.add_argument("title", help="decision title, e.g. \"Adopt usage-based pricing\"")
+    new_decision.add_argument("--owner", help="accountable person (default: policy defaults.owner)")
+    new_decision.add_argument("--status", choices=("draft", "in_review", "approved", "superseded", "archived"), default="draft", help="initial status (default: %(default)s)")
+    new_decision.add_argument("--sensitivity", choices=SENSITIVITIES, help="default: policy defaults.sensitivity")
+    new_decision.add_argument("--source", action="append", default=[], dest="source_ids", metavar="E-NNN", help="supporting evidence ID (repeatable)")
+    new_decision.add_argument("--review-by", metavar="YYYY-MM-DD", help="date by which the decision must be re-checked")
+    new_decision.add_argument("--supersedes", metavar="D-NNN", help="decision this one replaces")
+    new_decision.add_argument("--json", action="store_true", help=JSON_HELP)
     new_decision.set_defaults(func=cmd_new)
 
     new_evidence = new_sub.add_parser("evidence", help="append a source to the evidence register")
-    new_evidence.add_argument("--source", required=True, dest="source_name")
-    new_evidence.add_argument("--location", required=True)
-    new_evidence.add_argument("--type", required=True, dest="evidence_type")
-    new_evidence.add_argument("--claims", required=True)
-    new_evidence.add_argument("--date")
-    new_evidence.add_argument("--accessed")
-    new_evidence.add_argument("--json", action="store_true")
+    new_evidence.add_argument("--source", required=True, dest="source_name", help="who or what produced the evidence")
+    new_evidence.add_argument("--location", required=True, help="URL or path where the source can be checked")
+    new_evidence.add_argument("--type", required=True, dest="evidence_type", help="kind of source, e.g. interview, analytics, report")
+    new_evidence.add_argument("--claims", required=True, help="what the source supports, in one line")
+    new_evidence.add_argument("--date", metavar="YYYY-MM-DD", help="when the source was produced (default: today)")
+    new_evidence.add_argument("--accessed", metavar="YYYY-MM-DD", help="when it was last checked (default: today)")
+    new_evidence.add_argument("--json", action="store_true", help=JSON_HELP)
     new_evidence.set_defaults(func=cmd_new)
 
     new_note = new_sub.add_parser("note", help="create a draft note in a workstream")
-    new_note.add_argument("title")
-    new_note.add_argument("--workstream", required=True)
+    new_note.add_argument("title", help="note title")
+    new_note.add_argument("--workstream", required=True, help="existing workstream directory, e.g. notes")
     new_note.add_argument("--owner", help="default: policy defaults.owner")
-    new_note.add_argument("--type", choices=("strategy", "research", "framework", "specification", "guide", "reference"), default="guide", dest="doc_type")
-    new_note.add_argument("--sensitivity", choices=("public", "internal", "confidential", "restricted"), help="default: policy defaults.sensitivity")
-    new_note.add_argument("--link-from", help="vault-relative Markdown map to link the new note from")
-    new_note.add_argument("--json", action="store_true")
+    new_note.add_argument("--type", choices=("strategy", "research", "framework", "specification", "guide", "reference"), default="guide", dest="doc_type", help="document type (default: %(default)s)")
+    new_note.add_argument("--sensitivity", choices=SENSITIVITIES, help="default: policy defaults.sensitivity")
+    new_note.add_argument("--link-from", metavar="PATH", help="vault-relative Markdown map to link the new note from")
+    new_note.add_argument("--json", action="store_true", help=JSON_HELP)
     new_note.set_defaults(func=cmd_new)
 
     status = sub.add_parser("status", help="summarize vault health and review queue")
-    status.add_argument("--root")
-    status.add_argument("--json", action="store_true")
-    status.add_argument("--today")
-    status.add_argument("--due-days", type=int, help="default: policy defaults.status_due_days")
-    status.add_argument("--strict", action="store_true")
+    status.add_argument("--root", help=ROOT_HELP)
+    status.add_argument("--json", action="store_true", help=JSON_HELP)
+    status.add_argument("--today", help=TODAY_HELP)
+    status.add_argument("--due-days", type=int, metavar="N", help="review window in days (default: policy defaults.status_due_days)")
+    status.add_argument("--strict", action="store_true", help="exit 1 when anything needs attention")
     status.set_defaults(func=cmd_status)
 
     graph = sub.add_parser("graph", help="export the vault wikilink graph")
-    graph.add_argument("--root")
-    graph.add_argument("--format", choices=("json", "dot", "obsidian"), default="json")
-    graph.add_argument("--canonical-only", action="store_true")
-    graph.add_argument("--output", help="write inside the vault (e.g. .whykit/graph.json)")
+    graph.add_argument("--root", help=ROOT_HELP)
+    graph.add_argument("--format", choices=("json", "dot", "mermaid", "obsidian"), default=None, help="output format (default: json)")
+    graph.add_argument("--json", action="store_true", help="shorthand for --format json")
+    graph.add_argument("--canonical-only", action="store_true", help="only include canonical documents")
+    graph.add_argument("--output", metavar="PATH", help="write inside the vault (e.g. .whykit/graph.json) instead of stdout")
     graph.set_defaults(func=cmd_graph)
 
     backlinks = sub.add_parser("backlinks", help="list inbound links to a note, decision or evidence ID")
-    backlinks.add_argument("target")
-    backlinks.add_argument("--root")
-    backlinks.add_argument("--json", action="store_true")
+    backlinks.add_argument("target", help="vault-relative path, D-NNN or E-NNN")
+    backlinks.add_argument("--root", help=ROOT_HELP)
+    backlinks.add_argument("--json", action="store_true", help=JSON_HELP)
     backlinks.set_defaults(func=cmd_backlinks)
 
     impact = sub.add_parser("impact", help="show what depends on evidence, a decision or a document")
-    impact.add_argument("target")
-    impact.add_argument("--root")
-    impact.add_argument("--json", action="store_true")
+    impact.add_argument("target", help="vault-relative path, D-NNN or E-NNN")
+    impact.add_argument("--root", help=ROOT_HELP)
+    impact.add_argument("--json", action="store_true", help=JSON_HELP)
     impact.set_defaults(func=cmd_impact)
 
+    trace = sub.add_parser("trace", help="trace decisions to their evidence and flag missing, retired or stale sources")
+    trace.add_argument("--root", help=ROOT_HELP)
+    trace.add_argument("--decision", metavar="D-NNN", help="trace only this decision")
+    trace.add_argument("--today", help="evaluate evidence age as of this YYYY-MM-DD date instead of today")
+    trace.add_argument("--max-age-days", type=int, metavar="N", help="treat evidence as stale after N days when policy has no age for its type")
+    trace.add_argument("--gaps-only", action="store_true", help="list only live decisions with gaps")
+    trace.add_argument("--strict", action="store_true", help="exit 1 when any live decision has a gap")
+    trace.add_argument("--json", action="store_true", help=JSON_HELP)
+    trace.set_defaults(func=cmd_trace)
+
     query = sub.add_parser("query", help="query notes by text, metadata and evidence")
-    query.add_argument("text", nargs="?")
-    query.add_argument("--root")
-    query.add_argument("--type", dest="doc_type")
-    query.add_argument("--status")
-    query.add_argument("--owner")
-    query.add_argument("--sensitivity")
-    query.add_argument("--source", dest="source_id")
-    query.add_argument("--tag")
-    query.add_argument("--canonical-only", action="store_true")
-    query.add_argument("--limit", type=int, default=100)
-    query.add_argument("--json", action="store_true")
+    query.add_argument("text", nargs="?", help="free-text search (optional)")
+    query.add_argument("--root", help=ROOT_HELP)
+    query.add_argument("--type", dest="doc_type", help="filter by document type")
+    query.add_argument("--status", help="filter by status")
+    query.add_argument("--owner", help="filter by owner")
+    query.add_argument("--sensitivity", help="filter by sensitivity")
+    query.add_argument("--source", dest="source_id", metavar="E-NNN", help="only records citing this evidence ID")
+    query.add_argument("--tag", help="filter by tag")
+    query.add_argument("--canonical-only", action="store_true", help="only canonical documents")
+    query.add_argument("--limit", type=int, default=100, metavar="N", help="maximum results (default: %(default)s)")
+    query.add_argument("--json", action="store_true", help=JSON_HELP)
     query.set_defaults(func=cmd_query)
 
     context = sub.add_parser("context", help="build an evidence-aware context pack for one target")
-    context.add_argument("target")
-    context.add_argument("--root")
-    context.add_argument("--max-chars", type=int, default=20_000)
-    context.add_argument("--no-body", action="store_true")
-    context.add_argument("--json", action="store_true")
+    context.add_argument("target", help="vault-relative path, D-NNN or E-NNN")
+    context.add_argument("--root", help=ROOT_HELP)
+    context.add_argument("--max-chars", type=int, default=20_000, metavar="N", help="body character budget (default: %(default)s)")
+    context.add_argument("--no-body", action="store_true", help="omit the document body")
+    context.add_argument("--json", action="store_true", help=JSON_HELP)
     context.set_defaults(func=cmd_context)
 
     pack = sub.add_parser("pack", help="build a bounded multi-record context bundle")
-    pack.add_argument("targets", nargs="*")
-    pack.add_argument("--root")
-    pack.add_argument("--query")
-    pack.add_argument("--max-docs", type=int, default=8)
-    pack.add_argument("--max-chars", type=int, default=30_000)
-    pack.add_argument("--canonical-only", action="store_true")
-    pack.add_argument("--format", choices=("json", "markdown"), default="json")
-    pack.add_argument("--for", dest="agent", choices=("generic", "cursor", "claude", "codex"), default="generic")
+    pack.add_argument("targets", nargs="*", help="vault-relative paths, D-NNN or E-NNN")
+    pack.add_argument("--root", help=ROOT_HELP)
+    pack.add_argument("--query", help="add records matching this text query")
+    pack.add_argument("--max-docs", type=int, default=8, metavar="N", help="maximum records (default: %(default)s)")
+    pack.add_argument("--max-chars", type=int, default=30_000, metavar="N", help="total body character budget (default: %(default)s)")
+    pack.add_argument("--canonical-only", action="store_true", help="only canonical documents")
+    pack.add_argument("--format", choices=("json", "markdown"), default=None, help="output format (default: json)")
+    pack.add_argument("--json", action="store_true", help="shorthand for --format json")
+    pack.add_argument("--for", dest="agent", choices=("generic", "cursor", "claude", "codex"), default="generic", help="tailor the preamble to an agent host (default: %(default)s)")
     pack.set_defaults(func=cmd_pack)
 
     review = sub.add_parser("review", help="list review work or record a review event")
-    review.add_argument("--root")
-    review_sub = review.add_subparsers(dest="review_command", required=True)
+    review.add_argument("--root", help=ROOT_HELP)
+    review_sub = review.add_subparsers(dest="review_command", required=True, metavar="<action>", title="actions")
     review_list = review_sub.add_parser("list", help="show upcoming/overdue reviews")
-    review_list.add_argument("--today")
-    review_list.add_argument("--due-days", type=int)
-    review_list.add_argument("--owner")
-    review_list.add_argument("--overdue-only", action="store_true")
-    review_list.add_argument("--json", action="store_true")
+    review_list.add_argument("--today", help=TODAY_HELP)
+    review_list.add_argument("--due-days", type=int, metavar="N", help="review window in days (default: policy)")
+    review_list.add_argument("--owner", help="only reviews owned by this person")
+    review_list.add_argument("--overdue-only", action="store_true", help="hide reviews that are not yet due")
+    review_list.add_argument("--json", action="store_true", help=JSON_HELP)
     review_list.set_defaults(func=cmd_review)
     review_record = review_sub.add_parser("record", help="record a review event")
-    review_record.add_argument("target")
-    review_record.add_argument("--reviewer", required=True)
-    review_record.add_argument("--outcome", choices=("confirmed", "update-required", "supersede-required", "archived"), default="confirmed")
-    review_record.add_argument("--next-review")
-    review_record.add_argument("--note", default="", dest="note_text")
-    review_record.add_argument("--today")
-    review_record.add_argument("--json", action="store_true")
+    review_record.add_argument("target", help="vault-relative path or D-NNN")
+    review_record.add_argument("--reviewer", required=True, help="who performed the review")
+    review_record.add_argument("--outcome", choices=("confirmed", "update-required", "supersede-required", "archived"), default="confirmed", help="review result (default: %(default)s)")
+    review_record.add_argument("--next-review", metavar="YYYY-MM-DD", help="next review date")
+    review_record.add_argument("--note", default="", dest="note_text", help="short note for the review log")
+    review_record.add_argument("--today", help="record the review as of this YYYY-MM-DD date")
+    review_record.add_argument("--json", action="store_true", help=JSON_HELP)
     review_record.set_defaults(func=cmd_review)
 
     snapshot = sub.add_parser("snapshot", help="create a deterministic vault snapshot")
-    snapshot.add_argument("--root")
-    snapshot.add_argument("--today")
-    snapshot.add_argument("--output")
-    snapshot.add_argument("--compact", action="store_true")
+    snapshot.add_argument("--root", help=ROOT_HELP)
+    snapshot.add_argument("--today", help=TODAY_HELP)
+    snapshot.add_argument("--output", metavar="PATH", help="write the JSON snapshot here instead of stdout")
+    snapshot.add_argument("--compact", action="store_true", help="emit compact JSON")
     snapshot.set_defaults(func=cmd_snapshot)
 
     verify_snapshot = sub.add_parser("verify-snapshot", help="compare the vault with a prior snapshot")
-    verify_snapshot.add_argument("snapshot")
-    verify_snapshot.add_argument("--root")
-    verify_snapshot.add_argument("--today")
-    verify_snapshot.add_argument("--json", action="store_true")
+    verify_snapshot.add_argument("snapshot", help="baseline snapshot JSON (relative paths resolve against the vault root)")
+    verify_snapshot.add_argument("--root", help=ROOT_HELP)
+    verify_snapshot.add_argument("--today", help=TODAY_HELP)
+    verify_snapshot.add_argument("--json", action="store_true", help=JSON_HELP)
     verify_snapshot.set_defaults(func=cmd_verify_snapshot)
 
     check = sub.add_parser("check", help="run a local/CI/release policy gate")
-    check.add_argument("--root")
-    check.add_argument("--profile", default="ci")
-    check.add_argument("--base")
-    check.add_argument("--head", default="HEAD")
-    check.add_argument("--today")
-    check.add_argument("--json", action="store_true")
+    check.add_argument("--root", help=ROOT_HELP)
+    check.add_argument("--profile", default="ci", help="policy profile: local, ci, release or a custom one (default: %(default)s)")
+    check.add_argument("--base", metavar="REF", help="base Git ref for the immutable-history check")
+    check.add_argument("--head", default="HEAD", metavar="REF", help="head Git ref (default: %(default)s)")
+    check.add_argument("--today", help=TODAY_HELP)
+    check.add_argument("--json", action="store_true", help=JSON_HELP)
     check.set_defaults(func=cmd_check)
 
     policy = sub.add_parser("policy", help="show the effective repository-local policy")
-    policy.add_argument("--root")
-    policy.add_argument("--json", action="store_true")
+    policy.add_argument("--root", help=ROOT_HELP)
+    policy.add_argument("--json", action="store_true", help=JSON_HELP)
     policy.set_defaults(func=cmd_policy)
 
     evidence = sub.add_parser("evidence", help="inspect and manage evidence lifecycle")
-    evidence.add_argument("--root")
-    evidence_sub = evidence.add_subparsers(dest="evidence_command", required=True)
+    evidence.add_argument("--root", help=ROOT_HELP)
+    evidence_sub = evidence.add_subparsers(dest="evidence_command", required=True, metavar="<action>", title="actions")
     evidence_list = evidence_sub.add_parser("list", help="list evidence rows")
-    evidence_list.add_argument("--state", choices=("all", "active", "retired"), default="all")
-    evidence_list.add_argument("--json", action="store_true")
+    evidence_list.add_argument("--state", choices=("all", "active", "retired"), default="all", help="which rows to list (default: %(default)s)")
+    evidence_list.add_argument("--json", action="store_true", help=JSON_HELP)
     evidence_list.set_defaults(func=cmd_evidence)
     evidence_retire = evidence_sub.add_parser("retire", help="retire active evidence")
-    evidence_retire.add_argument("id")
-    evidence_retire.add_argument("--why", required=True, dest="reason")
-    evidence_retire.add_argument("--replaced-by")
-    evidence_retire.add_argument("--today")
-    evidence_retire.add_argument("--json", action="store_true")
+    evidence_retire.add_argument("id", metavar="E-NNN", help="evidence ID to retire")
+    evidence_retire.add_argument("--why", required=True, dest="reason", help="why the evidence no longer holds")
+    evidence_retire.add_argument("--replaced-by", metavar="E-NNN", help="evidence that supersedes it")
+    evidence_retire.add_argument("--today", help="retire as of this YYYY-MM-DD date")
+    evidence_retire.add_argument("--json", action="store_true", help=JSON_HELP)
     evidence_retire.set_defaults(func=cmd_evidence)
 
     adopt = sub.add_parser("adopt", help="inventory existing Markdown and stage it for a vault")
-    adopt.add_argument("source")
-    adopt.add_argument("--into")
-    adopt.add_argument("--owner", default="TODO")
-    adopt.add_argument("--profile", choices=("generic", "adr-only", "obsidian-loose"), default="generic")
-    adopt.add_argument("--write", action="store_true")
-    adopt.add_argument("--json", action="store_true")
+    adopt.add_argument("source", help="directory of existing Markdown to inventory")
+    adopt.add_argument("--into", metavar="VAULT", help="vault to stage into (default: nearest vault)")
+    adopt.add_argument("--owner", default="TODO", help="owner for adopted notes (default: %(default)s)")
+    adopt.add_argument("--profile", choices=("generic", "adr-only", "obsidian-loose"), default="generic", help="how to interpret the source (default: %(default)s)")
+    adopt.add_argument("--write", action="store_true", help="write the staged files (default: dry run)")
+    adopt.add_argument("--json", action="store_true", help=JSON_HELP)
     adopt.set_defaults(func=cmd_adopt)
 
     history = sub.add_parser("history", help="verify that accepted decisions were not rewritten")
-    history.add_argument("--base", required=True, help="base commit or ref")
-    history.add_argument("--head", default="HEAD")
-    history.add_argument("--root")
+    history.add_argument("--base", required=True, metavar="REF", help="base commit or ref, e.g. origin/main")
+    history.add_argument("--head", default="HEAD", metavar="REF", help="head commit or ref (default: %(default)s)")
+    history.add_argument("--root", help=ROOT_HELP)
+    history.add_argument("--json", action="store_true", help=JSON_HELP)
     history.set_defaults(func=cmd_history)
 
-
     rules = sub.add_parser("rules", help="list lint rules or explain one rule code")
-    rules.add_argument("code", nargs="?")
-    rules.add_argument("--json", action="store_true")
+    rules.add_argument("code", nargs="?", help="rule code to explain, e.g. evidence.unknown_id")
+    rules.add_argument("--json", action="store_true", help=JSON_HELP)
     rules.add_argument("--markdown", action="store_true", help="emit the complete Markdown table")
     rules.set_defaults(func=cmd_rules)
 
     doctor = sub.add_parser("doctor", help="check prerequisites and vault integrity")
-    doctor.add_argument("--root")
-    doctor.add_argument("--json", action="store_true")
+    doctor.add_argument("--root", help=ROOT_HELP)
+    doctor.add_argument("--json", action="store_true", help=JSON_HELP)
     doctor.set_defaults(func=cmd_doctor)
 
     hooks = sub.add_parser("install-hooks", help="install the pre-commit vault check")
-    hooks.add_argument("--root")
+    hooks.add_argument("--root", help=ROOT_HELP)
     hooks.add_argument("--force", action="store_true", help="replace an existing pre-commit hook")
     hooks.set_defaults(func=cmd_install_hooks)
 
@@ -955,24 +1040,81 @@ def build_parser() -> argparse.ArgumentParser:
         "explorer-index",
         help="export the Explorer vault index from the canonical Python parser",
     )
-    explorer_index.add_argument("--root")
-    explorer_index.add_argument("--today", help="evaluate lint review dates as of this ISO date")
-    explorer_index.add_argument("--json", action="store_true", default=True)
+    explorer_index.add_argument("--root", help=ROOT_HELP)
+    explorer_index.add_argument("--today", help=TODAY_HELP)
+    explorer_index.add_argument("--json", action="store_true", default=True, help="accepted for symmetry; output is always JSON")
     explorer_index.set_defaults(func=cmd_explorer_index)
 
     serve = sub.add_parser("serve", help="run the optional Explorer (source checkout only)")
-    serve.add_argument("vault", nargs="?", default=".")
-    serve.add_argument("--host", default="127.0.0.1")
-    serve.add_argument("--port", type=int, default=5173)
+    serve.add_argument("vault", nargs="?", default=".", help="vault to serve (default: current directory)")
+    serve.add_argument("--host", default="127.0.0.1", help="interface to bind (default: %(default)s)")
+    serve.add_argument("--port", type=int, default=5173, help="port to listen on (default: %(default)s)")
     serve.add_argument("--allow-sensitive-network", action="store_true", help="allow non-loopback serving even when non-public docs are present")
     serve.set_defaults(func=cmd_serve)
+
+    completion = sub.add_parser(
+        "completion",
+        help="print a shell completion script",
+        description="Print a completion script for your shell.",
+        epilog=COMPLETION_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    completion.add_argument("shell", choices=SHELLS, help="target shell")
+    completion.set_defaults(func=cmd_completion)
 
     return parser
 
 
+COMPLETION_EPILOG = """\
+install:
+  bash  eval "$(whykit completion bash)"        # add to ~/.bashrc
+  zsh   eval "$(whykit completion zsh)"         # add to ~/.zshrc
+  fish  whykit completion fish > ~/.config/fish/completions/whykit.fish"""
+
+
+def cmd_completion(args: argparse.Namespace) -> int:
+    print(render_completion(build_parser(), args.shell), end="")
+    return 0
+
+
+def _describe_os_error(exc: OSError) -> str:
+    reason = exc.strerror or exc.__class__.__name__
+    if exc.filename is not None and exc.filename2 is not None:
+        return f"{reason}: {exc.filename} -> {exc.filename2}"
+    if exc.filename is not None:
+        return f"{reason}: {exc.filename}"
+    return str(exc) or reason
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    return args.func(args)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    func = getattr(args, "func", None)
+    if func is None:
+        parser.print_help(sys.stderr)
+        return 2
+    try:
+        return func(args)
+    except KeyboardInterrupt:
+        print("interrupted", file=sys.stderr)
+        return 130
+    except BrokenPipeError:
+        # The reader went away (`whykit query | head`). Point stdout at devnull
+        # so the interpreter's final flush does not print a second traceback.
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+        except (OSError, ValueError):
+            pass
+        return 1
+    except OSError as exc:
+        # A filesystem refusal is a user-facing condition, not a crash.
+        # WHYKIT_DEBUG=1 restores the traceback for bug reports.
+        if os.environ.get("WHYKIT_DEBUG"):
+            raise
+        print(f"cannot complete `whykit {args.command}`: {_describe_os_error(exc)}", file=sys.stderr)
+        print("hint: check the path and its permissions; set WHYKIT_DEBUG=1 for a traceback", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

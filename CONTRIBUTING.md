@@ -10,10 +10,13 @@ Contributions should preserve the invariant that Markdown is the canonical data.
 | `src/whykit/` | CLI, linter, history check, adopt |
 | `src/whykit/template/` | The vault `whykit init` writes |
 | `schemas/` | The data contract for integrations |
-| `examples/northline/` | Worked example vault, linted strictly in CI |
+| `examples/tiny/` | Smallest example vault, same layout as `whykit init` |
+| `examples/northline/` | Fully linked synthetic example vault, linted strictly in CI |
+| `docs/` | User documentation |
+| `apps/explorer/` | Optional read-only viewer |
 | `tests/` | Regression suite |
 
-The repository is not itself a vault. `examples/northline/` and a freshly
+The repository is not itself a vault. The two example vaults and a freshly
 generated vault are what CI checks.
 
 ## Before opening a pull request
@@ -23,6 +26,9 @@ Requires [uv](https://docs.astral.sh/uv/). From the repository root:
 ```bash
 uv sync --locked
 uv run python -m unittest discover -s tests -v
+uv run ruff check
+uv run mypy
+uv run zizmor --offline .   # when touching .github/ or action.yml
 uv run whykit lint examples/northline --strict --today 2026-09-17
 fresh_parent="$(mktemp -d)"
 fresh_vault="$fresh_parent/vault"
@@ -57,6 +63,15 @@ npm ci --prefix apps/explorer
 npm --prefix apps/explorer run check
 npm --prefix apps/explorer run build
 ```
+
+## Changing documentation
+
+Documentation is tested like code. `tests/test_docs.py` parses every `whykit`
+command in the README, `CONTRIBUTING.md`, `docs/` and the example READMEs against
+the real argument parser, executes the README quickstart in a temporary
+directory, and checks that relative links resolve. If you document a new flag or
+command, that test tells you when the docs and the CLI disagree. Write commands
+the way a reader will type them, and use reserved example domains.
 
 ## Good contribution areas
 

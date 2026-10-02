@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .messages import print_no_vault
 from .context import build_context
 from .lint import find_vault_root, is_vault_root
 from .query import query_vault
@@ -52,6 +53,16 @@ AGENT_PREAMBLES = {
 }
 
 
+def _allowed(context: dict[str, Any], allowed: set[str] | None) -> bool:
+    if allowed is None:
+        return True
+    # Evidence-register rows carry no sensitivity of their own and inherit the
+    # register's `internal` classification; so do documents without the key.
+    record = context.get("record") if context.get("kind") != "evidence" else None
+    level = str((record or {}).get("sensitivity") or "internal").lower()
+    return level in allowed
+
+
 def build_pack(
     root: Path,
     *,
@@ -61,7 +72,15 @@ def build_pack(
     max_chars: int = 30_000,
     canonical_only: bool = False,
     agent: str | None = None,
+    allowed_sensitivities: set[str] | None = None,
 ) -> dict[str, Any]:
+    """Assemble a bounded bundle of contexts for *targets* and/or *query*.
+
+    ``allowed_sensitivities`` restricts which records may enter the bundle.
+    A record outside that set is reported exactly like a missing target and
+    is rejected before it consumes any of the body budget, so the budget
+    figures cannot be used to infer the size of a hidden document.
+    """
     explicit = [value.strip() for value in (targets or []) if value.strip()]
     selected: list[tuple[str, str]] = [(target, "explicit") for target in explicit]
     vault = VaultIndex.load(root)
@@ -71,6 +90,7 @@ def build_pack(
             root,
             text=query,
             canonical_only=canonical_only,
+            allowed_sensitivities=allowed_sensitivities,
             limit=max_docs,
             vault=vault,
         )
@@ -104,6 +124,8 @@ def build_pack(
             include_body=allowance > 0,
             vault=vault,
         )
+        if context.get("exists") and not _allowed(context, allowed_sensitivities):
+            context = {"exists": False, "ambiguous": False}
         if not context.get("exists"):
             missing.append({
                 "target": target,
@@ -233,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
 
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
 
     report = build_pack(

@@ -13,9 +13,11 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "scripts" / "whykit.py"
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from whykit.mcp_server import filter_report  # noqa: E402
 from whykit.query import query_vault  # noqa: E402
+from _vaults import fresh_vault  # noqa: E402
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
@@ -52,7 +54,7 @@ class McpSensitivityTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.vault = Path(self.tmp.name) / "vault"
-        self.assertEqual(run("init", "--minimal", str(self.vault)).returncode, 0)
+        fresh_vault(self.vault, "--minimal")
         _write_doc(
             self.vault,
             "notes/public-note.md",
@@ -169,36 +171,63 @@ class McpSensitivityTests(unittest.TestCase):
         self.assertNotIn("unclassified-evidence-sentinel", json.dumps(filtered))
 
     def test_server_build_uses_the_current_mcp_sdk_server_api(self) -> None:
-        registered_tools: dict[str, object] = {}
+        registered_tools: dict[str, tuple[object, dict]] = {}
 
         class SDKServer:
-            def __init__(self, name: str) -> None:
+            def __init__(self, name: str, **kwargs: object) -> None:
                 self.name = name
+                self.instructions = kwargs.get("instructions")
 
-            def tool(self):
+            def tool(self, **kwargs: object):
                 def register(function):
-                    registered_tools[function.__name__] = function
+                    registered_tools[function.__name__] = (function, kwargs)
                     return function
 
                 return register
+
+        class Model:
+            def __init__(self, **kwargs: object) -> None:
+                self.__dict__.update(kwargs)
 
         package = types.ModuleType("mcp")
         package.__path__ = []  # type: ignore[attr-defined]
         server_package = types.ModuleType("mcp.server")
         server_package.__path__ = []  # type: ignore[attr-defined]
         server_package.MCPServer = SDKServer  # type: ignore[attr-defined]
+        mcp_types = types.ModuleType("mcp_types")
+        for name in ("CallToolResult", "TextContent", "ToolAnnotations"):
+            setattr(mcp_types, name, type(name, (Model,), {}))
+        pydantic = types.ModuleType("pydantic")
+        pydantic.Field = lambda **kwargs: kwargs  # type: ignore[attr-defined]
 
         with patch.dict(sys.modules, {
             "mcp": package,
             "mcp.server": server_package,
+            "mcp_types": mcp_types,
+            "pydantic": pydantic,
         }):
             from whykit.mcp_server import build_server
 
             server = build_server(self.vault)
+            function, options = registered_tools["context"]
+            hidden = function(target="notes/restricted-secret")
+            traversal = function(target="../../etc/passwd")
 
         self.assertEqual(server.name, "whykit")
-        self.assertEqual(set(registered_tools), {"query", "context", "impact"})
-
+        self.assertIn("untrusted", server.instructions)
+        self.assertEqual(set(registered_tools), {"query", "context", "impact", "status", "pack"})
+        for name, (_, options) in registered_tools.items():
+            with self.subTest(tool=name):
+                annotations = options["annotations"]
+                self.assertTrue(annotations.read_only_hint)
+                self.assertFalse(annotations.destructive_hint)
+                self.assertFalse(annotations.open_world_hint)
+                self.assertTrue(options["title"])
+        self.assertFalse(hidden.is_error)
+        self.assertFalse(hidden.structured_content["exists"])
+        self.assertEqual(json.loads(hidden.content[0].text), hidden.structured_content)
+        self.assertTrue(traversal.is_error)
+        self.assertEqual(traversal.structured_content["error"]["code"], "invalid_target")
 
 if __name__ == "__main__":
     unittest.main()

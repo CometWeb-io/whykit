@@ -6,40 +6,45 @@ import json
 import sys
 from pathlib import Path
 
+from .messages import print_no_vault
 from .graph import build_graph
 from .lint import (
     DECISION_ID_RE,
     EVIDENCE_ID_RE,
     find_vault_root,
     is_vault_root,
-    rel,
 )
 from .vault_index import VaultIndex
 
 
 def _normalize_target(root: Path, target: str, vault: VaultIndex) -> tuple[str, str]:
-    """Return (kind, graph_id) for a CLI target."""
+    """Return (kind, graph_id) for a CLI target.
+
+    Documents resolve exactly as wikilinks do, so a bare stem or an alias finds
+    the note wherever it lives instead of being looked up as a root-level path.
+    """
     raw = target.strip()
     if EVIDENCE_ID_RE.fullmatch(raw):
         return "evidence", f"evidence:{raw}"
     if DECISION_ID_RE.fullmatch(raw):
         for note in vault.notes:
             if str(note.front.get("decision_id") or "").strip() == raw:
-                return "decision", rel(root, note.path).removesuffix(".md")
+                return "decision", vault.relative(note.path).removesuffix(".md")
         return "decision", raw
-    path = Path(raw)
-    if not path.is_absolute():
-        path = root / path
-    if path.suffix.lower() == ".md" and path.is_file():
-        return "document", rel(root, path).removesuffix(".md")
-    # Stem / alias / vault-relative without suffix.
-    cleaned = raw.removesuffix(".md")
-    return "document", cleaned
+    path = Path(raw).expanduser()
+    if path.is_absolute():
+        if path.suffix.lower() == ".md" and path.is_file() and vault.note_for(path) is not None:
+            return "document", vault.relative(path).removesuffix(".md")
+        return "document", raw.removesuffix(".md")
+    resolved, ambiguous = vault.resolve_link(raw)
+    if resolved is not None and not ambiguous:
+        return "document", vault.relative(resolved).removesuffix(".md")
+    return "document", raw.removesuffix(".md")
 
 
-def build_backlinks(root: Path, target: str) -> dict:
+def build_backlinks(root: Path, target: str, *, vault: VaultIndex | None = None) -> dict:
     root = root.resolve()
-    vault = VaultIndex.load(root)
+    vault = vault or VaultIndex.load(root)
     kind, node_id = _normalize_target(root, target, vault)
     graph = build_graph(root, vault=vault)
     known = {node["id"] for node in graph["nodes"]}
@@ -73,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
     report = build_backlinks(root, args.target)
     if args.json:

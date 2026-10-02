@@ -112,7 +112,7 @@ WhyKit exposes bounded, versioned machine-readable surfaces instead of requiring
 an agent to ingest the whole vault for every task:
 
 ```bash
-whykit new note "Research" --workstream 07-research --link-from Home.md --json
+whykit new note "Research" --workstream notes --link-from Home.md --json
 whykit lint --json --quiet              # deterministic structural findings
 whykit status --json                    # counts + due review queue
 whykit query "pricing" --json           # discovery/filtering
@@ -120,6 +120,7 @@ whykit context D-018 --json             # bounded context pack around one target
 whykit pack D-018 --query "pricing"      # budgeted multi-record context bundle
 whykit graph --format json              # typed bulk topology
 whykit impact E-018 --json              # reverse dependency / blast radius
+whykit trace --gaps-only --json         # decisions resting on missing/retired/stale evidence
 whykit evidence list --json             # active + retired evidence lifecycle
 whykit review list --json               # operational review queue
 whykit snapshot --compact               # immutable content fingerprint

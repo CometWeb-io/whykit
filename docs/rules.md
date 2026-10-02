@@ -45,11 +45,13 @@
 | `evidence.retired` | warning | A document cites retired evidence. | Review the claim and cite the replacement where appropriate. |
 | `evidence.retired_date` | error | A retired evidence row has an invalid retirement date. | Use a real YYYY-MM-DD date. |
 | `fact.inline_evidence` | warning | A fact callout has no inline E-NNN citation. | Add an E-NNN in the callout. |
+| `fact.evidence_missing` | warning | A fact callout cites an E-NNN with no populated register row. | Register the source or correct the cited ID. |
 | `frontmatter.invalid` | error | YAML front matter cannot be parsed. | Fix the front matter syntax. |
+| `frontmatter.empty` | warning | A required metadata key is present but has no value. | Fill in the value, or use the documented placeholder in templates. |
 | `frontmatter.missing` | error | A governed note has no YAML front matter. | Add the standard WhyKit front matter block. |
 | `frontmatter.required` | error | A required metadata key is missing. | Add the named key. |
-| `markdown_link.missing` | warning | A relative Markdown link points to a missing local file. | Fix the relative path or remove the stale link. |
-| `markdown_link.outside` | warning | A relative Markdown link resolves outside the vault. | Keep the asset/note inside the vault or use an explicit external URL/evidence location. |
+| `markdown_link.missing` | warning | A relative Markdown link or image points to a missing local file. | Fix the relative path or remove the stale link. |
+| `markdown_link.outside` | warning | A relative Markdown link or image resolves outside the vault. | Keep the asset/note inside the vault or use an explicit external URL/evidence location. |
 | `note.orphan` | warning | Nothing in the vault links to this note. | Link it from Home.md or a workstream map. |
 | `review_log.date` | error | A review-log row has an invalid date. | Use a real YYYY-MM-DD date. |
 | `review_log.next_review` | error | A review-log row has an invalid next-review date. | Use YYYY-MM-DD or an em dash when no next review applies. |
@@ -66,6 +68,7 @@
 | `secret.scan_skipped_large_file` | error | A text asset is larger than the built-in secret scanner limit. | Scan the file externally, exclude it explicitly, or split it into smaller governed assets. |
 | `secret.scan_unreadable` | error | A secret-scan candidate could not be read. | Fix permissions or exclude the path explicitly after an external scan. |
 | `sensitivity.invalid` | error | sensitivity uses an unsupported label. | Use public, internal, confidential or restricted. |
+| `source_of_truth.invalid` | warning | source_of_truth is not a boolean. | Use source_of_truth: true or source_of_truth: false. |
 | `status.invalid` | error | status uses an unsupported lifecycle value. | Use template, draft, in_review, approved, superseded or archived. |
 | `type.invalid` | error | type uses an unsupported document type. | Use a documented WhyKit type. |
 | `wikilink.ambiguous` | error | A wikilink matches multiple notes. | Use a vault-relative path rather than a bare stem/alias. |

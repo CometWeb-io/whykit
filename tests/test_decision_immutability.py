@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,11 +32,11 @@ class DecisionImmutabilityTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def check(self) -> subprocess.CompletedProcess[str]:
-        return run("python3", str(SCRIPT), "history", "--base", self.base, "--head", "HEAD", cwd=self.root)
+        return run(sys.executable, str(SCRIPT), "history", "--base", self.base, "--head", "HEAD", cwd=self.root)
 
     def test_approved_record_cannot_be_rewritten(self) -> None:
         p = self.root / "06-decisions/d-001-accepted.md"
-        p.write_text(p.read_text() + "changed\n")
+        p.write_text(p.read_text(encoding="utf-8") + "changed\n")
         run("git", "add", ".", cwd=self.root)
         run("git", "commit", "-qm", "rewrite", cwd=self.root)
         proc = self.check()
@@ -44,7 +45,7 @@ class DecisionImmutabilityTests(unittest.TestCase):
 
     def test_draft_record_remains_editable(self) -> None:
         p = self.root / "06-decisions/d-002-draft.md"
-        p.write_text(p.read_text() + "changed\n")
+        p.write_text(p.read_text(encoding="utf-8") + "changed\n")
         run("git", "add", ".", cwd=self.root)
         run("git", "commit", "-qm", "edit draft", cwd=self.root)
         proc = self.check()
@@ -101,10 +102,10 @@ class DecisionImmutabilityQuotedStatusTests(unittest.TestCase):
         tmp, root, base = self._repo_with_status('status: "approved"')
         try:
             p = root / "06-decisions/d-001-accepted.md"
-            p.write_text(p.read_text() + "changed\n")
+            p.write_text(p.read_text(encoding="utf-8") + "changed\n")
             run("git", "add", ".", cwd=root)
             run("git", "commit", "-qm", "rewrite", cwd=root)
-            proc = run("python3", str(SCRIPT), "history", "--base", base, "--head", "HEAD", cwd=root)
+            proc = run(sys.executable, str(SCRIPT), "history", "--base", base, "--head", "HEAD", cwd=root)
             self.assertEqual(proc.returncode, 1, proc.stderr)
         finally:
             tmp.cleanup()
@@ -113,10 +114,10 @@ class DecisionImmutabilityQuotedStatusTests(unittest.TestCase):
         tmp, root, base = self._repo_with_status("status: approved # accepted by council")
         try:
             p = root / "06-decisions/d-001-accepted.md"
-            p.write_text(p.read_text() + "changed\n")
+            p.write_text(p.read_text(encoding="utf-8") + "changed\n")
             run("git", "add", ".", cwd=root)
             run("git", "commit", "-qm", "rewrite", cwd=root)
-            proc = run("python3", str(SCRIPT), "history", "--base", base, "--head", "HEAD", cwd=root)
+            proc = run(sys.executable, str(SCRIPT), "history", "--base", base, "--head", "HEAD", cwd=root)
             self.assertEqual(proc.returncode, 1, proc.stderr)
         finally:
             tmp.cleanup()
@@ -160,7 +161,7 @@ class NestedVaultImmutabilityTests(unittest.TestCase):
         run("git", "add", ".", cwd=self.repo)
         run("git", "commit", "-qm", "rewrite", cwd=self.repo)
         proc = run(
-            "python3",
+            sys.executable,
             str(SCRIPT),
             "history",
             "--base",

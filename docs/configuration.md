@@ -54,6 +54,7 @@ secrets = true
 require_git = true
 require_clean_tree = true
 require_configured = true
+require_hub_links = false
 history = "required"
 ```
 
@@ -160,14 +161,15 @@ Use the scaffold command instead of allocating IDs by hand:
 ```bash
 whykit new evidence \
   --source "Interview set" --type interview \
-  --location "07-research/interviews/" \
+  --location "notes/interviews/" \
   --claims "ICP pain is repeated across interviews"
 
 whykit new decision "Focus on one ICP" \
   --owner "Product" --source E-001
 
 whykit new note "Competitor review" \
-  --workstream 07-research --type research --owner "Research"
+  --workstream notes --type research --owner "Research" \
+  --link-from Home.md
 ```
 
 Retire evidence without deleting its stable ID:
@@ -178,6 +180,28 @@ whykit evidence retire E-012 \
   --why "Superseded by the corrected dataset" \
   --replaced-by E-019
 ```
+
+## Evidence access age
+
+Vaults with fast-changing sources can opt into access-age warnings per evidence
+type:
+
+```toml
+[evidence_access_age_days]
+analytics = 30
+"vendor doc" = 180
+```
+
+Keys are matched against the register's `Type` column. Lint compares each active
+row's `Accessed` date with `--today` (or today) and reports
+`evidence.access_stale` when the window has passed, `evidence.access_missing`
+when a covered row has no `Accessed` date, and `evidence.access_future` for dates
+after the lint date. Types you leave out (typically historic sources) are not
+checked.
+
+This is a warning, not proof that a source is still correct. Recent access is
+also not permission to publish a claim; publication approval belongs to the
+owner's claims or review workflow.
 
 ## Graph, query and bounded context
 

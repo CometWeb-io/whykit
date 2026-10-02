@@ -72,6 +72,17 @@ export function parseInline(input: string): MdInline[] {
   return out;
 }
 
+// Consecutive quoted lines form one paragraph; a bare `>` line separates them.
+function quoteParagraphs(lines: string[]): MdInline[][] {
+  const out: MdInline[][] = [];
+  let buf: string[] = [];
+  for (const line of [...lines, ""]) {
+    if (line.trim()) buf.push(line.trim());
+    else if (buf.length) { out.push(parseInline(buf.join(" "))); buf = []; }
+  }
+  return out;
+}
+
 function isTableSep(line: string) {
   return /^\|?\s*:?-{3,}/.test(line.trim());
 }
@@ -156,7 +167,7 @@ export function parseMarkdown(src: string): MdBlock[] {
         t: "callout",
         kind,
         title,
-        children: body.filter(Boolean).map(parseInline),
+        children: quoteParagraphs(body),
       });
       continue;
     }
@@ -167,7 +178,7 @@ export function parseMarkdown(src: string): MdBlock[] {
         body.push((lines[i] ?? "").replace(/^>\s?/, ""));
         i += 1;
       }
-      blocks.push({ t: "quote", children: body.filter(Boolean).map(parseInline) });
+      blocks.push({ t: "quote", children: quoteParagraphs(body) });
       continue;
     }
 
@@ -269,6 +280,23 @@ export function slugify(text: string) {
     .replace(/\p{M}+/gu, "")
     .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
     .replace(/(^-|-$)/g, "");
+}
+
+/**
+ * Heading ids for one document. Repeated headings get `-1`, `-2` suffixes so
+ * every in-page anchor stays unique and valid.
+ */
+export function createSlugger(): (text: string) => string {
+  const seen = new Map<string, number>();
+  return (text: string) => {
+    const base = slugify(text) || "section";
+    let n = seen.get(base) ?? 0;
+    let id = n ? `${base}-${n}` : base;
+    while (n && seen.has(id)) id = `${base}-${++n}`;
+    seen.set(base, n + 1);
+    seen.set(id, seen.get(id) ?? 1);
+    return id;
+  };
 }
 
 export function inlineText(nodes: MdInline[]): string {

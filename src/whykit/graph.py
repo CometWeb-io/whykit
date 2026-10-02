@@ -10,12 +10,12 @@ import json
 import sys
 from pathlib import Path
 
+from .messages import print_no_vault
 from .lint import (
     DECISION_ID_RE,
     EVIDENCE_ID_RE,
     WIKILINK_RE,
     _mask_code,
-    _resolve,
     evidence_register,
     find_vault_root,
     is_vault_root,
@@ -37,21 +37,32 @@ def build_graph(
         note for note in notes
         if not canonical_only or (note.front.get("source_of_truth") is True and note.front.get("status") == "approved")
     ]
-    index = vault_index.link_index
-    selected_paths = {note.path.resolve() for note in selected}
     nodes: list[dict] = []
     edges: list[dict] = []
     unresolved: list[dict] = []
     seen_edges: set[tuple[str, str, str]] = set()
     path_by_decision: dict[str, str] = {}
+    duplicate_decisions: set[str] = set()
+
+    def node_id(path: Path) -> str:
+        return vault_index.relative(path).removesuffix(".md")
 
     for note in notes:
         value = str(note.front.get("decision_id") or "").strip()
         if DECISION_ID_RE.fullmatch(value):
-            path_by_decision[value] = rel(root, note.path).removesuffix(".md")
+            if value in path_by_decision:
+                duplicate_decisions.add(value)
+            path_by_decision[value] = node_id(note.path)
+    selected_ids = {node_id(note.path) for note in selected}
+
+    def add_edge(source: str, destination: str, edge_type: str) -> None:
+        key = (source, destination, edge_type)
+        if key not in seen_edges:
+            seen_edges.add(key)
+            edges.append({"from": source, "to": destination, "type": edge_type})
 
     for note in selected:
-        source = rel(root, note.path).removesuffix(".md")
+        source = node_id(note.path)
         nodes.append({
             "id": source,
             "kind": "document",
@@ -67,7 +78,7 @@ def build_graph(
             target = match.group(1).strip()
             if not target or target.startswith(("http://", "https://")):
                 continue
-            resolved, ambiguous = _resolve(root, target, index)
+            resolved, ambiguous = vault_index.resolve_link(target)
             if resolved is None or ambiguous:
                 unresolved.append({
                     "from": source,
@@ -76,32 +87,25 @@ def build_graph(
                     "reason": "ambiguous" if ambiguous else "missing",
                 })
                 continue
-            if canonical_only and resolved.resolve() not in selected_paths:
+            destination = node_id(resolved)
+            if canonical_only and destination not in selected_ids:
                 continue
-            destination = rel(root, resolved).removesuffix(".md")
-            key = (source, destination, "wikilink")
-            if key not in seen_edges:
-                seen_edges.add(key)
-                edges.append({"from": source, "to": destination, "type": "wikilink"})
+            add_edge(source, destination, "wikilink")
 
         if source != "00-context/evidence-register":
             for evidence_id in sorted(set(EVIDENCE_ID_RE.findall(note.text))):
-                destination = f"evidence:{evidence_id}"
-                key = (source, destination, "evidence")
-                if key not in seen_edges:
-                    seen_edges.add(key)
-                    edges.append({"from": source, "to": destination, "type": "evidence"})
+                add_edge(source, f"evidence:{evidence_id}", "evidence")
 
         supersedes = str(note.front.get("supersedes") or "").strip()
         if DECISION_ID_RE.fullmatch(supersedes):
             destination = path_by_decision.get(supersedes)
-            if destination:
-                key = (source, destination, "supersedes")
-                if key not in seen_edges:
-                    seen_edges.add(key)
-                    edges.append({"from": source, "to": destination, "type": "supersedes"})
-            else:
+            if supersedes in duplicate_decisions:
+                unresolved.append({"from": source, "target": supersedes, "type": "supersedes", "reason": "ambiguous"})
+            elif destination is None:
                 unresolved.append({"from": source, "target": supersedes, "type": "supersedes", "reason": "missing"})
+            elif not canonical_only or destination in selected_ids:
+                # A canonical-only export must not point at a node it left out.
+                add_edge(source, destination, "supersedes")
 
     active, retired, _ = evidence_register(root)
     referenced_evidence = sorted({edge[1].split(":", 1)[1] for edge in seen_edges if edge[2] == "evidence"})
@@ -192,21 +196,71 @@ def as_dot(graph: dict) -> str:
     return "\n".join(lines)
 
 
+def _mermaid_label(value: str) -> str:
+    # Mermaid has no backslash escapes inside quoted labels; it uses HTML-style
+    # entity codes.  Newlines would end the statement, so they become spaces.
+    text = " ".join(str(value).split())
+    for raw, code in (("#", "#35;"), ('"', "#quot;"), ("<", "#lt;"), (">", "#gt;")):
+        text = text.replace(raw, code)
+    return text
+
+
+def as_mermaid(graph: dict) -> str:
+    """Render the graph as a Mermaid flowchart (GitHub and Obsidian render it inline).
+
+    Node IDs are generated (``n0``, ``n1``…) because vault paths contain
+    characters Mermaid treats as syntax; the path is kept in the label.
+    """
+    ids = {node["id"]: f"n{index}" for index, node in enumerate(graph["nodes"])}
+    lines = ["flowchart LR"]
+    for node in graph["nodes"]:
+        label = _mermaid_label(node.get("title") or node["id"])
+        if node.get("kind") == "evidence":
+            lines.append(f'  {ids[node["id"]]}(["{label}"])')
+        else:
+            lines.append(f'  {ids[node["id"]]}["{label}<br/><small>{_mermaid_label(node["id"])}</small>"]')
+    arrows = {"wikilink": "-->", "evidence": "-.->", "supersedes": "==>"}
+    for edge in graph["edges"]:
+        source, target = ids.get(edge["from"]), ids.get(edge["to"])
+        if source is None or target is None:
+            continue
+        edge_type = edge.get("type") or "wikilink"
+        lines.append(f"  {source} {arrows.get(edge_type, '-->')}|{edge_type}| {target}")
+    classes = {
+        "evidence": [ids[n["id"]] for n in graph["nodes"] if n.get("kind") == "evidence" and n.get("status") == "active"],
+        "unusable": [ids[n["id"]] for n in graph["nodes"] if n.get("kind") == "evidence" and n.get("status") != "active"],
+        "decision": [ids[n["id"]] for n in graph["nodes"] if n.get("kind") == "document" and n.get("decision_id")],
+    }
+    styles = {
+        "evidence": "stroke-dasharray: 4 2",
+        "unusable": "stroke-dasharray: 4 2,stroke:#b42318,color:#b42318",
+        "decision": "stroke-width:2px",
+    }
+    for name, members in classes.items():
+        if members:
+            lines.append(f"  classDef {name} {styles[name]}")
+            lines.append(f"  class {','.join(members)} {name}")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="whykit graph", description="Export typed WhyKit relations as JSON or Graphviz DOT.")
+    parser = argparse.ArgumentParser(prog="whykit graph", description="Export typed WhyKit relations as JSON, Graphviz DOT or Mermaid.")
     parser.add_argument("--root", help="vault root (default: nearest vault)")
-    parser.add_argument("--format", choices=("json", "dot", "obsidian"), default="json")
+    parser.add_argument("--format", choices=("json", "dot", "mermaid", "obsidian"), default="json")
     parser.add_argument("--canonical-only", action="store_true", help="include only approved source-of-truth documents (plus evidence they cite)")
     parser.add_argument("--output", help="write to this path (vault-relative or absolute); default: stdout")
     args = parser.parse_args(argv)
     requested_root = Path(args.root).expanduser().absolute() if args.root else find_vault_root()
     root = requested_root.resolve() if requested_root is not None else None
     if root is None or not is_vault_root(root):
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
     graph = build_graph(root, canonical_only=args.canonical_only)
     if args.format == "dot":
         rendered = as_dot(graph)
+        text_mode = True
+    elif args.format == "mermaid":
+        rendered = as_mermaid(graph)
         text_mode = True
     elif args.format == "obsidian":
         rendered = json.dumps(as_obsidian(graph), ensure_ascii=False, indent=2)

@@ -8,6 +8,7 @@ import re
 import sys
 from pathlib import Path
 
+from .messages import print_no_vault
 from .lint import (
     _split_table_row,
     decision_log_rows,
@@ -64,7 +65,7 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
     for note in index.notes:
         doc_id = rel(root, note.path).removesuffix(".md")
         top = doc_id.split("/", 1)[0] if "/" in doc_id else "root"
-        body = note.text[note.body_offset :] if note.has_front else note.text
+        body = note.body
         docs.append({
             "id": doc_id,
             "title": str(note.front.get("title") or note.path.stem),
@@ -83,7 +84,7 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
             "decisionId": str(note.front.get("decision_id") or "") or None,
             "supersedes": str(note.front.get("supersedes") or "") or None,
             "summary": _summary(body),
-            "body": body.lstrip("\n") if body.startswith("\n") else body,
+            "body": body.lstrip("\n"),
         })
     docs.sort(key=lambda item: item["id"])
 
@@ -207,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
     today = dt.date.fromisoformat(args.today) if args.today else None
     payload = build_explorer_index(root, today=today)

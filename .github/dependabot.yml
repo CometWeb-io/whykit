@@ -1,15 +1,32 @@
 version: 2
 updates:
-  - package-ecosystem: pip
+  # Runtime has no dependencies; this keeps the uv.lock-pinned contributor
+  # tooling and the optional MCP extra current.
+  - package-ecosystem: uv
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Let a new release age before proposing it, so a compromised upload has
+    # time to be yanked first.
+    cooldown:
+      default-days: 7
+    groups:
+      dev-tools:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
 
   # The Explorer is optional and its CI job is non-blocking. Group minor and
   # patch updates. Leave each major bump in its own pull request.
@@ -18,6 +35,8 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
     groups:
       explorer-minor-patch:
         patterns: ["*"]

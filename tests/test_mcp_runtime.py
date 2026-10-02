@@ -40,8 +40,58 @@ class McpRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             {tool.name for tool in response.tools},
-            {"query", "context", "impact"},
+            {"query", "context", "impact", "status", "pack"},
         )
+        for tool in response.tools:
+            with self.subTest(tool=tool.name):
+                self.assertTrue(tool.title)
+                self.assertTrue(tool.description)
+                self.assertTrue(tool.annotations.read_only_hint)
+                self.assertFalse(tool.annotations.destructive_hint)
+                self.assertTrue(tool.annotations.idempotent_hint)
+                self.assertFalse(tool.annotations.open_world_hint)
+                for name, schema in tool.input_schema["properties"].items():
+                    self.assertTrue(schema.get("description"), f"{tool.name}.{name} has no description")
+
+    async def test_in_process_errors_are_structured_tool_results(self) -> None:
+        from whykit.mcp_server import build_server
+
+        server = build_server(ROOT / "examples" / "northline")
+        async with asyncio.timeout(20):
+            async with Client(server) as client:
+                for tool_name, arguments, code in (
+                    ("context", {"target": "../../etc/passwd"}, "invalid_target"),
+                    ("impact", {"target": "/etc/passwd"}, "invalid_target"),
+                    ("impact", {"target": "C:\\Windows\\win.ini"}, "invalid_target"),
+                    ("context", {"target": "file:///etc/passwd"}, "invalid_target"),
+                    ("pack", {"targets": ["Home", "~/.ssh/id_ed25519"]}, "invalid_target"),
+                    ("pack", {}, "invalid_argument"),
+                    ("query", {"source_id": "not-an-id"}, "invalid_argument"),
+                    ("status", {"today": "not-a-date"}, "invalid_argument"),
+                ):
+                    with self.subTest(tool=tool_name, arguments=arguments):
+                        result = await client.call_tool(tool_name, arguments)
+                        self.assertTrue(result.is_error)
+                        self.assertEqual(result.structured_content["error"]["code"], code)
+                        self.assertEqual(json.loads(result.content[0].text), result.structured_content)
+
+                # Arguments outside the advertised schema never reach the handler.
+                for tool_name, arguments in (
+                    ("query", {"limit": -1}),
+                    ("context", {"target": "x" * 600}),
+                    ("context", {}),
+                    ("pack", {"targets": ["Home"] * 21}),
+                ):
+                    with self.subTest(tool=tool_name, arguments=list(arguments)):
+                        result = await client.call_tool(tool_name, arguments)
+                        self.assertTrue(result.is_error)
+
+                ok = await client.call_tool("status", {"today": "2026-09-17"})
+                self.assertFalse(ok.is_error)
+                self.assertNotIn(str(ROOT), ok.content[0].text)
+                bundle = await client.call_tool("pack", {"targets": ["D-001"], "max_chars": 500})
+                self.assertFalse(bundle.is_error)
+                self.assertEqual(bundle.structured_content["resolved"], 1)
 
     async def test_stdio_tools_enforce_sensitivity_on_real_tool_calls(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -116,6 +166,23 @@ class McpRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("public-sentinel", public_payload["content"])
                     self.assertEqual(public_payload["evidence"], [])
                     self.assertNotIn("private-evidence-sentinel", public_context.content[0].text)
+
+                    hidden_pack = await client.call_tool("pack", {"targets": ["notes/restricted-note", "D-001"]})
+                    missing_pack = await client.call_tool("pack", {"targets": ["notes/missing-note", "D-999"]})
+                    hidden_bundle = json.loads(hidden_pack.content[0].text)
+                    missing_bundle = json.loads(missing_pack.content[0].text)
+                    for bundle in (hidden_bundle, missing_bundle):
+                        bundle.pop("requested_targets")
+                        bundle.pop("selected")
+                        for item in bundle["missing"]:
+                            item.pop("target")
+                    self.assertEqual(hidden_bundle, missing_bundle)
+                    self.assertNotIn("sentinel", hidden_pack.content[0].text)
+
+                    public_status = await client.call_tool("status", {})
+                    self.assertFalse(public_status.is_error)
+                    for sentinel in ("restricted-note", "d-001-restricted", "D-001", str(vault)):
+                        self.assertNotIn(sentinel, public_status.content[0].text)
 
                     for tool_name in ("context", "impact"):
                         for hidden_target, missing_target, sentinel in (

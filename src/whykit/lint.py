@@ -16,12 +16,15 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import functools
 import json
 import re
 import sys
+import unicodedata
 from urllib.parse import unquote
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from collections.abc import Callable
 from typing import Iterable
 
 from .config import CONFIG_FILE, ConfigError, load_config
@@ -96,8 +99,10 @@ PLACEHOLDER_DATE = "YYYY-MM-DD"
 PLACEHOLDER_OWNER = "TODO"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DATED_FILENAME_RE = re.compile(r"-(\d{4}-\d{2}-\d{2})(?:-[A-Za-z]{2,4})?$")
-WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]*)?\]\]")
-MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
+# Inside a Markdown table Obsidian writes the alias pipe as `\|`; the optional
+# backslash keeps it out of the target so `[[a/b\|alias]]` resolves as `a/b`.
+WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)\\?(?:#[^\]|]+)?(?:\|[^\]]*)?\]\]")
+MARKDOWN_LINK_RE = re.compile(r"(!?)\[[^\]]*\]\(([^)]+)\)")
 EVIDENCE_ID_RE = re.compile(r"\bE-\d{3,}\b")
 DECISION_ID_RE = re.compile(r"\bD-\d{3,}\b")
 DECISION_FILE_RE = re.compile(r"^d-(\d{3,})-")
@@ -121,6 +126,7 @@ CONTENT_SKIP_DIRS = {
     ".git", ".obsidian", ".import-staging", "node_modules", "__pycache__",
     "apps", "examples", "tests", ".github", "schemas",
 }
+ATTACHMENT_SKIP_DIRS = {".git", ".obsidian", ".import-staging", "node_modules", "__pycache__", ".whykit"}
 SECRET_SKIP_DIRS = {
     ".git", ".obsidian", ".import-staging", "node_modules", "__pycache__", "tests",
 }
@@ -142,7 +148,14 @@ class Note:
     front: dict = field(default_factory=dict)
     has_front: bool = False
     front_error: str | None = None
-    body_offset: int = 0
+    body_offset: int = 0  # line count, not a character index
+
+    @property
+    def body(self) -> str:
+        """The note text after the front matter block (the whole text when there is none)."""
+        if not self.has_front:
+            return self.text
+        return "\n".join(self.text.split("\n")[self.body_offset:])
 
 
 def _strip_yaml_comment(value: str) -> str:
@@ -222,17 +235,38 @@ def _yaml_scalar(value: str) -> object:
     return value
 
 
+BLOCK_SCALAR_RE = re.compile(r"^[|>][+-]?[1-9]?[+-]?$")
+FRONT_CLOSE_RE = re.compile(r"^---$", re.MULTILINE)
+
+
+def _front_value(value: str, key: str) -> object:
+    if BLOCK_SCALAR_RE.match(_strip_yaml_comment(value)):
+        raise ValueError(
+            f"{key!r} uses a block scalar ({value.strip()}); WhyKit reads single-line values only"
+        )
+    return _yaml_scalar(value)
+
+
+def _is_sequence_item(content: str) -> bool:
+    return content.startswith("- ")
+
+
 def _parse_front_matter(raw: str) -> dict:
     """Parse the deliberately small YAML subset supported by WhyKit.
 
     Supported: top-level scalars/lists, block lists, and one nested mapping
     level (used by `provenance`), including block lists inside that mapping.
-    Rich YAML features such as anchors, folded scalars and arbitrary nesting are
+    Block-list items may sit at any consistent indentation, including the
+    column-0 form (`tags:` followed by `- a`) that many editors write.
+    Rich YAML features such as anchors, block scalars and arbitrary nesting are
     rejected instead of behaving differently depending on installed packages.
     """
     out: dict = {}
     current_top: str | None = None
+    child_indent: int | None = None
     current_nested: str | None = None
+    nested_indent: int | None = None
+    nested_item_indent: int | None = None
 
     for raw_line in raw.splitlines():
         if not raw_line.strip() or raw_line.lstrip().startswith("#"):
@@ -242,7 +276,7 @@ def _parse_front_matter(raw: str) -> dict:
         indent = len(raw_line) - len(raw_line.lstrip(" "))
         content = raw_line.strip()
 
-        if indent == 0:
+        if indent == 0 and not _is_sequence_item(content):
             if ":" not in content:
                 raise ValueError(f"cannot read line: {raw_line!r}")
             key, _, value = content.partition(":")
@@ -253,54 +287,71 @@ def _parse_front_matter(raw: str) -> dict:
                 raise ValueError(f"duplicate front matter key: {key!r}")
             value = value.strip()
             current_top = key
+            child_indent = None
             current_nested = None
-            out[key] = None if value == "" else _yaml_scalar(value)
+            nested_indent = None
+            out[key] = None if value == "" else _front_value(value, key)
             continue
 
-        if indent == 2 and current_top:
-            parent = out.get(current_top)
-            if content.startswith("- "):
-                if parent is None:
-                    parent = []
-                    out[current_top] = parent
-                if not isinstance(parent, list):
-                    raise ValueError(f"{current_top!r} mixes mapping/scalar and list values")
-                parent.append(_yaml_scalar(content[2:].strip()))
-                continue
-            if ":" not in content:
-                raise ValueError(f"cannot read nested line: {raw_line!r}")
-            if parent == []:
-                raise ValueError(f"{current_top!r} mixes list and mapping values")
-            if parent is None:
-                parent = {}
-                out[current_top] = parent
-            if not isinstance(parent, dict):
-                raise ValueError(f"cannot nest under scalar key {current_top!r}")
-            nested_key, _, value = content.partition(":")
-            nested_key = nested_key.strip()
-            if not nested_key:
-                raise ValueError("front matter nested key cannot be empty")
-            if nested_key in parent:
-                raise ValueError(f"duplicate front matter key: {current_top}.{nested_key!r}")
-            value = value.strip()
-            current_nested = nested_key
-            parent[nested_key] = [] if value == "" else _yaml_scalar(value)
-            continue
+        if current_top is None:
+            raise ValueError(f"cannot read line: {raw_line!r}")
+        parent = out.get(current_top)
 
-        if indent == 4 and current_top and current_nested and content.startswith("- "):
-            parent = out.get(current_top)
+        # A list item under the open nested key: deeper than the key, or at the
+        # same column (YAML's compact form) once the key holds a list.
+        if (
+            current_nested is not None
+            and nested_indent is not None
+            and _is_sequence_item(content)
+            and (indent > nested_indent or (indent == nested_indent and isinstance(parent, dict) and isinstance(parent.get(current_nested), list)))
+        ):
             if not isinstance(parent, dict):
                 raise ValueError(f"cannot nest list under {current_top!r}")
             nested = parent.get(current_nested)
-            if nested == "":
-                nested = []
-                parent[current_nested] = nested
             if not isinstance(nested, list):
                 raise ValueError(f"{current_top}.{current_nested} is not a list")
+            if nested_item_indent is None:
+                nested_item_indent = indent
+            elif indent != nested_item_indent:
+                raise ValueError(f"inconsistent list indentation under {current_top}.{current_nested}")
             nested.append(_yaml_scalar(content[2:].strip()))
             continue
 
-        raise ValueError(f"unsupported YAML indentation/structure: {raw_line!r}")
+        if child_indent is None:
+            child_indent = indent
+        if indent != child_indent:
+            raise ValueError(f"unsupported YAML indentation/structure: {raw_line!r}")
+
+        if _is_sequence_item(content):
+            if parent is None:
+                parent = []
+                out[current_top] = parent
+            if not isinstance(parent, list):
+                raise ValueError(f"{current_top!r} mixes mapping/scalar and list values")
+            current_nested = None
+            nested_indent = None
+            parent.append(_yaml_scalar(content[2:].strip()))
+            continue
+        if indent == 0 or ":" not in content:
+            raise ValueError(f"cannot read nested line: {raw_line!r}")
+        if parent == []:
+            raise ValueError(f"{current_top!r} mixes list and mapping values")
+        if parent is None:
+            parent = {}
+            out[current_top] = parent
+        if not isinstance(parent, dict):
+            raise ValueError(f"cannot nest under scalar key {current_top!r}")
+        nested_key, _, value = content.partition(":")
+        nested_key = nested_key.strip()
+        if not nested_key:
+            raise ValueError("front matter nested key cannot be empty")
+        if nested_key in parent:
+            raise ValueError(f"duplicate front matter key: {current_top}.{nested_key!r}")
+        value = value.strip()
+        current_nested = nested_key
+        nested_indent = indent
+        nested_item_indent = None
+        parent[nested_key] = [] if value == "" else _front_value(value, f"{current_top}.{nested_key}")
     return out
 
 
@@ -311,17 +362,22 @@ def load_note(path: Path, *, text: str | None = None) -> Note:
         # Path.read_text() uses universal newlines; callers with decoded bytes
         # (notably adopt's hash-preserving scan) must see the same parser input.
         text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Editors on Windows commonly save UTF-8 with a byte-order mark; it is not
+    # content, and leaving it in place hides the front matter fence.
+    text = text.removeprefix("\ufeff")
     note = Note(path=path, text=text)
-    if not text.startswith("---\n"):
+    if not (text.startswith("---\n") or text == "---"):
         return note
-    end = text.find("\n---\n", 4)
-    if end == -1:
+    # The closing fence may be the very next line (empty front matter) or the
+    # last line of a file with no trailing newline.
+    close = FRONT_CLOSE_RE.search(text, 4)
+    if close is None:
         note.front_error = "front matter opened with --- but never closed"
         return note
     note.has_front = True
-    note.body_offset = text[: end + 5].count("\n")
+    note.body_offset = text[: close.end()].count("\n") + 1
     try:
-        note.front = _parse_front_matter(text[4:end])
+        note.front = _parse_front_matter(text[4:close.start()])
     except Exception as exc:  # noqa: BLE001
         note.front_error = f"front matter is not valid YAML: {exc}"
     return note
@@ -372,6 +428,18 @@ def check_front_matter(root: Path, note: Note, findings: list[Finding], today: d
     for key in REQUIRED_KEYS:
         if key not in note.front:
             add(findings, root, note.path, 1, "error", "frontmatter.required", f"front matter is missing `{key}`")
+        elif note.front[key] is None or (isinstance(note.front[key], (str, list)) and not note.front[key]):
+            # `owner:` with nothing after it parses, so the key is "present"; every
+            # value check below would then skip it silently.
+            add(findings, root, note.path, 1, "warning", "frontmatter.empty", f"`{key}` is present but empty")
+
+    source_of_truth = note.front.get("source_of_truth")
+    if source_of_truth is not None and not isinstance(source_of_truth, bool):
+        add(
+            findings, root, note.path, 1, "warning", "source_of_truth.invalid",
+            f"source_of_truth `{source_of_truth}` is not a boolean; use true or false "
+            "(the canonical-document checks do not apply to this note)",
+        )
 
     status = note.front.get("status")
     if status is not None and (not isinstance(status, str) or status not in ALLOWED_STATUS):
@@ -450,12 +518,21 @@ def _mask_code(text: str) -> str:
     return INLINE_CODE_RE.sub(blank, FENCE_RE.sub(blank, text))
 
 
+def _link_key(value: str) -> str:
+    # Filenames written on macOS are often NFD while typed link text is NFC; on
+    # a Linux CI checkout the two spellings are different byte strings.
+    return unicodedata.normalize("NFC", value).casefold()
+
+
 def _build_index(notes: list[Note]) -> dict[str, set[Path]]:
     index: dict[str, set[Path]] = {}
     for note in notes:
         for key in {note.path.stem, *[a for a in _as_list(note.front.get("aliases")) if a]}:
-            index.setdefault(key.casefold(), set()).add(note.path)
+            index.setdefault(_link_key(key), set()).add(note.path)
     return index
+
+
+Resolver = Callable[[str], "tuple[Path | None, bool]"]
 
 
 def _resolve(root: Path, target: str, index: dict[str, set[Path]]) -> tuple[Path | None, bool]:
@@ -465,7 +542,7 @@ def _resolve(root: Path, target: str, index: dict[str, set[Path]]) -> tuple[Path
     candidate = root / (normalized if normalized.endswith(".md") else normalized + ".md")
     if candidate.exists() and _within(root, candidate):
         return candidate, False
-    stem = normalized.rstrip("/").split("/")[-1].removesuffix(".md").casefold()
+    stem = _link_key(normalized.rstrip("/").split("/")[-1].removesuffix(".md"))
     hits = {path for path in index.get(stem, set()) if _within(root, path)}
     if len(hits) == 1:
         return next(iter(hits)), False
@@ -474,7 +551,49 @@ def _resolve(root: Path, target: str, index: dict[str, set[Path]]) -> tuple[Path
     return None, False
 
 
-def check_wikilinks(root: Path, note: Note, index: dict[str, set[Path]], findings: list[Finding]) -> None:
+class AttachmentIndex:
+    """Non-Markdown files a wikilink may target (`![[diagram.png]]`, `[[brief.pdf]]`).
+
+    Built lazily: most vaults never link an attachment, and walking the tree is
+    the expensive part.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self._by_name: dict[str, list[Path]] | None = None
+
+    def _names(self) -> dict[str, list[Path]]:
+        if self._by_name is None:
+            self._by_name = {}
+            for path in self.root.rglob("*"):
+                if path.suffix.lower() == ".md" or not path.is_file() or not _within(self.root, path):
+                    continue
+                if any(part in ATTACHMENT_SKIP_DIRS for part in path.relative_to(self.root).parts[:-1]):
+                    continue
+                self._by_name.setdefault(_link_key(path.name), []).append(path)
+        return self._by_name
+
+    def resolves(self, target: str, note_dir: Path) -> bool:
+        normalized = target.strip().replace("\\", "/")
+        suffix = Path(normalized).suffix.lower()
+        if not suffix or suffix == ".md":
+            return False
+        for candidate in (self.root / normalized.lstrip("/"), note_dir / normalized):
+            if candidate.is_file() and _within(self.root, candidate):
+                return True
+        # Obsidian resolves attachments by file name anywhere in the vault and
+        # picks the nearest copy, so several matches are not an ambiguity here.
+        return bool(self._names().get(_link_key(normalized.rstrip("/").split("/")[-1])))
+
+
+def check_wikilinks(
+    root: Path,
+    note: Note,
+    index: dict[str, set[Path]],
+    findings: list[Finding],
+    attachments: AttachmentIndex | None = None,
+    resolve: Resolver | None = None,
+) -> None:
     masked = _mask_code(note.text)
     for match in WIKILINK_RE.finditer(masked):
         target = match.group(1).strip()
@@ -486,7 +605,12 @@ def check_wikilinks(root: Path, note: Note, index: dict[str, set[Path]], finding
         if ".." in Path(normalized_target).parts:
             add(findings, root, note.path, line, "warning", "wikilink.outside", f"wikilink tries to leave the vault: [[{target}]]")
             continue
-        resolved, ambiguous = _resolve(root, target, index)
+        resolved, ambiguous = resolve(target) if resolve else _resolve(root, target, index)
+        if resolved is None and not ambiguous:
+            if attachments is None:
+                attachments = AttachmentIndex(root)
+            if attachments.resolves(target, note.path.parent):
+                continue
         if ambiguous:
             add(findings, root, note.path, line, "error", "wikilink.ambiguous", f"wikilink is ambiguous: [[{target}]] — use a path")
         elif resolved is None:
@@ -502,7 +626,8 @@ def check_wikilinks(root: Path, note: Note, index: dict[str, set[Path]], finding
 def check_markdown_links(root: Path, note: Note, findings: list[Finding]) -> None:
     masked = _mask_code(note.text)
     for match in MARKDOWN_LINK_RE.finditer(masked):
-        raw = match.group(1).strip()
+        kind = "image" if match.group(1) else "link"
+        raw = match.group(2).strip()
         # Markdown permits <path with spaces>; optional titles are intentionally
         # ignored here rather than pretending to implement a full CommonMark parser.
         if raw.startswith("<") and ">" in raw:
@@ -517,9 +642,9 @@ def check_markdown_links(root: Path, note: Note, findings: list[Finding]) -> Non
         candidate = (root / target.lstrip("/")) if target.startswith("/") else (note.path.parent / target)
         line = note.text[: match.start()].count("\n") + 1
         if not _within(root, candidate):
-            add(findings, root, note.path, line, "warning", "markdown_link.outside", f"Markdown link leaves the vault: ({target})")
+            add(findings, root, note.path, line, "warning", "markdown_link.outside", f"Markdown {kind} leaves the vault: ({target})")
         elif not candidate.exists():
-            add(findings, root, note.path, line, "warning", "markdown_link.missing", f"local Markdown link does not exist: ({target})")
+            add(findings, root, note.path, line, "warning", "markdown_link.missing", f"local Markdown {kind} does not exist: ({target})")
 
 
 def _split_table_row(line: str) -> list[str]:
@@ -539,7 +664,9 @@ def _split_table_row(line: str) -> list[str]:
             buf.append("|")
             i += 2
             continue
-        if ch == "[" and nxt == "[":
+        # Only a `[[` that is closed later on the line opens a wikilink. A stray
+        # `[[` in free text must not swallow every following cell separator.
+        if ch == "[" and nxt == "[" and text.find("]]", i + 2) != -1:
             wiki_depth += 1
             buf.extend((ch, nxt))
             i += 2
@@ -827,7 +954,17 @@ def check_decision_log(root: Path, notes: list[Note], findings: list[Finding]) -
                 add(findings, root, note.path, 1, "warning", "decision.superseded_by_mismatch", f"{did} declares superseded_by {declared}, but the reverse supersedes edge resolves to {expected}")
 
 
-def check_fact_evidence(root: Path, note: Note, findings: list[Finding]) -> None:
+def check_fact_evidence(
+    root: Path,
+    note: Note,
+    findings: list[Finding],
+    known_evidence: set[str] | None = None,
+) -> None:
+    """Fact callouts must cite evidence, and the evidence they cite must exist.
+
+    `known_evidence` is every active or retired register ID; None skips the
+    existence check (callers without a register view).
+    """
     lines = _mask_code(note.text).splitlines()
     i = 0
     while i < len(lines):
@@ -838,8 +975,16 @@ def check_fact_evidence(root: Path, note: Note, findings: list[Finding]) -> None
             while i < len(lines) and lines[i].startswith(">"):
                 block.append(lines[i])
                 i += 1
-            if not EVIDENCE_ID_RE.search("\n".join(block)):
+            cited = EVIDENCE_ID_RE.findall("\n".join(block))
+            if not cited:
                 add(findings, root, note.path, start + 1, "warning", "fact.inline_evidence", "verified fact callout has no inline E-NNN citation")
+            elif known_evidence is not None:
+                for eid in dict.fromkeys(cited):
+                    if eid not in known_evidence:
+                        add(
+                            findings, root, note.path, start + 1, "warning", "fact.evidence_missing",
+                            f"fact callout cites {eid}, but the evidence register has no populated row for it",
+                        )
             continue
         i += 1
 
@@ -903,8 +1048,15 @@ def check_review_log(root: Path, notes: list[Note], findings: list[Finding]) -> 
         return
     note = next((item for item in notes if item.path.resolve() == path.resolve()), load_note(path))
     lines = note.text.splitlines()
-    header = "| Date | Target | Reviewer | Outcome | Previous review | Next review | Note |"
-    header_idx = next((i for i, line in enumerate(lines) if line.strip() == header), None)
+    header = ["date", "target", "reviewer", "outcome", "previous review", "next review", "note"]
+    # Compare cells, not the raw line: Markdown formatters pad table columns.
+    header_idx = next(
+        (
+            i for i, line in enumerate(lines)
+            if line.lstrip().startswith("|") and [c.lower() for c in _split_table_row(line)] == header
+        ),
+        None,
+    )
     if header_idx is None or header_idx + 1 >= len(lines):
         add(findings, root, path, None, "error", "review_log.table", "review log table is missing or malformed")
         return
@@ -935,13 +1087,14 @@ def check_review_log(root: Path, notes: list[Note], findings: list[Finding]) -> 
                 add(findings, root, path, line_no, "error", "review_log.target", "review event target is missing or ambiguous")
         i += 1
 
-def check_orphans(root: Path, notes: list[Note], findings: list[Finding]) -> None:
+def check_orphans(root: Path, notes: list[Note], findings: list[Finding], resolve: Resolver | None = None) -> None:
     exempt_names = {"README.md", "AGENTS.md", "OBSIDIAN.md", "INTEROP.md", "Home.md", "SECURITY.md", "CONTRIBUTING.md", "CHANGELOG.md"}
     linked: set[Path] = set()
-    index = _build_index(notes)
+    if resolve is None:
+        resolve = functools.partial(_resolve, root, index=_build_index(notes))
     for note in notes:
         for match in WIKILINK_RE.finditer(_mask_code(note.text)):
-            resolved, ambiguous = _resolve(root, match.group(1).strip(), index)
+            resolved, ambiguous = resolve(match.group(1).strip())
             if resolved and not ambiguous:
                 linked.add(resolved.resolve())
     for note in notes:
@@ -1063,8 +1216,13 @@ def collect_markdown(root: Path, paths: list[str]) -> list[Path]:
                     child for child in p.rglob("*.md")
                     if child.is_file() and _within(root, child)
                 ))
-            elif p.suffix.lower() == ".md" and p.exists():
+            elif p.suffix.lower() == ".md" and p.is_file():
                 out.append(p)
+            elif not p.exists():
+                # A typo in a CI path list must not turn into "0 files — clean".
+                raise VaultPathError(f"path not found: {raw}")
+            else:
+                raise VaultPathError(f"not a Markdown file or directory: {raw}")
         return out
     return sorted(
         p for p in root.rglob("*.md")
@@ -1100,12 +1258,17 @@ def lint(
     index = index_model.link_index
     findings: list[Finding] = []
     today = today or dt.date.today()
+    attachments = AttachmentIndex(root)
+    active_evidence, retired_evidence, _ = evidence_register(root)
+    known_evidence = set(active_evidence) | set(retired_evidence)
 
     for note in notes:
         check_front_matter(root, note, findings, today)
-        check_wikilinks(root, note, index, findings)
+        # The index memoises link resolution: a vault repeats the same targets
+        # many times, and each uncached lookup costs several filesystem calls.
+        check_wikilinks(root, note, index, findings, attachments, index_model.resolve_link)
         check_markdown_links(root, note, findings)
-        check_fact_evidence(root, note, findings)
+        check_fact_evidence(root, note, findings, known_evidence)
     check_evidence_register(root, findings, today)
     check_evidence_ids(root, notes, findings)
     check_decision_ids(root, notes, findings)
@@ -1116,7 +1279,7 @@ def lint(
         check_review_log(root, all_notes, findings)
         check_agents_configured(root, findings)
     if orphans and not paths:
-        check_orphans(root, notes, findings)
+        check_orphans(root, notes, findings, index_model.resolve_link)
     if hub_links is None and not paths:
         try:
             config, _ = load_config(root)
@@ -1158,7 +1321,7 @@ def resolve_root(explicit: str | None, paths: list[str], cwd: Path | None = None
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="whykit lint", description="Check an WhyKit vault.")
+    parser = argparse.ArgumentParser(prog="whykit lint", description="Check a WhyKit vault.")
     parser.add_argument("paths", nargs="*", help="Markdown files/directories to check")
     parser.add_argument("--root", help="vault root (default: nearest vault at or above the working directory)")
     parser.add_argument("--strict", action="store_true", help="warnings count as failures")
@@ -1178,14 +1341,15 @@ def main(argv: list[str] | None = None) -> int:
 
     root, paths, note = resolve_root(args.root, list(args.paths))
     if not is_vault_root(root):
-        print(f"not an WhyKit vault: {root}", file=sys.stderr)
-        print("expected Home.md and 00-context/ — run `whykit init <dir>` to create one", file=sys.stderr)
+        from .messages import no_vault
+        print(no_vault(args.root), file=sys.stderr)
         return 2
 
     try:
         files, findings = lint(root, paths, orphans=not args.no_orphans, secrets=not args.no_secrets, today=as_of)
     except VaultPathError as exc:
         print(str(exc), file=sys.stderr)
+        print(f"hint: paths are relative to the vault root ({root}); lint checks .md files and directories", file=sys.stderr)
         return 2
     errors = [f for f in findings if f.level == "error"]
     warnings = [f for f in findings if f.level == "warning"]

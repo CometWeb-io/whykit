@@ -11,7 +11,7 @@ last_updated: 2026-08-11
 review_by: 2027-02-01
 source_of_truth: false
 sensitivity: public
-source_ids: []
+source_ids: ["E-013"]
 tags: ["decisions", "motion"]
 workstream: "06-decisions"
 ---
@@ -32,7 +32,7 @@ The primary motion is direct to ops and maintenance leads. Partners may introduc
 
 ## Rationale
 
-D-009 failed as a primary motion. Direct is slower and more in our control. It matches D-002.
+D-009 failed as a primary motion: two signed partners produced three meetings and zero SQL in six months. [E-013] Direct is slower and more in our control. It matches D-002.
 
 ## Ownership and review
 
