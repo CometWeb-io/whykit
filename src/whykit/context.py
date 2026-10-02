@@ -7,6 +7,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from .messages import print_no_vault
 from .impact import analyze_impact
 from .lint import (
     DECISION_ID_RE,
@@ -161,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
     report = build_context(root, args.target, max_chars=args.max_chars, include_body=not args.no_body)
     if args.json:

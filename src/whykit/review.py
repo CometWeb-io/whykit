@@ -4,12 +4,14 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 import sys
 from pathlib import Path
 
+from .messages import print_no_vault
 from .io import apply_transaction, safe_vault_target, vault_mutation_lock
 from .config import ConfigError, load_config
-from .lint import DECISION_ID_RE, _build_index, _resolve, collect_markdown, find_vault_root, is_vault_root, load_note, rel
+from .lint import DECISION_ID_RE, _build_index, _parse_date, _resolve, collect_markdown, find_vault_root, is_vault_root, load_note, rel
 from .scaffold import _frontmatter_replace, _table_cell
 from .status import build_status
 
@@ -43,6 +45,24 @@ claim is true.
 | Date | Target | Reviewer | Outcome | Previous review | Next review | Note |
 |---|---|---|---|---|---|---|
 '''
+
+
+def _front_date(text: str, key: str) -> dt.date | None:
+    if not text.startswith("---\n"):
+        return None
+    end = text.find("\n---\n", 4)
+    if end < 0:
+        return None
+    match = re.search(rf"(?m)^{re.escape(key)}:[ \t]*(\S+)[ \t]*$", text[:end])
+    return _parse_date(match.group(1)) if match else None
+
+
+def _touch_last_updated(text: str, today: dt.date) -> str:
+    # A back-dated review (--today in the past) must not move last_updated
+    # backwards: the file is being modified now, and a last_updated earlier than
+    # `created` is a lint error.
+    floor = max(filter(None, (_front_date(text, "created"), _front_date(text, "last_updated"))), default=today)
+    return _frontmatter_replace(text, "last_updated", max(today, floor).isoformat())
 
 
 def _decision_record(root: Path, decision_id: str):
@@ -103,6 +123,12 @@ def record_review(
         if rel(root, note.path) == "00-context/review-log.md":
             raise ValueError("the review log cannot review itself")
 
+        created = _parse_date(note.front.get("created") or "")
+        if created is not None and today < created:
+            raise ValueError(
+                f"review date {today.isoformat()} is before {rel(root, note.path)} was created ({created.isoformat()})"
+            )
+
         previous_review = str(note.front.get("review_by") or "").strip() or "—"
         resolved_next = next_review
         if resolved_next:
@@ -140,12 +166,12 @@ def record_review(
         )) + " |"
         lines.insert(insert_at, row)
         updated_log = "\n".join(lines) + ("\n" if log_before.endswith("\n") else "")
-        updated_log = _frontmatter_replace(updated_log, "last_updated", today.isoformat())
+        updated_log = _touch_last_updated(updated_log, today)
 
         updates: dict = {log: updated_log}
         if outcome == "confirmed" and resolved_next:
             updated_target = _frontmatter_replace(target_before, "review_by", resolved_next)
-            updated_target = _frontmatter_replace(updated_target, "last_updated", today.isoformat())
+            updated_target = _touch_last_updated(updated_target, today)
             updates[note_path] = updated_target
         apply_transaction(root, updates)
 
@@ -187,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
 
     if args.review_command == "list":

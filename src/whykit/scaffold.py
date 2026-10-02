@@ -14,6 +14,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
+from .messages import parse_iso_date, print_no_vault
 from .io import apply_transaction, atomic_write_text, safe_vault_target, vault_mutation_lock
 from .config import ConfigError, load_config
 from .lint import (
@@ -188,7 +189,7 @@ def create_decision(
         if status == "approved" and owner.strip() in {"", "TODO"}:
             raise ValueError("approved decisions require a real --owner")
         if review_by:
-            dt.date.fromisoformat(review_by)
+            parse_iso_date("--review-by", review_by)
         predecessor_path: Path | None = None
         predecessor_text: str | None = None
         if supersedes:
@@ -298,7 +299,9 @@ Why this option, given the evidence and constraints?
         if status == "approved" and supersedes and predecessor_path and predecessor_text is not None:
             predecessor_path = safe_vault_target(
                 vault,
-                predecessor_path.relative_to(vault.resolve()),
+                # The record was globbed under `vault` as given, so it is relative
+                # to that spelling even when the vault sits behind a symlink.
+                predecessor_path.relative_to(vault),
                 create_parents=False,
             )
             updated_predecessor = _frontmatter_replace(predecessor_text, "status", "superseded")
@@ -326,8 +329,8 @@ def create_evidence(
         raise ValueError("evidence source, location, type and claims must be non-empty")
     source_date = date or today.isoformat()
     accessed_date = accessed or today.isoformat()
-    dt.date.fromisoformat(source_date)
-    dt.date.fromisoformat(accessed_date)
+    parse_iso_date("--date", source_date)
+    parse_iso_date("--accessed", accessed_date)
     with vault_mutation_lock(vault):
         evidence_id = _next_id(_existing_evidence_ids(vault), "E")
         register = safe_vault_target(vault, "00-context/evidence-register.md", create_parents=False)
@@ -511,7 +514,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     vault = _vault(args.root)
     if vault is None:
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
     try:
         config, _ = load_config(vault)
@@ -535,7 +538,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.json:
                 print(json.dumps(payload, ensure_ascii=False, indent=2))
             else:
-                print(f"created {decision_id}: {path.relative_to(vault)}")
+                print(f"created {decision_id}: {path.relative_to(vault).as_posix()}")
         elif args.kind == "evidence":
             evidence_id = create_evidence(
                 vault, source=args.source_name, location=args.location, kind=args.evidence_type,
@@ -558,7 +561,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.json:
                 print(json.dumps(payload, ensure_ascii=False, indent=2))
             else:
-                print(f"created note: {path.relative_to(vault)}")
+                print(f"created note: {path.relative_to(vault).as_posix()}")
                 if args.link_from:
                     print(f"linked from: {args.link_from}")
                 else:

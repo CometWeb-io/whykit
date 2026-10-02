@@ -15,8 +15,10 @@ ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "scripts" / "whykit.py"
 
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from whykit.lint import find_vault_root, is_vault_root, resolve_root  # noqa: E402
+from _vaults import fresh_vault  # noqa: E402
 
 
 def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -93,7 +95,7 @@ class InitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "vault"
             target.mkdir()
-            (target / "keepme.md").write_text("mine")
+            (target / "keepme.md").write_text("mine", encoding="utf-8")
             self.assertEqual(run("init", str(target)).returncode, 2)
             self.assertEqual(run("init", str(target), "--force").returncode, 0)
             self.assertTrue((target / "keepme.md").exists(), "--force must not wipe the destination")
@@ -106,7 +108,7 @@ class RootResolutionTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name)
         self.vault = self.base / "knowledge"
-        run("init", str(self.vault))
+        fresh_vault(self.vault)
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -136,7 +138,8 @@ class RootResolutionTests(unittest.TestCase):
     def test_a_directory_that_is_not_a_vault_is_rejected_clearly(self) -> None:
         result = run("lint", "--root", str(self.base))
         self.assertEqual(result.returncode, 2)
-        self.assertIn("not an WhyKit vault", result.stderr)
+        self.assertIn("not a WhyKit vault", result.stderr)
+        self.assertIn("hint:", result.stderr)
 
 
 class AdoptTests(unittest.TestCase):
@@ -144,18 +147,18 @@ class AdoptTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name)
         self.vault = self.base / "knowledge"
-        run("init", "--full", str(self.vault))
+        fresh_vault(self.vault, "--full")
         self.legacy = self.base / "old-docs"
         (self.legacy / "adr").mkdir(parents=True)
         (self.legacy / "adr" / "0001-use-postgres.md").write_text(
             "# Use Postgres\n\n## Status\n\nAccepted\n\n## Context\n\n"
             + "We needed a database that the team already knew how to operate. " * 3
-            + "\n\n## Decision\n\nPostgres.\n"
+            + "\n\n## Decision\n\nPostgres.\n", encoding="utf-8"
         )
-        (self.legacy / "notes.md").write_text("# Notes\n\n" + "Something substantive was written here. " * 8)
-        (self.legacy / "copy.md").write_text("# Notes\n\n" + "Something substantive was written here. " * 8)
-        (self.legacy / "stub.md").write_text("# Just a heading\n")
-        (self.legacy / "empty.md").write_text("")
+        (self.legacy / "notes.md").write_text("# Notes\n\n" + "Something substantive was written here. " * 8, encoding="utf-8")
+        (self.legacy / "copy.md").write_text("# Notes\n\n" + "Something substantive was written here. " * 8, encoding="utf-8")
+        (self.legacy / "stub.md").write_text("# Just a heading\n", encoding="utf-8")
+        (self.legacy / "empty.md").write_text("", encoding="utf-8")
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -193,7 +196,7 @@ class AdoptTests(unittest.TestCase):
 
         records = list((self.vault / "07-research" / "sources").glob("ingestion-*.md"))
         self.assertTrue(records)
-        body = records[0].read_text()
+        body = records[0].read_text(encoding="utf-8")
         self.assertIn("SHA-256", body)
         self.assertIn("adr/0001-use-postgres.md", body)
 
@@ -267,7 +270,7 @@ class AdoptTests(unittest.TestCase):
         from whykit.adopt import scan
 
         outside = self.base / "outside-secret.md"
-        outside.write_text("# Secret\n\n" + "outside material " * 20)
+        outside.write_text("# Secret\n\n" + "outside material " * 20, encoding="utf-8")
         link = self.legacy / "linked-secret.md"
         try:
             link.symlink_to(outside)
@@ -281,7 +284,7 @@ class AdoptTests(unittest.TestCase):
 
         candidates = scan(self.legacy)
         target = next(c for c in candidates if c.assessment == "useful" and not c.looks_like_decision)
-        target.path.write_text(target.path.read_text() + "\nchanged after scan\n")
+        target.path.write_text(target.path.read_text(encoding="utf-8") + "\nchanged after scan\n", encoding="utf-8")
         with patch("whykit.adopt.scan", return_value=candidates):
             with self.assertRaisesRegex(RuntimeError, "source changed during adoption"):
                 adopt(self.legacy, self.vault, write=True, owner="Test owner")
@@ -494,10 +497,13 @@ class ContractTests(unittest.TestCase):
             "uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0",
             workflow,
         )
-        self.assertIn("name: Exercise the composite Action from this checkout", workflow)
+        self.assertIn("name: Profile mode on the Northline example", workflow)
+        self.assertIn("name: Legacy mode on the tiny example", workflow)
         self.assertIn("uses: ./", workflow)
         self.assertIn("profile: ci", workflow)
         self.assertIn('history: "false"', workflow)
+        # Example review dates are fixed, so the Action run pins its as-of day.
+        self.assertIn('today: "2026-09-17"', workflow)
 
     def test_release_reuses_ci_before_publishing_without_artifact_transfer(self) -> None:
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
@@ -674,7 +680,7 @@ class ContractTests(unittest.TestCase):
     def test_json_schemas_are_valid_and_declare_a_draft(self) -> None:
         for path in sorted((ROOT / "schemas").glob("*.json")):
             with self.subTest(path=path.name):
-                parsed = json.loads(path.read_text())
+                parsed = json.loads(path.read_text(encoding="utf-8"))
                 self.assertEqual(parsed.get("$schema"), "https://json-schema.org/draft/2020-12/schema")
                 self.assertTrue(parsed.get("$id", "").endswith(path.name))
 
@@ -697,13 +703,13 @@ class ContractTests(unittest.TestCase):
     def test_pre_commit_hooks_use_repository_local_policy(self) -> None:
         from whykit.cli import PRE_COMMIT_HOOK
 
-        checkout_hook = (ROOT / "scripts" / "pre-commit").read_text()
+        checkout_hook = (ROOT / "scripts" / "pre-commit").read_text(encoding="utf-8")
         for content in (PRE_COMMIT_HOOK, checkout_hook):
             self.assertIn("check --profile local", content)
             self.assertNotIn("lint --no-orphans", content)
 
     def test_github_action_installs_its_own_revision_and_fails_closed_on_shallow_history(self) -> None:
-        action = (ROOT / "action.yml").read_text()
+        action = (ROOT / "action.yml").read_text(encoding="utf-8")
         self.assertIn('WHYKIT_ACTION_PATH: ${{ github.action_path }}', action)
         self.assertIn('pip install --disable-pip-version-check --quiet "$WHYKIT_ACTION_PATH"', action)
         self.assertNotIn('pip install --disable-pip-version-check --quiet \\n          "whykit', action)

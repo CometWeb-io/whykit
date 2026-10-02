@@ -27,6 +27,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.17"
@@ -61,18 +62,6 @@ jobs:
           uv run whykit snapshot --root examples/northline --today 2026-09-17 --output .whykit/ci-snapshot.json
           uv run whykit verify-snapshot .whykit/ci-snapshot.json --root examples/northline --today 2026-09-17 --json
           rm -rf examples/northline/.whykit
-      - name: Set up Python for the composite Action smoke test
-        if: matrix.python-version == '3.12'
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Exercise the composite Action from this checkout
-        if: matrix.python-version == '3.12'
-        uses: ./
-        with:
-          root: examples/northline
-          profile: ci
-          history: "false"
       - name: A fresh vault must lint clean
         run: |
           uv run whykit init "$RUNNER_TEMP/fresh-vault"
@@ -116,12 +105,132 @@ jobs:
           test ! -d "$RUNNER_TEMP/fresh-minimal/01-strategy"
           uv run whykit lint --root "$RUNNER_TEMP/fresh-minimal"
 
+  static:
+    name: Lint, types and workflow audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.17"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Lockfile matches pyproject.toml
+        run: uv lock --check
+      - name: Install the pinned development tools
+        run: uv sync --locked --only-group dev
+      - name: Ruff
+        run: uv run --no-sync ruff check --output-format=github
+      - name: Mypy
+        run: uv run --no-sync mypy
+      - name: Audit workflows and the composite Action
+        # Offline audits need no token. Configuration: .github/zizmor.yml.
+        run: uv run --no-sync zizmor --offline --format=github .
+
+  action:
+    name: Composite Action (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Pull requests exercise the default history gate, which needs it.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Legacy mode on the tiny example
+        id: tiny
+        uses: ./
+        with:
+          root: examples/tiny
+          strict: "true"
+          today: "2026-09-17"
+      - name: Profile mode on the Northline example
+        id: northline
+        uses: ./
+        with:
+          root: examples/northline
+          profile: ci
+          history: "false"
+          today: "2026-09-17"
+      - name: The version output matches the package
+        shell: bash
+        env:
+          TINY_VERSION: ${{ steps.tiny.outputs.version }}
+          NORTHLINE_VERSION: ${{ steps.northline.outputs.version }}
+        run: |
+          set -euo pipefail
+          expected="$(python -c "import re, pathlib; print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('src/whykit/__init__.py').read_text()).group(1))")"
+          for actual in "$TINY_VERSION" "$NORTHLINE_VERSION"; do
+            if [ "$actual" != "$expected" ]; then
+              echo "version output '$actual' does not match __version__ '$expected'" >&2
+              exit 1
+            fi
+          done
+          if python -c "import whykit" 2>/dev/null; then
+            echo "the Action leaked WhyKit into the caller's Python environment" >&2
+            exit 1
+          fi
+      - name: Prepare a vault with a broken wikilink
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -R examples/tiny "$RUNNER_TEMP/broken"
+          printf '\n[[does-not-exist]]\n' >> "$RUNNER_TEMP/broken/Home.md"
+          mv "$RUNNER_TEMP/broken" .action-broken-vault
+      - name: A vault with lint errors must fail the Action
+        id: broken
+        continue-on-error: true
+        uses: ./
+        with:
+          root: .action-broken-vault
+          history: "false"
+      - name: An invalid input must fail the Action
+        id: bad-input
+        continue-on-error: true
+        uses: ./
+        with:
+          root: examples/tiny
+          strict: "maybe"
+      - name: An invalid date must fail the Action
+        id: bad-today
+        continue-on-error: true
+        uses: ./
+        with:
+          root: examples/tiny
+          today: "17/09/2026"
+      - name: Failure cases failed
+        shell: bash
+        env:
+          BROKEN: ${{ steps.broken.outcome }}
+          BAD_INPUT: ${{ steps.bad-input.outcome }}
+          BAD_TODAY: ${{ steps.bad-today.outcome }}
+        run: |
+          set -euo pipefail
+          for outcome in "$BROKEN" "$BAD_INPUT" "$BAD_TODAY"; do
+            if [ "$outcome" != "failure" ]; then
+              echo "expected the Action to fail, got '$outcome'" >&2
+              exit 1
+            fi
+          done
+
   package:
     name: MCP SDK and wheel/source distribution smoke
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.17"
@@ -129,9 +238,11 @@ jobs:
           enable-cache: true
       - name: Install and exercise the optional MCP server against the SDK
         run: |
-          uv sync --locked --extra mcp
+          uv sync --locked --no-dev --extra mcp
           uv run python -m unittest discover -s tests -p 'test_mcp_runtime.py' -v
       - run: uv build
+      - name: Check distribution metadata renders on PyPI
+        run: uv run --locked --only-group dist twine check --strict dist/*
       - name: Keep checkout-only tests out of the installable source distribution
         run: |
           set -euo pipefail
@@ -169,6 +280,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.17"
@@ -194,15 +307,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.17"
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --locked --no-dev
-      - run: |
+      - env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
           uv run whykit history \
-            --base "${{ github.event.pull_request.base.sha }}" --head HEAD \
+            --base "$PR_BASE_SHA" --head HEAD \
             --root examples/northline
 
   secret-scan:
@@ -213,6 +329,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Run gitleaks
         # The gitleaks *binary* is MIT and free everywhere. The official Action
         # requires a paid licence key for organisation-owned repositories, which
@@ -243,6 +360,8 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.17"

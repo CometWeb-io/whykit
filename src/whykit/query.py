@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 
+from .messages import print_no_vault
 from .lint import EVIDENCE_ID_RE, find_vault_root, is_vault_root
 from .vault_index import VaultIndex
 
@@ -142,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
     report = query_vault(
         root,

@@ -4,16 +4,17 @@ aliases: ["D-010"]
 type: decision
 decision_id: D-010
 supersedes: D-009
-status: approved
+status: superseded
 owner: "Lena Krüger"
 created: 2026-08-11
-last_updated: 2026-08-11
+last_updated: 2026-09-15
 review_by: 2027-02-01
 source_of_truth: false
 sensitivity: public
 source_ids: []
 tags: ["decisions", "motion"]
 workstream: "06-decisions"
+superseded_by: D-011
 ---
 
 # Decision record: direct to ops directors; partners are optional

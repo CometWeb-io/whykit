@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
+from .messages import print_no_vault
 from .graph import build_graph
 from .lint import (
     DECISION_ID_RE,
     EVIDENCE_ID_RE,
-    _resolve,
     evidence_register,
     find_vault_root,
     is_vault_root,
@@ -44,7 +43,6 @@ def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) 
     vault_index = vault or VaultIndex.load(root)
     notes = vault_index.notes
     active, retired, _ = evidence_register(root)
-    graph = build_graph(root, vault=vault_index)
 
     if EVIDENCE_ID_RE.fullmatch(target):
         row = active.get(target) or retired.get(target)
@@ -52,7 +50,7 @@ def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) 
             _note_summary(root, note)
             for note in notes
             if target in set(EVIDENCE_ID_RE.findall(note.text))
-            and rel(root, note.path) != "00-context/evidence-register.md"
+            and vault_index.relative(note.path) != "00-context/evidence-register.md"
         ]
         references.sort(key=lambda item: item["path"])
         replacement = row.get("replaced_by", "") if row and target in retired else ""
@@ -81,7 +79,8 @@ def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) 
                 "references": [],
                 "reference_count": 0,
             }
-        node_id = rel(root, note.path).removesuffix(".md")
+        node_id = vault_index.relative(note.path).removesuffix(".md")
+        graph = build_graph(root, vault=vault_index)
         incoming_ids = sorted({edge["from"] for edge in graph["edges"] if edge["to"] == node_id and edge.get("type", "wikilink") == "wikilink"})
         outgoing_ids = sorted({edge["to"] for edge in graph["edges"] if edge["from"] == node_id and edge.get("type", "wikilink") == "wikilink"})
         by_node = {item["id"]: item for item in graph["nodes"]}
@@ -106,7 +105,7 @@ def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) 
             "reference_count": len(incoming),
         }
 
-    resolved, ambiguous = _resolve(root, target, vault_index.link_index)
+    resolved, ambiguous = vault_index.resolve_link(target)
     if resolved is None:
         return {
             "contract_version": 1,
@@ -119,7 +118,8 @@ def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) 
             "reference_count": 0,
         }
     note = vault_index.note_for(resolved)
-    node_id = rel(root, resolved).removesuffix(".md")
+    node_id = vault_index.relative(resolved).removesuffix(".md")
+    graph = build_graph(root, vault=vault_index)
     by_node = {item["id"]: item for item in graph["nodes"]}
     incoming_ids = sorted({edge["from"] for edge in graph["edges"] if edge["to"] == node_id and edge.get("type", "wikilink") == "wikilink"})
     outgoing_ids = sorted({edge["to"] for edge in graph["edges"] if edge["from"] == node_id and edge.get("type", "wikilink") == "wikilink"})
@@ -184,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
     report = analyze_impact(root, args.target)
     if args.json:

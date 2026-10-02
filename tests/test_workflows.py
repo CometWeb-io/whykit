@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -11,10 +12,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "scripts" / "whykit.py"
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from whykit.graph import build_graph  # noqa: E402
 from whykit.impact import analyze_impact  # noqa: E402
 from whykit.status import build_status  # noqa: E402
+from _vaults import fresh_vault  # noqa: E402
 
 
 def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -25,8 +28,7 @@ class RecordWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.vault = Path(self.tmp.name) / "vault"
-        init = run("init", str(self.vault))
-        self.assertEqual(init.returncode, 0, init.stderr)
+        fresh_vault(self.vault)
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -43,7 +45,7 @@ class RecordWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("E-001", result.stdout)
-        register = (self.vault / "00-context/evidence-register.md").read_text()
+        register = (self.vault / "00-context/evidence-register.md").read_text(encoding="utf-8")
         self.assertIn("Example benchmark", register)
         lint = run("lint", "--root", str(self.vault))
         self.assertEqual(lint.returncode, 0, lint.stdout + lint.stderr)
@@ -63,21 +65,25 @@ class RecordWorkflowTests(unittest.TestCase):
         self.assertIn("D-001", result.stdout)
         paths = list((self.vault / "06-decisions").glob("d-001-*.md"))
         self.assertEqual(len(paths), 1)
-        log = (self.vault / "06-decisions/decision-log.md").read_text()
+        log = (self.vault / "06-decisions/decision-log.md").read_text(encoding="utf-8")
         self.assertIn("D-001", log)
         self.assertIn("Use a shared context ledger", log)
         lint = run("lint", "--root", str(self.vault))
         self.assertEqual(lint.returncode, 0, lint.stdout + lint.stderr)
 
     def test_approved_decision_gets_policy_review_date_when_not_supplied(self) -> None:
+        before = dt.date.today()
         result = run(
             "new", "--root", str(self.vault), "decision", "Ship the policy",
             "--status", "approved", "--owner", "Test owner",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        record = next((self.vault / "06-decisions").glob("d-001-*.md")).read_text()
-        expected = (dt.date.today() + dt.timedelta(days=90)).isoformat()
-        self.assertIn(f"review_by: {expected}", record)
+        record = next((self.vault / "06-decisions").glob("d-001-*.md")).read_text(encoding="utf-8")
+        # Bracket the wall clock so a run that crosses midnight still passes.
+        expected = {(day + dt.timedelta(days=90)).isoformat() for day in (before, dt.date.today())}
+        match = re.search(r"(?m)^review_by: (\S+)$", record)
+        self.assertIsNotNone(match)
+        self.assertIn(match.group(1), expected)
 
     def test_new_note_stays_inside_an_existing_workstream(self) -> None:
         result = run(
@@ -98,7 +104,7 @@ class RecordWorkflowTests(unittest.TestCase):
         self.assertEqual(payload["kind"], "note")
         self.assertEqual(payload["linked_from"], "Home.md")
         self.assertTrue(payload["strict_linked"])
-        self.assertIn("[[notes/linked-research|Linked research]]", (self.vault / "Home.md").read_text())
+        self.assertIn("[[notes/linked-research|Linked research]]", (self.vault / "Home.md").read_text(encoding="utf-8"))
         report = json.loads(run("lint", "--root", str(self.vault), "--json").stdout)
         self.assertNotIn("note.orphan", {item["code"] for item in report["findings"]})
 
@@ -129,7 +135,7 @@ class RecordWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(first.returncode, 0, first.stderr)
         old = next((self.vault / "06-decisions").glob("d-001-*.md"))
-        old_body_before = old.read_text().split("---", 2)[-1]
+        old_body_before = old.read_text(encoding="utf-8").split("---", 2)[-1]
 
         second = run(
             "new", "--root", str(self.vault), "decision", "Use option B",
@@ -137,11 +143,11 @@ class RecordWorkflowTests(unittest.TestCase):
             "--supersedes", "D-001",
         )
         self.assertEqual(second.returncode, 0, second.stderr)
-        old_text = old.read_text()
+        old_text = old.read_text(encoding="utf-8")
         self.assertIn("status: superseded", old_text)
         self.assertIn("superseded_by: D-002", old_text)
         self.assertEqual(old_text.split("---", 2)[-1], old_body_before)
-        log = (self.vault / "06-decisions/decision-log.md").read_text()
+        log = (self.vault / "06-decisions/decision-log.md").read_text(encoding="utf-8")
         self.assertIn("| D-001 | Use option A |", log)
         self.assertIn("| superseded | [[06-decisions/d-001-use-option-a]] |", log)
         lint = run("lint", "--root", str(self.vault))
@@ -162,7 +168,7 @@ class StatusAndGraphTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.vault = Path(self.tmp.name) / "vault"
-        self.assertEqual(run("init", str(self.vault)).returncode, 0)
+        fresh_vault(self.vault)
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -196,19 +202,19 @@ class StatusAndGraphTests(unittest.TestCase):
             encoding="utf-8",
         )
         log = self.vault / "06-decisions/decision-log.md"
-        text = log.read_text()
+        text = log.read_text(encoding="utf-8")
         text = text.replace(
             "| D-001 |  |  |  | proposed / accepted / superseded |  |",
             "| D-001 | Test | 2026-09-01 | Test owner | accepted | [[06-decisions/d-001-test]] |",
         )
-        log.write_text(text)
+        log.write_text(text, encoding="utf-8")
         report = build_status(self.vault, today=dt.date(2026, 9, 22), due_days=7)
         self.assertEqual(len(report["review_queue"]), 1)
         self.assertEqual(report["review_queue"][0]["days"], 3)
 
     def test_graph_exports_resolved_links(self) -> None:
         home = self.vault / "Home.md"
-        home.write_text(home.read_text() + "\n[[00-context/company]]\n", encoding="utf-8")
+        home.write_text(home.read_text(encoding="utf-8") + "\n[[00-context/company]]\n", encoding="utf-8")
         graph = build_graph(self.vault)
         self.assertTrue(any(e["from"] == "Home" and e["to"] == "00-context/company" for e in graph["edges"]))
         self.assertEqual(graph["unresolved"], [])

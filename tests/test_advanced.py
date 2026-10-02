@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -11,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "scripts" / "whykit.py"
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from whykit.graph import build_graph  # noqa: E402
 from whykit.check import run_check  # noqa: E402
@@ -18,6 +20,7 @@ from whykit.context import build_context  # noqa: E402
 from whykit.pack import build_pack  # noqa: E402
 from whykit.query import query_vault  # noqa: E402
 from whykit.snapshot import build_snapshot, compare_snapshot  # noqa: E402
+from _vaults import fresh_vault  # noqa: E402
 
 
 def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -28,8 +31,7 @@ class AdvancedWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.vault = Path(self.tmp.name) / "vault"
-        result = run("init", str(self.vault))
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.init_day = fresh_vault(self.vault)
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -67,18 +69,22 @@ class AdvancedWorkflowTests(unittest.TestCase):
 
     def test_review_records_event_and_reschedules_approved_decision(self) -> None:
         decision = self._add_evidence_and_decision()
-        before = decision.read_text()
+        before = decision.read_text(encoding="utf-8")
         self.assertRegex(before, r"(?m)^review_by: \d{4}-\d{2}-\d{2}$")
+        # `new` stamps `created` from the wall clock, so the review date must be
+        # derived from it too; a fixed date turns red once the calendar passes it.
+        review_day = dt.date.today()
+        next_review = (review_day + dt.timedelta(days=105)).isoformat()
         result = run(
             "review", "--root", str(self.vault), "record", "D-001",
             "--reviewer", "Research", "--outcome", "confirmed",
-            "--today", "2026-10-01", "--next-review", "2027-01-15",
+            "--today", review_day.isoformat(), "--next-review", next_review,
             "--note", "Evidence rechecked",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        after = decision.read_text()
-        self.assertIn("review_by: 2027-01-15", after)
-        log = (self.vault / "00-context/review-log.md").read_text()
+        after = decision.read_text(encoding="utf-8")
+        self.assertIn(f"review_by: {next_review}", after)
+        log = (self.vault / "00-context/review-log.md").read_text(encoding="utf-8")
         self.assertIn("Evidence rechecked", log)
         self.assertIn("[[06-decisions/d-001-use-append-only-review-history]]", log)
         lint = run("lint", "--root", str(self.vault))
@@ -92,7 +98,7 @@ class AdvancedWorkflowTests(unittest.TestCase):
         self.assertTrue(report["matches"])
         self.assertTrue(report["content_matches"])
         company = self.vault / "00-context/company.md"
-        company.write_text(company.read_text() + "\nchanged\n", encoding="utf-8")
+        company.write_text(company.read_text(encoding="utf-8") + "\nchanged\n", encoding="utf-8")
         report = compare_snapshot(self.vault, first)
         self.assertFalse(report["matches"])
         self.assertIn("00-context/company.md", report["changed"])
@@ -128,12 +134,12 @@ class AdvancedWorkflowTests(unittest.TestCase):
 
     def test_snapshot_separates_content_drift_from_time_based_health_drift(self) -> None:
         decision = self._add_evidence_and_decision()
-        text = decision.read_text()
+        text = decision.read_text(encoding="utf-8")
         text = text.replace(
             next(line for line in text.splitlines() if line.startswith("review_by:")),
             "review_by: 2026-10-15",
         )
-        decision.write_text(text)
+        decision.write_text(text, encoding="utf-8")
         baseline = build_snapshot(self.vault, today=dt.date(2026, 9, 1))
         report = compare_snapshot(self.vault, baseline, today=dt.date(2026, 10, 20))
         self.assertTrue(report["content_matches"])
@@ -232,10 +238,14 @@ class AdvancedWorkflowTests(unittest.TestCase):
         self.assertEqual(lint.returncode, 0, lint.stdout + lint.stderr)
 
     def test_init_stamps_frontmatter_with_creation_date(self) -> None:
-        today = dt.date.today().isoformat()
-        home = (self.vault / "Home.md").read_text()
-        self.assertIn(f"created: {today}", home)
-        self.assertIn(f"last_updated: {today}", home)
+        # Bracket the wall clock so a run that crosses midnight still passes.
+        days = {self.init_day.isoformat(), dt.date.today().isoformat()}
+        home = (self.vault / "Home.md").read_text(encoding="utf-8")
+        created = re.search(r"(?m)^created: (\S+)$", home)
+        updated = re.search(r"(?m)^last_updated: (\S+)$", home)
+        self.assertIsNotNone(created)
+        self.assertIn(created.group(1), days)
+        self.assertEqual(updated.group(1) if updated else None, created.group(1))
 
     def test_doctor_has_json_contract(self) -> None:
         result = run("doctor", "--root", str(self.vault), "--json")
@@ -256,7 +266,7 @@ class AdvancedWorkflowTests(unittest.TestCase):
         }
         for schema_name, payload in payloads.items():
             with self.subTest(schema=schema_name):
-                schema = json.loads((ROOT / "schemas" / schema_name).read_text())
+                schema = json.loads((ROOT / "schemas" / schema_name).read_text(encoding="utf-8"))
                 self.assertTrue(set(schema.get("required", ())).issubset(payload))
 
 
@@ -273,16 +283,16 @@ class AppendOnlyReviewHistoryTests(unittest.TestCase):
             base = subprocess.run(["git", "-C", str(vault), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
 
             log = vault / "00-context/review-log.md"
-            text = log.read_text()
+            text = log.read_text(encoding="utf-8")
             text += "| 2026-09-22 | [[Home]] | Test | confirmed | — | 2027-01-01 | ok |\n"
-            log.write_text(text)
+            log.write_text(text, encoding="utf-8")
             subprocess.run(["git", "-C", str(vault), "add", "."], check=True)
             subprocess.run(["git", "-C", str(vault), "commit", "-qm", "append"], check=True)
             allowed = run("history", "--root", str(vault), "--base", base, "--head", "HEAD")
             self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
 
             base2 = subprocess.run(["git", "-C", str(vault), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
-            log.write_text(log.read_text().replace("confirmed", "archived", 1))
+            log.write_text(log.read_text(encoding="utf-8").replace("confirmed", "archived", 1), encoding="utf-8")
             subprocess.run(["git", "-C", str(vault), "add", "."], check=True)
             subprocess.run(["git", "-C", str(vault), "commit", "-qm", "rewrite"], check=True)
             blocked = run("history", "--root", str(vault), "--base", base2, "--head", "HEAD")

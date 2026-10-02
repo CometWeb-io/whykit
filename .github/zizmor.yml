@@ -1,0 +1,5 @@
+rules:
+  # Local actions and reusable workflows are referenced with the long-standing
+  # `./` form, which every supported runner understands.
+  self-repository:
+    disable: true

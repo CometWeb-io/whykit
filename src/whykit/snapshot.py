@@ -9,10 +9,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .messages import print_no_vault
 from .graph import build_graph
 from .io import atomic_write_text, safe_vault_target
 from .lint import collect_markdown, find_vault_root, is_vault_root, load_note, rel
 from .status import build_status
+from .vault_index import VaultIndex
 
 SNAPSHOT_FORMAT = "whykit.snapshot/v1"
 
@@ -25,22 +27,23 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _snapshot_files(root: Path) -> list[Path]:
-    files = set(collect_markdown(root, []))
+def _snapshot_files(root: Path, vault: VaultIndex | None = None) -> list[Path]:
+    files = {note.path for note in vault.notes} if vault is not None else set(collect_markdown(root, []))
     config = root / "whykit.toml"
     if config.is_file():
         files.add(config)
-    return sorted(files, key=lambda path: rel(root, path))
+    relative = vault.relative if vault is not None else (lambda path: rel(root, path))
+    return sorted(files, key=relative)
 
 
-def _file_entry(root: Path, path: Path) -> dict[str, Any]:
+def _file_entry(root: Path, path: Path, vault: VaultIndex | None = None) -> dict[str, Any]:
     entry: dict[str, Any] = {
-        "path": rel(root, path),
+        "path": vault.relative(path) if vault is not None else rel(root, path),
         "sha256": _sha256(path),
         "bytes": path.stat().st_size,
     }
     if path.suffix.lower() == ".md":
-        note = load_note(path)
+        note = (vault.note_for(path) if vault is not None else None) or load_note(path)
         entry.update({
             "title": str(note.front.get("title") or path.stem),
             "type": str(note.front.get("type") or ""),
@@ -67,9 +70,12 @@ def _snapshot_id(entries: list[dict[str, Any]]) -> str:
 def build_snapshot(root: Path, *, today: dt.date | None = None) -> dict[str, Any]:
     today = today or dt.date.today()
     root = root.resolve()
-    entries = [_file_entry(root, path) for path in _snapshot_files(root)]
-    status = build_status(root, today=today)
-    graph = build_graph(root)
+    # One parse feeds the file table, status and graph; each used to re-read
+    # every note, which tripled the cost of a snapshot on a large vault.
+    vault = VaultIndex.load(root)
+    entries = [_file_entry(root, path, vault) for path in _snapshot_files(root, vault)]
+    status = build_status(root, today=today, vault=vault)
+    graph = build_graph(root, vault=vault)
     edges_by_type: dict[str, int] = {}
     for edge in graph.get("edges", []):
         edge_type = str(edge.get("type") or "wikilink")
@@ -142,12 +148,21 @@ def compare_snapshot(root: Path, baseline: dict[str, Any], *, today: dt.date | N
 
 
 def _load_baseline(path: Path) -> dict[str, Any]:
+    hint = "hint: create a baseline with `whykit snapshot --output <file>`"
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"cannot read snapshot: {exc}") from exc
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise ValueError(f"snapshot not found: {path}\n{hint}") from None
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"cannot read snapshot {path}: {getattr(exc, 'strerror', None) or exc}") from None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"not a WhyKit snapshot (invalid JSON at line {exc.lineno}, column {exc.colno}): {path}\n{hint}"
+        ) from None
     if not isinstance(payload, dict):
-        raise ValueError("snapshot must be a JSON object")
+        raise ValueError(f"not a WhyKit snapshot (expected a JSON object): {path}\n{hint}")
     return payload
 
 
@@ -161,7 +176,7 @@ def main_snapshot(argv: list[str] | None = None) -> int:
     requested_root = Path(args.root).expanduser().absolute() if args.root else find_vault_root()
     root = requested_root.resolve() if requested_root is not None else None
     if root is None or not is_vault_root(root):
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
     today = None
     if args.today:
@@ -202,7 +217,7 @@ def main_verify(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
     snapshot_path = Path(args.snapshot).expanduser()
     if not snapshot_path.is_absolute():

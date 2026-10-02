@@ -5,6 +5,96 @@ All notable changes to WhyKit are documented here. The format follows
 semantic versioning, where the **data contract** is the public API alongside the
 CLI and the lint rule codes.
 
+## [Unreleased]
+
+### Added
+
+- `whykit trace` follows every decision to the evidence it cites, including
+  evidence inherited through supersession, and flags missing, retired and stale
+  sources. `--gaps-only --strict` turns it into a CI gate; the staleness window
+  reuses the `[evidence_access_age_days]` policy behind `evidence.access_stale`.
+- `whykit graph --format mermaid` renders the relation graph as a Mermaid
+  flowchart with escaped labels.
+- `whykit completion bash|zsh|fish` prints a shell completion script generated
+  from the live CLI, so new commands and options complete without a release.
+- `--json` on `init`, `history`, `graph` and `pack` (`graph`/`pack` keep
+  `--format`; combining `--json` with another format is a usage error).
+- The MCP server gains read-only `status` and `pack` tools. Every tool honours
+  the configured sensitivity ceiling: hidden records are indistinguishable from
+  missing ones and do not consume the body budget, bodies are marked
+  `content_trust: "untrusted_data"`, and failures return structured error codes
+  without leaking internal messages. See `docs/mcp.md`.
+- New lint warnings: `frontmatter.empty` (a required key with no value),
+  `source_of_truth.invalid` (a non-boolean `source_of_truth`), and
+  `fact.evidence_missing` (a fact callout citing an unregistered `E-NNN`).
+  Missing local Markdown images are now reported under `markdown_link.missing`.
+- The composite Action accepts a `today` input, exposes the installed WhyKit
+  version as the `version` output, and installs into a private virtual
+  environment so it never changes the Python used by later steps.
+- Explorer: graph layout without overlapping nodes, hover highlighting of a note's
+  direct links, multi-term search, deep links that survive reloads, and a test suite
+  (`npm test`, included in `npm run check`).
+- New documentation: concepts, CI integration, Obsidian, troubleshooting and
+  FAQ, plus a 60-second quickstart in the README. A test checks every command
+  documented in the README and guides against the real CLI.
+- Vaults created by `init` ignore `.whykit/mutation.lock` and
+  `.whykit/transactions/`.
+
+### Changed
+
+- `whykit lint <path>` exits 2 for a path that does not exist, escapes the
+  vault, or is not Markdown, instead of linting zero files and reporting
+  "clean".
+- The front matter parser accepts column-zero, four-space and compact nested
+  block lists, a UTF-8 byte-order mark, and a closing fence at end of file
+  without a newline. Block scalars are rejected with a specific message.
+- Commands outside a vault explain how to recover and name the path they
+  checked. OS errors and a closed stdout no longer print a traceback;
+  `WHYKIT_DEBUG=1` restores it for bug reports. `history` explains an unknown
+  revision or a directory outside a Git work tree instead of dumping Git usage.
+- Every CLI option has help text; a bare `whykit` prints help and exits 2.
+- Invalid dates name the flag and the expected `YYYY-MM-DD` format; `check
+  --today` rejects the same non-calendar ISO forms as `lint --today`.
+- `graph`, `backlinks`, `impact`, `status`, `snapshot` and `lint` resolve each
+  distinct link target once per run, and `snapshot` parses the vault once.
+  Results are unchanged; large vaults are noticeably faster.
+
+### Fixed
+
+- `review record --today` with a past date can no longer move `last_updated`
+  backwards (which produced a lint error), and a review dated before the record
+  was created is refused without writing anything.
+- Wikilinks to attachments (`![[diagram.png]]`, `[[brief.pdf]]`) resolve by file
+  name or vault path; escaped alias pipes inside tables keep the link target;
+  backslash paths resolve; NFC link text matches NFD file names.
+- A stray `[[` in a register or log table no longer swallows the following
+  cells or hides an evidence row from ID allocation.
+- Explorer index bodies no longer include part of the YAML front matter.
+- Supersession works when the vault path is a symlink.
+- Canonical-only graphs never contain edges to excluded nodes; an ambiguous
+  bare stem or duplicate decision ID is reported instead of silently picking one.
+- The review log table header is accepted when padded by a Markdown formatter.
+- A superseded decision whose successor was itself superseded later
+  (D-001 → D-002 → D-003) no longer raises `decision.superseded_by_missing`.
+- `new` prints vault-relative paths with forward slashes on Windows too.
+- The Northline example records the partner-channel evidence for its direct
+  motion in D-011, which supersedes D-010 instead of rewriting it, so
+  `whykit trace --strict` passes on the example.
+
+### Security
+
+- MCP targets are validated before touching the filesystem: absolute paths,
+  URLs, `~`, `.`/`..` segments and control characters are rejected, and
+  symlinks out of the vault are not followed.
+- Repository automation: every third-party action is pinned to a commit,
+  workflows declare least-privilege permissions and do not persist the checkout
+  token, Action inputs reach the shell only through the environment, and
+  workflows are audited with zizmor and OpenSSF Scorecard. Dependabot covers
+  every ecosystem with a cooldown.
+- Contributor tooling (ruff, mypy, zizmor, twine) is pinned in `uv.lock`; CI
+  checks that the lockfile matches `pyproject.toml` and validates distribution
+  metadata.
+
 ## [0.3.0.dev0] — source preview, not released
 
 `whykit --version` reports `0.3.0.dev0`. That string is this source preview,

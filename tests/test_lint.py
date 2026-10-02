@@ -252,6 +252,40 @@ class LintRegressionTests(VaultTestCase):
         )
         self.assertIn("decision.supersession_cycle", self.codes())
 
+    def _write_chain(self, third_status: str) -> None:
+        self.write(
+            "06-decisions/d-001-first.md",
+            front("First", doc_type="decision", status="superseded", extra="decision_id: D-001\nsuperseded_by: D-002\n"),
+        )
+        self.write(
+            "06-decisions/d-002-second.md",
+            front("Second", doc_type="decision", status="superseded", extra="decision_id: D-002\nsupersedes: D-001\nsuperseded_by: D-003\n"),
+        )
+        self.write(
+            "06-decisions/d-003-third.md",
+            front("Third", doc_type="decision", status=third_status, extra="decision_id: D-003\nsupersedes: D-002\nreview_by: 2027-01-01\n"),
+        )
+        self.write(
+            "06-decisions/decision-log.md",
+            front("Decision log", doc_type="decision")
+            + "\n| ID | Decision | Date | Owner | Status | Record |\n"
+              "|---|---|---|---|---|---|\n"
+              "| D-001 | First | 2026-09-17 | Test owner | superseded | [[06-decisions/d-001-first]] |\n"
+              "| D-002 | Second | 2026-09-17 | Test owner | superseded | [[06-decisions/d-002-second]] |\n"
+              "| D-003 | Third | 2026-09-17 | Test owner | accepted | [[06-decisions/d-003-third]] |\n",
+        )
+
+    def test_superseded_successor_still_counts_as_a_replacement(self) -> None:
+        # D-001 -> D-002 -> D-003: D-002 being superseded later must not orphan D-001.
+        self._write_chain("approved")
+        codes = self.codes()
+        self.assertNotIn("decision.superseded_by_missing", codes)
+        self.assertNotIn("decision.superseded_by_mismatch", codes)
+
+    def test_chain_without_an_approved_tail_still_warns(self) -> None:
+        self._write_chain("draft")
+        self.assertIn("decision.superseded_by_missing", self.codes())
+
     def test_superseded_by_must_match_the_approved_reverse_edge(self) -> None:
         self.write(
             "06-decisions/d-001-first.md",
@@ -576,3 +610,239 @@ class MarkdownLinkTests(VaultTestCase):
         codes = self.codes()
         self.assertNotIn("markdown_link.missing", codes)
         self.assertNotIn("markdown_link.outside", codes)
+
+
+FRONT_KEYS = (
+    "type: guide\nstatus: draft\nowner: Test owner\ncreated: 2026-09-17\n"
+    "last_updated: 2026-09-17\nsource_of_truth: false\nsensitivity: internal\n"
+)
+
+
+class FrontMatterEdgeCaseTests(VaultTestCase):
+    """Valid files editors really produce must parse; broken ones must stay loud."""
+
+    def test_column_zero_block_list_is_valid_yaml(self) -> None:
+        path = self.write("notes/a.md", f"---\ntitle: A\n{FRONT_KEYS}tags:\n- alpha\n- beta\n---\n\n# A\n")
+        note = lint_mod.load_note(path)
+        self.assertIsNone(note.front_error)
+        self.assertEqual(note.front["tags"], ["alpha", "beta"])
+
+    def test_four_space_block_list_is_valid_yaml(self) -> None:
+        path = self.write("notes/a.md", f"---\ntitle: A\n{FRONT_KEYS}aliases:\n    - First\n    - Second\n---\n")
+        self.assertEqual(lint_mod.load_note(path).front["aliases"], ["First", "Second"])
+
+    def test_compact_list_under_nested_key_is_valid_yaml(self) -> None:
+        path = self.write(
+            "notes/a.md",
+            f"---\ntitle: A\n{FRONT_KEYS}provenance:\n  sources:\n  - one\n  - two\n  importer: manual\n---\n",
+        )
+        note = lint_mod.load_note(path)
+        self.assertIsNone(note.front_error)
+        self.assertEqual(note.front["provenance"], {"sources": ["one", "two"], "importer": "manual"})
+
+    def test_inconsistent_indentation_is_still_rejected(self) -> None:
+        path = self.write("notes/a.md", f"---\ntitle: A\n{FRONT_KEYS}tags:\n  - a\n    - b\n---\n")
+        self.assertIn("indentation", lint_mod.load_note(path).front_error or "")
+
+    def test_block_scalar_is_rejected_with_a_specific_message(self) -> None:
+        path = self.write("notes/a.md", f"---\ntitle: >-\n  Folded\n{FRONT_KEYS}---\n")
+        error = lint_mod.load_note(path).front_error or ""
+        self.assertIn("block scalar", error)
+
+    def test_utf8_bom_does_not_hide_front_matter(self) -> None:
+        path = self.root / "notes" / "bom.md"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(("﻿" + front("BOM note")).encode("utf-8"))
+        note = lint_mod.load_note(path)
+        self.assertTrue(note.has_front)
+        self.assertEqual(note.front["title"], "BOM note")
+        self.assertNotIn("frontmatter.missing", self.codes())
+
+    def test_front_matter_closed_at_end_of_file_without_newline(self) -> None:
+        path = self.write("notes/a.md", f"---\ntitle: A\n{FRONT_KEYS}---")
+        note = lint_mod.load_note(path)
+        self.assertTrue(note.has_front)
+        self.assertIsNone(note.front_error)
+        self.assertEqual(note.body, "")
+
+    def test_empty_front_matter_reports_missing_keys_not_an_unclosed_fence(self) -> None:
+        self.write("notes/a.md", "---\n---\n\n# A\n")
+        codes = self.codes()
+        self.assertNotIn("frontmatter.invalid", codes)
+        self.assertIn("frontmatter.required", codes)
+
+    def test_unclosed_front_matter_is_still_invalid(self) -> None:
+        self.write("notes/a.md", "---\ntitle: A\n\n# A\n")
+        self.assertIn("frontmatter.invalid", self.codes())
+
+    def test_body_skips_front_matter_by_line(self) -> None:
+        path = self.write("notes/a.md", front("Body") + "\nFirst paragraph.\n")
+        note = lint_mod.load_note(path)
+        self.assertTrue(note.body.startswith("\n# Body"))
+        self.assertNotIn("title:", note.body)
+
+    def test_empty_required_value_is_flagged(self) -> None:
+        self.write("notes/a.md", front("A").replace("owner: Test owner", "owner:"))
+        self.assertIn("frontmatter.empty", self.codes())
+
+    def test_template_placeholders_are_not_empty_values(self) -> None:
+        self.write("templates/t.md", front("T", status="template").replace("owner: Test owner", "owner: TODO"))
+        self.assertNotIn("frontmatter.empty", self.codes())
+
+    def test_non_boolean_source_of_truth_is_flagged(self) -> None:
+        for value in ("yes", '"true"', "1"):
+            with self.subTest(value=value):
+                self.write("notes/a.md", front("A", status="draft").replace("source_of_truth: false", f"source_of_truth: {value}"))
+                self.assertIn("source_of_truth.invalid", self.codes())
+
+    def test_boolean_source_of_truth_is_clean(self) -> None:
+        self.write("notes/a.md", front("A", status="draft", source_of_truth=False))
+        self.write("notes/b.md", front("B", source_of_truth=True))
+        self.assertNotIn("source_of_truth.invalid", self.codes())
+
+
+class LinkResolutionEdgeCaseTests(VaultTestCase):
+    def test_attachment_embed_resolves_by_file_name(self) -> None:
+        self.write("assets/diagram.png", "png")
+        self.write("notes/a.md", front("A") + "\n![[diagram.png]]\n")
+        codes = self.codes()
+        self.assertNotIn("embed.missing", codes)
+        self.assertNotIn("wikilink.missing", codes)
+
+    def test_attachment_link_resolves_by_vault_path(self) -> None:
+        self.write("assets/brief.pdf", "pdf")
+        self.write("notes/a.md", front("A") + "\n[[assets/brief.pdf]]\n")
+        self.assertNotIn("wikilink.missing", self.codes())
+
+    def test_missing_attachment_embed_is_still_an_error(self) -> None:
+        self.write("notes/a.md", front("A") + "\n![[missing.png]]\n")
+        self.assertIn("embed.missing", self.codes())
+
+    def test_attachments_in_ignored_directories_do_not_count(self) -> None:
+        self.write(".obsidian/cache.png", "png")
+        self.write("notes/a.md", front("A") + "\n![[cache.png]]\n")
+        self.assertIn("embed.missing", self.codes())
+
+    def test_escaped_alias_pipe_in_table_keeps_the_path(self) -> None:
+        # Two notes share the stem, so only the path disambiguates; the `\|`
+        # Obsidian writes inside tables must not glue a backslash onto it.
+        self.write("one/topic.md", front("One"))
+        self.write("two/topic.md", front("Two"))
+        self.write("notes/a.md", front("A") + "\n| Link |\n|---|\n| [[one/topic\\|First]] |\n")
+        codes = self.codes()
+        self.assertNotIn("wikilink.ambiguous", codes)
+        self.assertNotIn("wikilink.missing", codes)
+
+    def test_escaped_alias_pipe_after_heading(self) -> None:
+        self.write("one/topic.md", front("One"))
+        self.write("notes/a.md", front("A") + "\n| [[one/topic#Part\\|First]] |\n")
+        self.assertNotIn("wikilink.missing", self.codes())
+
+    def test_backslash_path_still_resolves(self) -> None:
+        self.write("one/topic.md", front("One"))
+        self.write("notes/a.md", front("A") + "\n[[one\\topic]]\n")
+        self.assertNotIn("wikilink.missing", self.codes())
+
+    def test_link_index_matches_nfc_text_to_nfd_file_names(self) -> None:
+        import unicodedata
+
+        nfd = unicodedata.normalize("NFD", "zażółć")
+        nfc = unicodedata.normalize("NFC", "zażółć")
+        missing_root = self.root / "not-on-disk"
+        note = lint_mod.Note(path=missing_root / "notes" / f"{nfd}.md", text="")
+        index = lint_mod._build_index([note])
+        resolved, ambiguous = lint_mod._resolve(missing_root, nfc, index)
+        self.assertEqual(resolved, note.path)
+        self.assertFalse(ambiguous)
+
+    def test_missing_markdown_image_is_visible(self) -> None:
+        self.write("notes/a.md", front("A") + "\n![Chart](../assets/chart.png)\n")
+        self.assertIn("markdown_link.missing", self.codes())
+
+    def test_existing_and_remote_markdown_images_are_clean(self) -> None:
+        self.write("assets/chart.png", "png")
+        self.write(
+            "notes/a.md",
+            front("A") + "\n![Chart](../assets/chart.png) ![Remote](https://example.com/x.png)\n",
+        )
+        self.assertNotIn("markdown_link.missing", self.codes())
+
+
+class FactEvidenceTests(VaultTestCase):
+    REGISTER = (
+        "\n## Active sources\n\n"
+        "| ID | Source | Type | Date | Accessed | Location | Claims |\n"
+        "|---|---|---|---|---|---|---|\n"
+        "| E-001 | Survey | dataset | 2026-09-01 | 2026-09-02 | https://example.test/survey | demand |\n"
+        "\n## Retired sources\n\n"
+        "| ID | Source | Retired on | Why | Replaced by |\n"
+        "|---|---|---|---|---|\n"
+        "| E-002 | Old survey | 2026-09-10 | outdated | E-001 |\n"
+    )
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write("00-context/evidence-register.md", front("Evidence register", doc_type="reference") + self.REGISTER)
+
+    def test_fact_citing_an_unregistered_id_is_flagged(self) -> None:
+        self.write("notes/a.md", front("A") + "\n> [!fact] Claim\n> Supported by E-999.\n")
+        self.assertIn("fact.evidence_missing", self.codes())
+
+    def test_fact_citing_active_or_retired_evidence_is_clean(self) -> None:
+        self.write("notes/a.md", front("A") + "\n> [!fact] Claim\n> Supported by E-001 and E-002.\n")
+        codes = self.codes()
+        self.assertNotIn("fact.evidence_missing", codes)
+        self.assertNotIn("fact.inline_evidence", codes)
+
+    def test_ids_outside_fact_callouts_are_not_checked(self) -> None:
+        self.write("notes/a.md", front("A") + "\nAllocate E-999 next.\n\n> [!fact] Claim\n> E-001.\n")
+        self.assertNotIn("fact.evidence_missing", self.codes())
+
+
+class ReviewLogFormattingTests(VaultTestCase):
+    def test_formatter_padded_header_is_accepted(self) -> None:
+        self.write(
+            "00-context/review-log.md",
+            front("Review log", doc_type="reference")
+            + "\n| Date       | Target | Reviewer | Outcome   | Previous review | Next review | Note |\n"
+              "| ---------- | ------ | -------- | --------- | --------------- | ----------- | ---- |\n"
+              "| 2026-09-20 | [[notes/a]] | Research | confirmed | — | 2026-12-01 | ok |\n",
+        )
+        self.write("notes/a.md", front("A"))
+        self.assertFalse([c for c in self.codes() if c.startswith("review_log.")])
+
+    def test_missing_review_log_table_is_still_an_error(self) -> None:
+        self.write("00-context/review-log.md", front("Review log", doc_type="reference") + "\nNo table.\n")
+        self.assertIn("review_log.table", self.codes())
+
+
+class LintPathArgumentTests(VaultTestCase):
+    def test_nonexistent_path_is_a_usage_error_not_a_clean_run(self) -> None:
+        self.write("Home.md", "# Home\n")
+        with self.assertRaises(lint_mod.VaultPathError):
+            lint_mod.lint(self.root, ["notes/typo.md"])
+
+    def test_non_markdown_file_is_a_usage_error(self) -> None:
+        self.write("assets/data.csv", "a,b\n")
+        with self.assertRaises(lint_mod.VaultPathError):
+            lint_mod.lint(self.root, ["assets/data.csv"])
+
+    def test_existing_markdown_path_is_linted(self) -> None:
+        self.write("notes/a.md", front("A"))
+        files, _ = lint_mod.lint(self.root, ["notes/a.md"])
+        self.assertEqual([p.name for p in files], ["a.md"])
+
+
+class CheckTodayArgumentTests(unittest.TestCase):
+    def test_check_rejects_non_calendar_iso_forms_like_lint_does(self) -> None:
+        import contextlib
+        import io
+
+        from whykit import check as check_mod
+
+        example = Path(__file__).resolve().parents[1] / "examples" / "northline"
+        for value in ("20260917", "2026-W38-4"):
+            with self.subTest(value=value):
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    self.assertEqual(check_mod.main(["--root", str(example), "--today", value]), 2)
+                self.assertIn("not a real ISO date", err.getvalue())

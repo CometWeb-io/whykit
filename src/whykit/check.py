@@ -10,9 +10,10 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from .messages import print_no_vault
 from .config import ConfigError, configuration_readiness, get_profile, load_config
 from .immutability import changed_records
-from .lint import find_vault_root, is_vault_root, lint, rel
+from .lint import _parse_date, find_vault_root, is_vault_root, lint, rel
 
 
 def _git_repo(root: Path) -> bool:
@@ -129,13 +130,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
     today = None
     if args.today:
-        try:
-            today = dt.date.fromisoformat(args.today)
-        except ValueError:
+        # Same YYYY-MM-DD contract as `whykit lint --today`; fromisoformat alone
+        # would also accept forms such as 20260917 or 2026-W38-4.
+        today = _parse_date(args.today)
+        if today is None:
             print(f"--today is not a real ISO date: {args.today}", file=sys.stderr)
             return 2
     try:

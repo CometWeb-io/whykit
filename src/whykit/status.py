@@ -8,15 +8,22 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from .messages import print_no_vault
 from .config import ConfigError, load_config
-from .lint import evidence_register, find_vault_root, is_vault_root, lint, rel
+from .lint import evidence_register, find_vault_root, is_vault_root, lint
 from .vault_index import VaultIndex
 
 
-def build_status(root: Path, *, today: dt.date | None = None, due_days: int = 30) -> dict:
+def build_status(
+    root: Path,
+    *,
+    today: dt.date | None = None,
+    due_days: int = 30,
+    vault: VaultIndex | None = None,
+) -> dict:
     today = today or dt.date.today()
     root = root.resolve()
-    vault = VaultIndex.load(root)
+    vault = vault or VaultIndex.load(root)
     notes = vault.notes
     _, findings = lint(root, today=today, vault=vault)
     active_evidence, retired_evidence, _ = evidence_register(root)
@@ -35,7 +42,7 @@ def build_status(root: Path, *, today: dt.date | None = None, due_days: int = 30
             continue
         if date <= horizon:
             review_queue.append({
-                "path": rel(root, note.path),
+                "path": vault.relative(note.path),
                 "title": str(note.front.get("title") or note.path.stem),
                 "owner": str(note.front.get("owner") or ""),
                 "review_by": date.isoformat(),
@@ -105,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
         today = dt.date.today()
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
     try:
         config, _ = load_config(root)

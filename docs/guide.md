@@ -44,12 +44,18 @@ uv run whykit init ../my-ledger
 uv run whykit lint --root ../my-ledger
 ```
 
-The examples later in this guide assume the same checkout install. Run commands
-with `uv run whykit ...` from the WhyKit repository (or pass
-`uv run --project /path/to/whykit whykit ...` from elsewhere). When the target
-vault is not the current directory, pass `--root`. After a future PyPI release,
-`uv tool install whykit` will put a `whykit` binary on your `PATH` and the bare
-command form will work.
+The rest of this guide writes commands as bare `whykit ...` run from inside the
+vault directory. From a source checkout, either:
+
+- run `uv run whykit ...` from the WhyKit repository and pass `--root` to point
+  at the vault, or
+- run `uv run --project /path/to/whykit whykit ...` from inside the vault, or
+- install a binary once with `uv tool install --from /path/to/whykit whykit`.
+
+`new`, `review` and `evidence` take `--root` **before** their subcommand
+(`whykit new --root ../my-ledger decision ...`); every other command accepts it
+anywhere. After a future PyPI release, `uv tool install whykit` will put
+`whykit` on your `PATH` directly.
 
 A fresh vault has zero lint errors and uses the vendor-neutral default layout.
 Use `uv run whykit init --full ../my-ledger` for the optional GTM-oriented
@@ -68,15 +74,25 @@ Nobody starts from nothing. `adopt` inventories what you have, hashes every file
 flags duplicates and spots existing ADRs:
 
 ```bash
-whykit adopt ../old-docs          # dry run
-whykit adopt ../old-docs --write  # stage it + write an ingestion record
+whykit adopt ../old-docs --into ../my-ledger          # dry run
+whykit adopt ../old-docs --into ../my-ledger --write  # stage it + write an ingestion record
 ```
+
+`--profile` tunes the inventory to what you are importing: `generic` (the
+default), `adr-only` for an existing ADR directory, or `obsidian-loose` for an
+Obsidian vault with partial front matter. Add `--json` for a machine-readable
+report. The readiness percentage checks front matter against WhyKit's linter,
+**not** links, evidence, decision integrity or approval, and the time estimate
+is heuristic. Only UTF-8 `*.md` files are scanned; review other assets
+separately. Known evidence-register and decision-log table layouts are flagged
+for manual mapping.
 
 It never writes into a workstream. Raw exports are staged in a separate dated
 batch under `.import-staging/` for each import, with a SHA-256 for each source.
 The command reports the exact migration-report path, and a person decides what
-becomes canonical. The inventory is the boring half, and the half everybody
-skips.
+becomes canonical. The ingestion record lands in `notes/`; link it from a map or
+lint reports it as `note.orphan`. The inventory is the boring half, and the half
+everybody skips.
 
 ### Establish repository policy
 
@@ -110,7 +126,7 @@ that is safe to store in the repository where the vault lives.
 ```bash
 whykit new evidence \
   --source "Customer interview set" --type interview \
-  --location "07-research/interviews/" \
+  --location "notes/interviews/" \
   --claims "Repeated procurement delay"
 
 whykit new decision "Narrow the first ICP" \
@@ -168,6 +184,45 @@ its evidence, relationships, supersession lineage and scoped findings. `graph`
 exports typed `wikilink`, `evidence` and `supersedes` relations. `impact` answers
 the reverse-dependency question before a source or record is changed.
 
+`graph --format mermaid` renders the same relations as a Mermaid flowchart that
+GitHub and Obsidian display inline: wikilinks are solid arrows, evidence
+citations dashed, supersession thick, and retired or missing evidence is drawn
+in red. Combine it with `--canonical-only` for a diagram of approved sources of
+truth only.
+
+### Trace decisions to their evidence
+
+`impact` looks at one record. `trace` checks the whole ledger the other way
+round: for every decision, which evidence it rests on, and whether that
+evidence can still carry it.
+
+```bash
+whykit trace --today 2026-09-22
+whykit trace --decision D-014 --json
+whykit trace --gaps-only --strict          # CI gate: exit 1 on any gap
+whykit trace --max-age-days 180            # fallback age window for untyped policy
+```
+
+A decision cites evidence directly (an `E-NNN` in its text or `source_ids`) or
+inherits it from a non-decision note it links to, shown as `via <note>`.
+Evidence linked through another decision is not inherited, so a successor
+cannot lean on the record it superseded. Each decision can report these gaps:
+
+| Gap | Meaning |
+|---|---|
+| `no_evidence` | Nothing cited, directly or through a linked note |
+| `missing_evidence` | Cites an ID that has no row in the evidence register |
+| `retired_evidence` | Cites retired evidence; the replacement ID is shown when recorded |
+| `stale_evidence` | Cites active evidence last accessed longer ago than its age window |
+
+The age window comes from `[evidence_access_age_days]` in `whykit.toml`, the
+same policy behind the `evidence.access_stale` lint warning, so `trace` shows
+which decisions a stale source actually undermines. `--max-age-days` applies
+only to source types the policy does not list. Only approved decisions that
+nothing supersedes count as live; `--strict` and the summary consider live
+decisions only, because a historical record may legitimately cite evidence
+retired since.
+
 ### Snapshot and verify drift
 
 A snapshot fingerprints governed Markdown plus `whykit.toml`:
@@ -182,51 +237,25 @@ identical bytes while its review queue changes simply because a due date passed.
 
 ### Put it in CI
 
-The composite action installs the exact checked-out action revision rather than a
-possibly different package release. It requires Python 3.11+ and `pip` on
-`PATH`; set up that runtime explicitly. Pin actions to reviewed commit SHAs and
-fetch full history when immutable-history verification is enabled:
+Use the composite GitHub Action from this repository, pinned to a reviewed commit
+SHA, with `profile: ci` and `fetch-depth: 0` so pull requests are checked
+against their base:
 
 ```yaml
-- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-  with:
-    fetch-depth: 0
-- uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-  with:
-    python-version: "3.12"
 - uses: CometWeb-io/whykit@<reviewed-40-character-commit-sha>
   with:
     root: knowledge
     profile: ci
-    history: "true"
 ```
 
-For a non-PR release/tag workflow, provide an explicit baseline when the selected
-profile requires history verification:
-
-```yaml
-- uses: CometWeb-io/whykit@<reviewed-40-character-commit-sha>
-  with:
-    root: knowledge
-    profile: release
-    base: HEAD^
-```
-
-For repositories that invoke the CLI directly, use the named gate instead of
-recreating its semantics in shell:
+Other CI systems can call the same gate directly:
 
 ```bash
 whykit check --root knowledge --profile ci --base origin/main --head HEAD
 ```
 
-The Action supports `profile: ci` / `profile: release`, so the repository-local
-`whykit.toml` is the policy authority instead of duplicated shell flags. Existing
-workflows that omit `profile` retain the legacy `strict` + `history` behavior.
-The history gate protects accepted decision reasoning and the append-only review
-log. If full Git history is unavailable when history was requested, the Action
-fails closed instead of silently skipping the check.
-
-The built-in `release` profile additionally requires `whykit.toml` to be concretely configured: generated placeholders such as `defaults.owner = "TODO"` are valid starter syntax but are not accepted as release policy.
+[Running WhyKit in CI](ci.md) covers the complete workflow file, every Action
+input, the release gate, exit codes and the pre-commit hook.
 
 ## Why not just ADRs?
 
@@ -283,7 +312,7 @@ replaced it.
 It contacts nothing. No telemetry, no accounts, no service, no runtime
 dependencies — a vault holds the material a company is least willing to hand to
 a third party, so this is enforced by a test that breaks the socket layer and
-runs every command, rather than by a sentence in a README.
+runs every vault command, rather than by a sentence in a README.
 
 It is deterministic by construction: one documented front-matter parser, no optional
 runtime parser path, and no network. The same supported YAML subset is interpreted
@@ -347,8 +376,9 @@ transcripts, screenshots or customer material.
 | `whykit new decision/evidence/note` | Create records and keep IDs/indexes in sync |
 | `whykit lint` | Check the vault (`--strict`, `--json`, `--today`) |
 | `whykit status` | Summarize health plus upcoming/overdue review work |
-| `whykit graph` | Export typed document/evidence/supersession relations as JSON or DOT |
+| `whykit graph` | Export typed document/evidence/supersession relations as JSON, DOT or Mermaid |
 | `whykit impact <target>` | Show reverse dependency/blast radius for evidence, decisions or documents |
+| `whykit trace` | Trace each decision to its evidence; flag missing, retired or stale sources |
 | `whykit query [text]` | Search and filter records with a versioned JSON contract |
 | `whykit context <target>` | Produce a bounded agent/person context pack |
 | `whykit pack [targets…] --query …` | Produce a budgeted multi-record agent handoff bundle |
@@ -362,6 +392,7 @@ transcripts, screenshots or customer material.
 | `whykit doctor` | Check prerequisites, integrity and review hygiene |
 | `whykit install-hooks` | Install the pre-commit vault check |
 | `whykit serve <vault>` | Run the optional Explorer (source checkout only) |
+| `whykit completion bash\|zsh\|fish` | Print a shell completion script (`eval "$(whykit completion zsh)"`) |
 
 Exit codes are stable, because CI depends on them:
 
@@ -370,6 +401,10 @@ Exit codes are stable, because CI depends on them:
 | `0` | No errors (and no warnings, under `--strict`) |
 | `1` | Findings that should fail the build |
 | `2` | The tool could not run: no vault, invalid configuration/input, or an unreadable Git baseline |
+| `130` | Interrupted (Ctrl-C) |
+
+Errors go to stderr with a `hint:` line naming the fix; set `WHYKIT_DEBUG=1` to get a
+Python traceback for a bug report instead.
 
 `2` is deliberately distinct from `1`. A pipeline that cannot tell "the vault has
 problems" from "the check never ran" will eventually report the second as the
@@ -381,12 +416,16 @@ Optional, read-only, and not part of the data contract — it is a viewer, and i
 CI job cannot block a fix to the format. Obsidian is an optional editor; the
 Explorer exists so a vault is legible in a browser without installing a vault app.
 
+It needs Node.js and the Explorer's dependencies, and runs only from a source
+checkout. From the WhyKit repository:
+
 ```bash
-whykit serve ../whykit/examples/northline
+npm ci --prefix apps/explorer
+uv run whykit serve examples/northline
 ```
 
-This path is relative to the `my-company-context` directory created in the
-quick start; adjust it if you cloned WhyKit elsewhere.
+It listens on `127.0.0.1` by default and refuses to serve non-public documents on
+another interface unless you pass `--allow-sensitive-network`.
 
 ## Agents and other systems
 

@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 
+from .messages import print_no_vault
 from .io import atomic_write_text, safe_vault_target, vault_mutation_lock
 from .impact import analyze_impact
 from .lint import EVIDENCE_ID_RE, _split_table_row, evidence_register, find_vault_root, is_vault_root
@@ -132,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print("no WhyKit vault found", file=sys.stderr)
+        print_no_vault(args.root)
         return 2
 
     if args.evidence_command == "list":

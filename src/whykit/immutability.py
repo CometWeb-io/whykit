@@ -14,6 +14,7 @@ Everything else must be represented by a new D-NNN record.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -158,7 +159,42 @@ def immutable_at(base: str, path: str, root: str | None = None, *, prefix: str |
     return _status(content) in {"approved", "superseded", "archived"}
 
 
+def _require_revisions(root: str | None, *refs: str) -> None:
+    """Fail with an actionable message before ``git diff`` dumps its own usage.
+
+    The error is a ``CalledProcessError`` so callers that already handle Git
+    failures (``whykit check`` included) report it without new plumbing.
+    """
+    where = root or os.getcwd()
+    try:
+        git("rev-parse", "--is-inside-work-tree", root=root)
+    except subprocess.CalledProcessError as exc:
+        raise subprocess.CalledProcessError(
+            exc.returncode, exc.cmd, output="",
+            stderr=(
+                f"not inside a Git work tree: {where}\n"
+                "hint: history checks compare commits; run from the vault's repository or pass --root"
+            ),
+        ) from None
+    for ref in refs:
+        try:
+            if ref.startswith("-"):
+                # Never let a revision be read as a Git option.
+                raise subprocess.CalledProcessError(128, ["git", "rev-parse", ref])
+            git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", root=root)
+        except subprocess.CalledProcessError as exc:
+            raise subprocess.CalledProcessError(
+                exc.returncode, exc.cmd, output="",
+                stderr=(
+                    f"unknown Git revision: {ref}\n"
+                    "hint: pass a commit, branch or tag that exists locally; "
+                    "in a shallow CI checkout, fetch it first (e.g. `git fetch origin main`)"
+                ),
+            ) from None
+
+
 def changed_records(base: str, head: str, root: str | None = None) -> list[tuple[str, str]]:
+    _require_revisions(root, base, head)
     prefix = _git_prefix(root)
     # Prefer --relative so paths are vault-rooted when `root` is a subdirectory.
     # Fall back to stripping the prefix manually if an older Git rejects the flag
@@ -262,12 +298,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", required=True, help="base commit/ref")
     parser.add_argument("--head", default="HEAD", help="head commit/ref")
     parser.add_argument("--root", help="vault root (may be a subdirectory of the Git work tree)")
+    parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = parser.parse_args(argv)
     try:
         blocked = changed_records(args.base, args.head, args.root)
     except subprocess.CalledProcessError as exc:
-        print(exc.stderr or str(exc), file=sys.stderr)
+        print((exc.stderr or str(exc)).rstrip(), file=sys.stderr)
         return 2
+    except FileNotFoundError:
+        print("git is not installed or not on PATH\nhint: `whykit history` needs Git to compare revisions", file=sys.stderr)
+        return 2
+    if args.json:
+        import json
+        print(json.dumps({
+            "contract_version": 1,
+            "base": args.base,
+            "head": args.head,
+            "passed": not blocked,
+            "blocked": [{"status": status, "path": path} for status, path in blocked],
+        }, ensure_ascii=False, indent=2))
+        return 1 if blocked else 0
     if not blocked:
         print("history: immutable reasoning unchanged; review log append-only")
         return 0

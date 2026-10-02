@@ -107,7 +107,7 @@ Before finishing a change:
 - Material decisions reached the decision log.
 - Front matter status, dates and sensitivity are correct.
 - Imported sources have an ingestion record and evidence IDs.
-- `python3 scripts/whykit.py lint` passes. It catches the mechanical half of this list;
+- `whykit lint` passes. It catches the mechanical half of this list;
   the half above it is still yours.
 
 ## Learned User Preferences

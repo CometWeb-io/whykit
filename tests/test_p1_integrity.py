@@ -177,6 +177,19 @@ class ExplorerIndexTests(unittest.TestCase):
         self.assertEqual(payload["lint"]["files"], len(payload["docs"]))
         self.assertEqual(payload["lint"]["errors"], 0)
 
+    def test_explorer_index_bodies_exclude_front_matter(self) -> None:
+        result = run("explorer-index", "--root", str(ROOT / "examples" / "northline"), "--today", "2026-09-17")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        docs = json.loads(result.stdout)["docs"]
+        self.assertGreater(len(docs), 1)
+        for doc in docs:
+            body = doc["body"]
+            # Front matter keys must never leak into the rendered Markdown.
+            self.assertNotRegex(body, r"(?m)^(status|owner|source_ids|last_updated):", doc["id"])
+            self.assertFalse(body.lstrip().startswith("---"), doc["id"])
+        company = next(doc for doc in docs if doc["id"] == "00-context/company")
+        self.assertTrue(company["body"].startswith("# Company context"), company["body"][:80])
+
     def test_build_script_delegates_to_python(self) -> None:
         script = (ROOT / "apps" / "explorer" / "scripts" / "build-vault-index.mjs").read_text(encoding="utf-8")
         self.assertIn("explorer-index", script)

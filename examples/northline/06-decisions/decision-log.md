@@ -5,7 +5,7 @@ type: decision
 status: approved
 owner: "Product Lead"
 created: 2026-03-12
-last_updated: 2026-08-11
+last_updated: 2026-09-15
 source_of_truth: true
 sensitivity: public
 source_ids: []
@@ -28,4 +28,5 @@ ID format: `D-NNN`, assigned in order, never reused.
 | D-007 | HubSpot stays CRM of record | 2026-02-20 | Lena Krüger | accepted | [[06-decisions/d-007-hubspot]] |
 | D-008 | Stay in discrete manufacturing through 2026 | 2026-08-11 | Maya Chen | accepted | [[06-decisions/d-008-discrete]] |
 | D-009 | Partner-led motion as primary in DACH | 2026-03-20 | Lena Krüger | superseded | [[06-decisions/d-009-partner-led]] |
-| D-010 | Direct to ops directors; partners are optional | 2026-08-11 | Lena Krüger | accepted | [[06-decisions/d-010-direct]] |
+| D-010 | Direct to ops directors; partners are optional | 2026-08-11 | Lena Krüger | superseded | [[06-decisions/d-010-direct]] |
+| D-011 | Direct to ops directors, evidence recorded | 2026-09-15 | Lena Krüger | accepted | [[06-decisions/d-011-direct-with-evidence]] |
