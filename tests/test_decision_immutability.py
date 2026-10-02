@@ -22,8 +22,8 @@ class DecisionImmutabilityTests(unittest.TestCase):
         run("git", "config", "user.name", "WhyKit test", cwd=self.root)
         d = self.root / "06-decisions"
         d.mkdir()
-        (d / "d-001-accepted.md").write_text("---\nstatus: approved\n---\n# Accepted\n")
-        (d / "d-002-draft.md").write_text("---\nstatus: draft\n---\n# Draft\n")
+        (d / "d-001-accepted.md").write_text("---\nstatus: approved\n---\n# Accepted\n", encoding="utf-8")
+        (d / "d-002-draft.md").write_text("---\nstatus: draft\n---\n# Draft\n", encoding="utf-8")
         run("git", "add", ".", cwd=self.root)
         run("git", "commit", "-qm", "base", cwd=self.root)
         self.base = run("git", "rev-parse", "HEAD", cwd=self.root).stdout.strip()
@@ -36,7 +36,7 @@ class DecisionImmutabilityTests(unittest.TestCase):
 
     def test_approved_record_cannot_be_rewritten(self) -> None:
         p = self.root / "06-decisions/d-001-accepted.md"
-        p.write_text(p.read_text(encoding="utf-8") + "changed\n")
+        p.write_text(p.read_text(encoding="utf-8") + "changed\n", encoding="utf-8")
         run("git", "add", ".", cwd=self.root)
         run("git", "commit", "-qm", "rewrite", cwd=self.root)
         proc = self.check()
@@ -45,7 +45,7 @@ class DecisionImmutabilityTests(unittest.TestCase):
 
     def test_draft_record_remains_editable(self) -> None:
         p = self.root / "06-decisions/d-002-draft.md"
-        p.write_text(p.read_text(encoding="utf-8") + "changed\n")
+        p.write_text(p.read_text(encoding="utf-8") + "changed\n", encoding="utf-8")
         run("git", "add", ".", cwd=self.root)
         run("git", "commit", "-qm", "edit draft", cwd=self.root)
         proc = self.check()
@@ -54,7 +54,7 @@ class DecisionImmutabilityTests(unittest.TestCase):
     def test_approved_record_allows_review_date_refresh_only(self) -> None:
         p = self.root / "06-decisions/d-001-accepted.md"
         p.write_text(
-            "---\nstatus: approved\nlast_updated: 2026-09-22\nreview_by: 2027-03-22\n---\n# Accepted\n"
+            "---\nstatus: approved\nlast_updated: 2026-09-22\nreview_by: 2027-03-22\n---\n# Accepted\n", encoding="utf-8"
         )
         run("git", "add", ".", cwd=self.root)
         run("git", "commit", "-qm", "refresh review metadata", cwd=self.root)
@@ -64,7 +64,7 @@ class DecisionImmutabilityTests(unittest.TestCase):
     def test_approved_record_allows_metadata_only_supersession(self) -> None:
         p = self.root / "06-decisions/d-001-accepted.md"
         p.write_text(
-            "---\nstatus: superseded\nlast_updated: 2026-09-22\nsuperseded_by: D-003\n---\n# Accepted\n"
+            "---\nstatus: superseded\nlast_updated: 2026-09-22\nsuperseded_by: D-003\n---\n# Accepted\n", encoding="utf-8"
         )
         run("git", "add", ".", cwd=self.root)
         run("git", "commit", "-qm", "supersede metadata", cwd=self.root)
@@ -74,7 +74,7 @@ class DecisionImmutabilityTests(unittest.TestCase):
     def test_supersession_cannot_smuggle_a_reasoning_rewrite(self) -> None:
         p = self.root / "06-decisions/d-001-accepted.md"
         p.write_text(
-            "---\nstatus: superseded\nlast_updated: 2026-09-22\nsuperseded_by: D-003\n---\n# Accepted\nrewritten rationale\n"
+            "---\nstatus: superseded\nlast_updated: 2026-09-22\nsuperseded_by: D-003\n---\n# Accepted\nrewritten rationale\n", encoding="utf-8"
         )
         run("git", "add", ".", cwd=self.root)
         run("git", "commit", "-qm", "bad supersession", cwd=self.root)
@@ -92,7 +92,7 @@ class DecisionImmutabilityQuotedStatusTests(unittest.TestCase):
         run("git", "config", "user.name", "WhyKit test", cwd=root)
         d = root / "06-decisions"
         d.mkdir()
-        (d / "d-001-accepted.md").write_text(f"---\n{status_line}\n---\n# Accepted\n")
+        (d / "d-001-accepted.md").write_text(f"---\n{status_line}\n---\n# Accepted\n", encoding="utf-8")
         run("git", "add", ".", cwd=root)
         run("git", "commit", "-qm", "base", cwd=root)
         base = run("git", "rev-parse", "HEAD", cwd=root).stdout.strip()
@@ -102,7 +102,7 @@ class DecisionImmutabilityQuotedStatusTests(unittest.TestCase):
         tmp, root, base = self._repo_with_status('status: "approved"')
         try:
             p = root / "06-decisions/d-001-accepted.md"
-            p.write_text(p.read_text(encoding="utf-8") + "changed\n")
+            p.write_text(p.read_text(encoding="utf-8") + "changed\n", encoding="utf-8")
             run("git", "add", ".", cwd=root)
             run("git", "commit", "-qm", "rewrite", cwd=root)
             proc = run(sys.executable, str(SCRIPT), "history", "--base", base, "--head", "HEAD", cwd=root)
@@ -114,7 +114,7 @@ class DecisionImmutabilityQuotedStatusTests(unittest.TestCase):
         tmp, root, base = self._repo_with_status("status: approved # accepted by council")
         try:
             p = root / "06-decisions/d-001-accepted.md"
-            p.write_text(p.read_text(encoding="utf-8") + "changed\n")
+            p.write_text(p.read_text(encoding="utf-8") + "changed\n", encoding="utf-8")
             run("git", "add", ".", cwd=root)
             run("git", "commit", "-qm", "rewrite", cwd=root)
             proc = run(sys.executable, str(SCRIPT), "history", "--base", base, "--head", "HEAD", cwd=root)

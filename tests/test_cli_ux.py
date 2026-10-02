@@ -271,6 +271,7 @@ class CompletionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("invalid choice", result.stderr)
 
+    @unittest.skipIf(os.name == "nt", "bash on Windows runners is not a POSIX login shell")
     @unittest.skipUnless(shutil.which("bash"), "bash is required")
     def test_bash_completion_completes_commands_options_and_choices(self) -> None:
         script = run("completion", "bash").stdout

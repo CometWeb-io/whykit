@@ -207,7 +207,7 @@ class StatusAndGraphTests(unittest.TestCase):
             "| D-001 |  |  |  | proposed / accepted / superseded |  |",
             "| D-001 | Test | 2026-09-01 | Test owner | accepted | [[06-decisions/d-001-test]] |",
         )
-        log.write_text(text)
+        log.write_text(text, encoding="utf-8")
         report = build_status(self.vault, today=dt.date(2026, 9, 22), due_days=7)
         self.assertEqual(len(report["review_queue"]), 1)
         self.assertEqual(report["review_queue"][0]["days"], 3)

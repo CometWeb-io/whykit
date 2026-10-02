@@ -74,6 +74,12 @@ CLI and the lint rule codes.
 - Canonical-only graphs never contain edges to excluded nodes; an ambiguous
   bare stem or duplicate decision ID is reported instead of silently picking one.
 - The review log table header is accepted when padded by a Markdown formatter.
+- A superseded decision whose successor was itself superseded later
+  (D-001 → D-002 → D-003) no longer raises `decision.superseded_by_missing`.
+- `new` prints vault-relative paths with forward slashes on Windows too.
+- The Northline example records the partner-channel evidence for its direct
+  motion in D-011, which supersedes D-010 instead of rewriting it, so
+  `whykit trace --strict` passes on the example.
 
 ### Security
 

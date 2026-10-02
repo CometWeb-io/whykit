@@ -538,7 +538,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.json:
                 print(json.dumps(payload, ensure_ascii=False, indent=2))
             else:
-                print(f"created {decision_id}: {path.relative_to(vault)}")
+                print(f"created {decision_id}: {path.relative_to(vault).as_posix()}")
         elif args.kind == "evidence":
             evidence_id = create_evidence(
                 vault, source=args.source_name, location=args.location, kind=args.evidence_type,
@@ -561,7 +561,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.json:
                 print(json.dumps(payload, ensure_ascii=False, indent=2))
             else:
-                print(f"created note: {path.relative_to(vault)}")
+                print(f"created note: {path.relative_to(vault).as_posix()}")
                 if args.link_from:
                     print(f"linked from: {args.link_from}")
                 else:

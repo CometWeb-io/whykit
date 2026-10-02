@@ -910,6 +910,7 @@ def check_decision_log(root: Path, notes: list[Note], findings: list[Finding]) -
                 add(findings, root, note.path, 1, "warning", "decision.supersedes_status", f"{did} is approved and supersedes {supersedes}, but the older record is not marked superseded")
 
     replacements: dict[str, list[str]] = {}
+    historical_replacements: dict[str, list[str]] = {}
     supersedes_edges: dict[str, str] = {}
     for replacement_id, replacement_note in record_notes.items():
         predecessor = str(replacement_note.front.get("supersedes", "")).strip()
@@ -917,6 +918,10 @@ def check_decision_log(root: Path, notes: list[Note], findings: list[Finding]) -
             supersedes_edges[replacement_id] = predecessor
         if DECISION_ID_RE.fullmatch(predecessor) and replacement_note.front.get("status") == "approved":
             replacements.setdefault(predecessor, []).append(replacement_id)
+        elif DECISION_ID_RE.fullmatch(predecessor) and replacement_note.front.get("status") == "superseded":
+            # A successor that was itself later superseded still replaces its
+            # predecessor; the chain's own tail is checked on that record.
+            historical_replacements.setdefault(predecessor, []).append(replacement_id)
 
     for predecessor, approved_replacements in replacements.items():
         if len(approved_replacements) > 1:
@@ -942,7 +947,7 @@ def check_decision_log(root: Path, notes: list[Note], findings: list[Finding]) -
             current = supersedes_edges[current]
 
     for did, note in record_notes.items():
-        approved_replacements = sorted(replacements.get(did, []))
+        approved_replacements = sorted(replacements.get(did, []) + historical_replacements.get(did, []))
         declared = str(note.front.get("superseded_by", "")).strip()
         if note.front.get("status") == "superseded" and not approved_replacements:
             add(findings, root, note.path, 1, "warning", "decision.superseded_by_missing", f"{did} is superseded but no approved newer record declares `supersedes: {did}`")

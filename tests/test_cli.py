@@ -95,7 +95,7 @@ class InitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "vault"
             target.mkdir()
-            (target / "keepme.md").write_text("mine")
+            (target / "keepme.md").write_text("mine", encoding="utf-8")
             self.assertEqual(run("init", str(target)).returncode, 2)
             self.assertEqual(run("init", str(target), "--force").returncode, 0)
             self.assertTrue((target / "keepme.md").exists(), "--force must not wipe the destination")
@@ -153,12 +153,12 @@ class AdoptTests(unittest.TestCase):
         (self.legacy / "adr" / "0001-use-postgres.md").write_text(
             "# Use Postgres\n\n## Status\n\nAccepted\n\n## Context\n\n"
             + "We needed a database that the team already knew how to operate. " * 3
-            + "\n\n## Decision\n\nPostgres.\n"
+            + "\n\n## Decision\n\nPostgres.\n", encoding="utf-8"
         )
-        (self.legacy / "notes.md").write_text("# Notes\n\n" + "Something substantive was written here. " * 8)
-        (self.legacy / "copy.md").write_text("# Notes\n\n" + "Something substantive was written here. " * 8)
-        (self.legacy / "stub.md").write_text("# Just a heading\n")
-        (self.legacy / "empty.md").write_text("")
+        (self.legacy / "notes.md").write_text("# Notes\n\n" + "Something substantive was written here. " * 8, encoding="utf-8")
+        (self.legacy / "copy.md").write_text("# Notes\n\n" + "Something substantive was written here. " * 8, encoding="utf-8")
+        (self.legacy / "stub.md").write_text("# Just a heading\n", encoding="utf-8")
+        (self.legacy / "empty.md").write_text("", encoding="utf-8")
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -270,7 +270,7 @@ class AdoptTests(unittest.TestCase):
         from whykit.adopt import scan
 
         outside = self.base / "outside-secret.md"
-        outside.write_text("# Secret\n\n" + "outside material " * 20)
+        outside.write_text("# Secret\n\n" + "outside material " * 20, encoding="utf-8")
         link = self.legacy / "linked-secret.md"
         try:
             link.symlink_to(outside)
@@ -284,7 +284,7 @@ class AdoptTests(unittest.TestCase):
 
         candidates = scan(self.legacy)
         target = next(c for c in candidates if c.assessment == "useful" and not c.looks_like_decision)
-        target.path.write_text(target.path.read_text(encoding="utf-8") + "\nchanged after scan\n")
+        target.path.write_text(target.path.read_text(encoding="utf-8") + "\nchanged after scan\n", encoding="utf-8")
         with patch("whykit.adopt.scan", return_value=candidates):
             with self.assertRaisesRegex(RuntimeError, "source changed during adoption"):
                 adopt(self.legacy, self.vault, write=True, owner="Test owner")

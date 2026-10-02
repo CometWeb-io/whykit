@@ -252,6 +252,40 @@ class LintRegressionTests(VaultTestCase):
         )
         self.assertIn("decision.supersession_cycle", self.codes())
 
+    def _write_chain(self, third_status: str) -> None:
+        self.write(
+            "06-decisions/d-001-first.md",
+            front("First", doc_type="decision", status="superseded", extra="decision_id: D-001\nsuperseded_by: D-002\n"),
+        )
+        self.write(
+            "06-decisions/d-002-second.md",
+            front("Second", doc_type="decision", status="superseded", extra="decision_id: D-002\nsupersedes: D-001\nsuperseded_by: D-003\n"),
+        )
+        self.write(
+            "06-decisions/d-003-third.md",
+            front("Third", doc_type="decision", status=third_status, extra="decision_id: D-003\nsupersedes: D-002\nreview_by: 2027-01-01\n"),
+        )
+        self.write(
+            "06-decisions/decision-log.md",
+            front("Decision log", doc_type="decision")
+            + "\n| ID | Decision | Date | Owner | Status | Record |\n"
+              "|---|---|---|---|---|---|\n"
+              "| D-001 | First | 2026-09-17 | Test owner | superseded | [[06-decisions/d-001-first]] |\n"
+              "| D-002 | Second | 2026-09-17 | Test owner | superseded | [[06-decisions/d-002-second]] |\n"
+              "| D-003 | Third | 2026-09-17 | Test owner | accepted | [[06-decisions/d-003-third]] |\n",
+        )
+
+    def test_superseded_successor_still_counts_as_a_replacement(self) -> None:
+        # D-001 -> D-002 -> D-003: D-002 being superseded later must not orphan D-001.
+        self._write_chain("approved")
+        codes = self.codes()
+        self.assertNotIn("decision.superseded_by_missing", codes)
+        self.assertNotIn("decision.superseded_by_mismatch", codes)
+
+    def test_chain_without_an_approved_tail_still_warns(self) -> None:
+        self._write_chain("draft")
+        self.assertIn("decision.superseded_by_missing", self.codes())
+
     def test_superseded_by_must_match_the_approved_reverse_edge(self) -> None:
         self.write(
             "06-decisions/d-001-first.md",

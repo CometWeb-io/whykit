@@ -177,7 +177,7 @@ class CompositeActionContractTests(unittest.TestCase):
             ok = run(lint, WHYKIT_STRICT="true", WHYKIT_TODAY="2026-09-17")
             self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
             self.assertEqual(
-                record.read_text().split(),
+                record.read_text(encoding="utf-8").split(),
                 ["lint", "--root", "vault", "--strict", "--today", "2026-09-17"],
             )
             bad_strict = run(lint, WHYKIT_STRICT="yes", WHYKIT_TODAY="")
@@ -196,7 +196,7 @@ class CompositeActionContractTests(unittest.TestCase):
             )
             self.assertEqual(policy.returncode, 0, policy.stdout + policy.stderr)
             self.assertEqual(
-                record.read_text().split(),
+                record.read_text(encoding="utf-8").split(),
                 ["check", "--root", "vault", "--profile", "ci", "--today", "2026-09-17"],
             )
             bad_history = run(

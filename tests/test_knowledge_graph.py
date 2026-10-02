@@ -77,18 +77,18 @@ class GraphCorrectnessTests(VaultCopyTestCase):
         self.assertGreater(graph["stats"]["edges_by_type"]["wikilink"], len(targets) - len(graph["unresolved"]) - 1)
 
     def test_canonical_only_graph_never_points_at_excluded_nodes(self) -> None:
-        # D-010 supersedes D-009; make only the successor canonical.
-        _set_front(self.vault / "06-decisions" / "d-010-direct.md", "source_of_truth", "true")
+        # D-011 supersedes D-010; make only the successor canonical.
+        _set_front(self.vault / "06-decisions" / "d-011-direct-with-evidence.md", "source_of_truth", "true")
         graph = build_graph(self.vault, canonical_only=True)
         ids = {node["id"] for node in graph["nodes"]}
-        self.assertIn("06-decisions/d-010-direct", ids)
-        self.assertNotIn("06-decisions/d-009-partner-led", ids)
+        self.assertIn("06-decisions/d-011-direct-with-evidence", ids)
+        self.assertNotIn("06-decisions/d-010-direct", ids)
         for edge in graph["edges"]:
             self.assertIn(edge["from"], ids, edge)
             self.assertIn(edge["to"], ids, edge)
         full = build_graph(self.vault)
         self.assertIn(
-            {"from": "06-decisions/d-010-direct", "to": "06-decisions/d-009-partner-led", "type": "supersedes"},
+            {"from": "06-decisions/d-011-direct-with-evidence", "to": "06-decisions/d-010-direct", "type": "supersedes"},
             full["edges"],
         )
 
@@ -97,7 +97,10 @@ class GraphCorrectnessTests(VaultCopyTestCase):
         clone.write_text("---\ntitle: Copy\ndecision_id: D-009\n---\n", encoding="utf-8")
         graph = build_graph(self.vault)
         supersedes = [edge for edge in graph["edges"] if edge["type"] == "supersedes"]
-        self.assertEqual(supersedes, [])
+        self.assertEqual(
+            supersedes,
+            [{"from": "06-decisions/d-011-direct-with-evidence", "to": "06-decisions/d-010-direct", "type": "supersedes"}],
+        )
         self.assertIn(
             {"from": "06-decisions/d-010-direct", "target": "D-009", "type": "supersedes", "reason": "ambiguous"},
             graph["unresolved"],
@@ -197,7 +200,7 @@ class TraceTests(VaultCopyTestCase):
 
     def test_clean_example_has_no_stale_or_retired_gaps_without_policy(self) -> None:
         report = build_trace(self.vault, today=TODAY)
-        self.assertEqual(report["summary"]["decisions"], 10)
+        self.assertEqual(report["summary"]["decisions"], 11)
         self.assertEqual(report["summary"]["live"], 9)
         self.assertEqual(report["summary"]["gaps"]["stale_evidence"], 0)
         self.assertEqual(report["summary"]["gaps"]["retired_evidence"], 0)
@@ -213,26 +216,27 @@ class TraceTests(VaultCopyTestCase):
         d002 = self._record(report, "D-002")
         self.assertTrue(all(item["via"] is None for item in d002["evidence"]))
 
-    def _strip_d010_evidence(self) -> None:
-        decision = self.vault / "06-decisions" / "d-010-direct.md"
+    def _strip_d011_evidence(self) -> None:
+        decision = self.vault / "06-decisions" / "d-011-direct-with-evidence.md"
         text = decision.read_text(encoding="utf-8")
-        text = text.replace('source_ids: ["E-013"]', "source_ids: []", 1).replace(" [E-013]", "")
+        text = text.replace('source_ids: ["E-013"]', "source_ids: []", 1).replace(" [E-013]", "").replace("- E-013 — ", "- ")
         decision.write_text(text, encoding="utf-8")
 
     def test_example_decisions_all_cite_evidence(self) -> None:
         report = build_trace(self.vault, today=TODAY)
         self.assertEqual(report["summary"]["gaps"]["no_evidence"], 0)
-        d010 = self._record(report, "D-010")
-        self.assertEqual({item["id"] for item in d010["evidence"]}, {"E-013"})
-        self.assertEqual(d010["gaps"], [])
+        d011 = self._record(report, "D-011")
+        self.assertEqual({item["id"] for item in d011["evidence"]}, {"E-013"})
+        self.assertEqual(d011["gaps"], [])
+        self.assertEqual(self._record(report, "D-010")["superseded_by"], ["D-011"])
 
     def test_successor_does_not_inherit_evidence_from_superseded_decision(self) -> None:
-        # D-009 cites E-013 too; once D-010 drops its own citation it must not borrow D-009's.
-        self._strip_d010_evidence()
+        # D-009 cites E-013 too; once D-011 drops its own citation it must not borrow it up the chain.
+        self._strip_d011_evidence()
         report = build_trace(self.vault, today=TODAY)
-        d010 = self._record(report, "D-010")
-        self.assertEqual(d010["evidence"], [])
-        self.assertEqual(d010["gaps"], ["no_evidence"])
+        d011 = self._record(report, "D-011")
+        self.assertEqual(d011["evidence"], [])
+        self.assertEqual(d011["gaps"], ["no_evidence"])
 
     def test_retired_missing_and_stale_evidence_are_flagged(self) -> None:
         retire_evidence(self.vault, "E-004", reason="superseded survey", replaced_by="E-005", today=TODAY)
@@ -281,11 +285,11 @@ class TraceTests(VaultCopyTestCase):
         clean = run("trace", "--root", str(self.vault), "--today", "2026-09-17", "--gaps-only", "--strict", "--json")
         self.assertEqual(clean.returncode, 0, clean.stdout + clean.stderr)
         self.assertEqual(json.loads(clean.stdout)["decisions"], [])
-        self._strip_d010_evidence()
+        self._strip_d011_evidence()
         gaps = run("trace", "--root", str(self.vault), "--today", "2026-09-17", "--gaps-only", "--strict", "--json")
         self.assertEqual(gaps.returncode, 1, gaps.stderr)
         payload = json.loads(gaps.stdout)
-        self.assertEqual([item["decision_id"] for item in payload["decisions"]], ["D-010"])
+        self.assertEqual([item["decision_id"] for item in payload["decisions"]], ["D-011"])
         missing = run("trace", "--root", str(self.vault), "--decision", "D-404")
         self.assertEqual(missing.returncode, 1)
         bad = run("trace", "--root", str(self.vault), "--decision", "E-001")
