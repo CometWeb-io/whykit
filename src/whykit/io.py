@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import codecs
 import json
 import os
 import secrets
@@ -66,7 +67,11 @@ def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None
             previous_mode = path.stat().st_mode & 0o7777
         except FileNotFoundError:
             pass
-        with tmp.open("x", encoding=encoding, newline="") as handle:
+        # surrogateescape: under a C/ASCII locale, command-line text (a title,
+        # an owner) arrives with surrogates for its UTF-8 bytes; write those
+        # bytes back instead of refusing the record.
+        errors = "surrogateescape" if codecs.lookup(encoding).name == "utf-8" else "strict"
+        with tmp.open("x", encoding=encoding, errors=errors, newline="") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
@@ -293,7 +298,7 @@ def stage_transaction(root: Path, updates: Mapping[Path, str]) -> Path:
         manifest.append({
             "target": relative,
             "staged": staged_name,
-            "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            "sha256": hashlib.sha256(content.encode("utf-8", "surrogateescape")).hexdigest(),
         })
     # ASCII JSON: paths decoded under a C locale carry surrogates, which UTF-8
     # cannot encode; json escapes round-trip them exactly.

@@ -527,8 +527,8 @@ def main(argv: list[str] | None = None) -> int:
                 }
                 for c in candidates
             ],
-            "ingestion_record": str(record.relative_to(vault)) if record else None,
-            "migration": str(migration.relative_to(vault)) if migration else None,
+            "ingestion_record": record.relative_to(vault).as_posix() if record else None,
+            "migration": migration.relative_to(vault).as_posix() if migration else None,
         }
         emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0

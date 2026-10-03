@@ -115,7 +115,8 @@ class QuickstartTests(unittest.TestCase):
             combined = "".join(outputs)
             self.assertIn("created E-001: 00-context/evidence-register.md", combined)
             self.assertIn("created D-001: 06-decisions/d-001-ship-sso-before-audit-logs.md", combined)
-            self.assertRegex(combined, r"\d+ files — 0 error\(s\), 4 warning\(s\)")
+            # The separator is an em dash on UTF-8 consoles and "-" or a code-page byte elsewhere.
+            self.assertRegex(combined, r"\d+ files \S 0 error\(s\), 4 warning\(s\)")
             self.assertIn("06-decisions/d-001-ship-sso-before-audit-logs.md  (Platform)", combined)
 
 

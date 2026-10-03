@@ -42,6 +42,9 @@ def _yaml_string(value: str) -> str:
 
 
 def _slugify(value: str) -> str:
+    # A C-locale argv title carries surrogates for its UTF-8 bytes; recover the
+    # text first so the file name does not depend on the locale.
+    value = value.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
     normalized = unicodedata.normalize("NFKD", value)
     ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
     slug = re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")

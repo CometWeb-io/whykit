@@ -7,6 +7,7 @@ wrong case, a read-only file, a decision record whose name is not ASCII.
 """
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -306,6 +307,25 @@ class LineEndingTests(VaultCase):
         self.assertEqual(match_line_endings(crlf, "x\ny\r\n"), "x\r\ny\r\n")
         self.assertEqual(match_line_endings(lf, "x\ny\n"), "x\ny\n")
         self.assertEqual(match_line_endings(self.tmp / "new.md", "x\n"), "x\n")
+
+
+class CLocaleArgumentTests(VaultCase):
+    """Under LC_ALL=C with UTF-8 mode off, argv text arrives as surrogates.
+
+    Linux runners reproduce this end to end; this test simulates it in-process
+    so every platform guards the write path and the file name.
+    """
+
+    def test_surrogate_title_is_written_as_utf8_with_a_locale_independent_name(self) -> None:
+        from whykit import cli
+
+        vault = self.vault("c-locale")
+        title = "Zażółć gęślą jaźń".encode().decode("ascii", "surrogateescape")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["new", "--root", str(vault), "decision", title]), 0)
+        records = sorted((vault / "06-decisions").glob("d-*-zazoc-gesla-jazn.md"))
+        self.assertEqual(len(records), 1, sorted(p.name for p in (vault / "06-decisions").iterdir()))
+        self.assertIn("Zażółć gęślą jaźń", records[0].read_text(encoding="utf-8"))
 
 
 class FileNameTests(VaultCase):
