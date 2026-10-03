@@ -147,6 +147,35 @@ def _safe_parts(path: str) -> tuple[str, ...] | None:
     return parts
 
 
+def _filesystem_encoding() -> str:
+    return sys.getfilesystemencoding()
+
+
+def _os_name(part: str) -> str:
+    """The file name that writes *part*'s original Git bytes to disk.
+
+    Git names are bytes, decoded here as UTF-8 with surrogateescape. Under a
+    C/ASCII locale the interpreter cannot encode such a name for the file
+    system and the file would be lost, so decode the same bytes the way the
+    file system codec will encode them back. Windows names are text.
+    """
+    if os.name == "nt":
+        return part
+    raw = part.encode("utf-8", "surrogateescape")
+    return raw.decode(_filesystem_encoding(), "surrogateescape")
+
+
+def _repo_text(value: str) -> str:
+    """Undo :func:`_os_name` for display: surrogates back to UTF-8 text.
+
+    Only escaped bytes change; text that is already decoded is untouched, and
+    bytes that are not valid UTF-8 stay escaped so they never merge.
+    """
+    if not any("\udc80" <= char <= "\udcff" for char in value):
+        return value
+    return value.encode("utf-8", "surrogateescape").decode("utf-8", "surrogateescape")
+
+
 def _wanted_content(name: str) -> bool:
     """Whether lint reads the file; anything else only needs to exist."""
     suffix = PurePosixPath(name).suffix.lower()
@@ -174,7 +203,7 @@ def materialize(rev: str, prefix: str, root: str, dest: Path) -> bool:
     blobs = _read_blobs([oid for _, oid, wanted in files if wanted], root)
     base = dest.resolve()
     for parts, oid, wanted in files:
-        target = base.joinpath(*parts)
+        target = base.joinpath(*(_os_name(part) for part in parts))
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             with open(target, "wb") as handle:
@@ -219,11 +248,17 @@ def _read_side(directory: Path, present: bool, today: dt.date) -> _Side:
             "review_by": _text(note.front.get("review_by")) or None,
             "supersedes": sorted({sid for sid in _as_list(note.front.get("supersedes")) if DECISION_ID_RE.fullmatch(sid)}),
             "superseded_by": sorted({sid for sid in _as_list(note.front.get("superseded_by")) if DECISION_ID_RE.fullmatch(sid)}),
-            "path": vault.relative(note.path),
+            "path": _repo_text(vault.relative(note.path)),
             "cites": list(note.cited_evidence),
         }
     active, retired, _ = evidence_register(directory)
-    _, findings = lint(directory, today=today, vault=vault)
+    _, found = lint(directory, today=today, vault=vault)
+    # Paths read back from disk carry the escapes _os_name wrote; report the
+    # names Git has, which is also what the rename map is keyed by.
+    findings = [
+        Finding(_repo_text(item.path), item.line, item.level, item.code, _repo_text(item.message))
+        for item in found
+    ]
     return _Side(True, decisions, active, retired, findings)
 
 

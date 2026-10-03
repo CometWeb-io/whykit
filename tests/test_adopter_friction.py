@@ -150,6 +150,47 @@ class ClosedPipeTests(unittest.TestCase):
                 self.assertNotIn("BrokenPipeError", stderr)
                 self.assertIn(code, (0, 1), stderr)
 
+    def test_a_windows_closed_pipe_is_a_closed_pipe_too(self) -> None:
+        # Windows reports a write to a pipe whose reader left as
+        # OSError(EINVAL), not BrokenPipeError. It must end the same way: exit
+        # 1, nothing on stderr, never an io_error with exit 2.
+        import contextlib
+        import errno
+        import io
+        from unittest import mock
+
+        from whykit import cli
+
+        class GoneReader(io.RawIOBase):
+            gone = True
+
+            def writable(self) -> bool:
+                return True
+
+            def write(self, data) -> int:  # type: ignore[override]
+                if self.gone:
+                    raise OSError(errno.EINVAL, "Invalid argument")
+                return len(data)
+
+        for argv in (
+            ["lint", "--format", "sarif", "--today", "2026-09-17"],
+            ["lint", "--json", "--today", "2026-09-17"],
+            ["status", "--today", "2026-09-17"],
+        ):
+            with self.subTest(argv=argv):
+                raw = GoneReader()
+                stream = io.TextIOWrapper(io.BufferedWriter(raw), encoding="utf-8")
+                err = io.StringIO()
+                try:
+                    with mock.patch.object(cli, "_WINDOWS", True, create=True), \
+                            mock.patch.object(sys, "stdout", stream), contextlib.redirect_stderr(err):
+                        code = cli.main([*argv, "--root", str(EXAMPLE)])
+                finally:
+                    raw.gone = False
+                    stream.close()
+                self.assertEqual(code, 1, err.getvalue())
+                self.assertEqual(err.getvalue(), "")
+
 
 class TitlesInOtherScriptsTests(unittest.TestCase):
     def test_letters_without_a_decomposition_keep_their_base_letter(self) -> None:
@@ -235,6 +276,20 @@ class AdoptFromAWorkingCopyTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         rows = [line for line in result.stdout.splitlines() if line.startswith("  notes/")]
         self.assertEqual(len(rows), 2, result.stdout)
+        columns = {display_width(row[: row.index("useful")]) for row in rows}
+        self.assertEqual(len(columns), 1, rows)
+
+    def test_the_assessment_column_aligns_on_a_console_that_escapes_the_name(self) -> None:
+        # A legacy code page (cp1252 on Windows) cannot encode CJK, so the name
+        # is printed as backslash escapes: the padding must follow what is
+        # printed, not the cells the original characters would take.
+        (self.source / "notes" / "決定事項.md").write_text("# 決定\n\n" + "word " * 30 + "\n", encoding="utf-8")
+        (self.source / "notes" / "plain-ascii.md").write_text("# Plain\n\n" + "word " * 30 + "\n", encoding="utf-8")
+        result = run("adopt", str(self.source), "--into", str(self.vault), env={"PYTHONIOENCODING": "cp1252"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [line for line in result.stdout.splitlines() if line.startswith("  notes/")]
+        self.assertEqual(len(rows), 2, result.stdout)
+        self.assertTrue(any("\\u" in row for row in rows), rows)
         columns = {display_width(row[: row.index("useful")]) for row in rows}
         self.assertEqual(len(columns), 1, rows)
 

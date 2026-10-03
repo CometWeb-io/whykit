@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import errno
 import os
 import re
 import shlex
@@ -1293,6 +1294,30 @@ def _wants_json(args: argparse.Namespace) -> bool:
     return bool(getattr(args, "json", False))
 
 
+_WINDOWS = sys.platform == "win32"
+
+
+def _reader_gone(exc: OSError) -> bool:
+    """Whether *exc* means the reader of stdout went away (`| head -1`).
+
+    POSIX raises BrokenPipeError (EPIPE). Windows reports a write to a pipe
+    whose reader closed as EINVAL; that errno never carries a file name there,
+    which keeps a real filesystem refusal on the io_error path.
+    """
+    if isinstance(exc, BrokenPipeError) or exc.errno == errno.EPIPE:
+        return True
+    return _WINDOWS and exc.errno == errno.EINVAL and exc.filename is None
+
+
+def _silence_stdout() -> None:
+    """Point stdout at devnull so the interpreter's final flush stays quiet."""
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+    except (OSError, ValueError):
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     # Before any output: an ASCII or legacy code-page console must degrade
     # glyphs, not abort the report with UnicodeEncodeError.
@@ -1317,16 +1342,12 @@ def main(argv: list[str] | None = None) -> int:
         return code
     except KeyboardInterrupt:
         return emit_error("interrupted", "interrupted", json_mode=_wants_json(args))
-    except BrokenPipeError:
-        # The reader went away (`whykit query | head`). Point stdout at devnull
-        # so the interpreter's final flush does not print a second traceback.
-        try:
-            devnull = os.open(os.devnull, os.O_WRONLY)
-            os.dup2(devnull, sys.stdout.fileno())
-        except (OSError, ValueError):
-            pass
-        return 1
     except OSError as exc:
+        if _reader_gone(exc):
+            # The reader went away (`whykit query | head`): exit 1 quietly,
+            # without a second traceback from the final flush.
+            _silence_stdout()
+            return 1
         # A filesystem refusal is a user-facing condition, not a crash.
         # WHYKIT_DEBUG=1 restores the traceback for bug reports.
         if os.environ.get("WHYKIT_DEBUG"):

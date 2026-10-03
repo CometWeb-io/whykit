@@ -262,6 +262,47 @@ class DiffReportTests(unittest.TestCase):
         report = json.loads(result.stdout.decode("utf-8"))
         self.assertEqual(report["decisions"]["moved"], self.report["decisions"]["moved"])
 
+    @unittest.skipIf(os.name == "nt", "Windows file names are UTF-16, not bytes")
+    def test_ascii_filesystem_encoding_still_writes_non_ascii_names(self) -> None:
+        # Linux under LC_ALL=C (no UTF-8 mode) encodes file names as ASCII with
+        # surrogateescape. Simulate that interpreter here: only names that
+        # round-trip through that codec can be opened, exactly as there.
+        from unittest import mock
+
+        from whykit import diff as diff_module
+        from whykit.immutability import _git_prefix
+
+        real_open = open
+
+        def ascii_open(target, *args, **kwargs):
+            os.fspath(target).encode("ascii", "surrogateescape")  # raises like the C-locale interpreter
+            return real_open(target, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as scratch, \
+                mock.patch.object(diff_module, "_filesystem_encoding", lambda: "ascii", create=True), \
+                mock.patch.object(diff_module, "open", ascii_open, create=True):
+            dest = Path(scratch)
+            where = str(self.vault)
+            self.assertTrue(diff_module.materialize(self.refs["head"], _git_prefix(where), where, dest))
+            names = os.listdir(os.fsencode(dest / "06-decisions"))
+        self.assertIn(CAFE_RENAMED.encode("utf-8"), names)
+
+    @unittest.skipIf(os.name == "nt", "Windows file names are UTF-16, not bytes")
+    def test_git_names_map_to_their_bytes_and_back_for_display(self) -> None:
+        from unittest import mock
+
+        from whykit import diff as diff_module
+
+        with mock.patch.object(diff_module, "_filesystem_encoding", lambda: "ascii"):
+            escaped = diff_module._os_name(CAFE)
+        self.assertEqual(escaped.encode("ascii", "surrogateescape"), CAFE.encode("utf-8"))
+        with mock.patch.object(diff_module, "_filesystem_encoding", lambda: "utf-8"):
+            self.assertEqual(diff_module._os_name(CAFE), CAFE)
+        self.assertEqual(diff_module._repo_text(f"06-decisions/{escaped}"), f"06-decisions/{CAFE}")
+        self.assertEqual(diff_module._repo_text(f"Café links {escaped}"), f"Café links {CAFE}")
+        # Bytes that are not UTF-8 stay escaped rather than collapsing into U+FFFD.
+        self.assertEqual(diff_module._repo_text("bad-\udcff.md"), "bad-\udcff.md")
+
     def test_identical_revisions_report_no_change(self) -> None:
         code, out, _ = call("diff", "--base", "HEAD", "--root", str(self.vault), "--today", TODAY, "--json")
         self.assertEqual(code, 0)

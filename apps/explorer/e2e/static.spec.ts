@@ -21,6 +21,24 @@ async function watchCsp(page: Page): Promise<() => Promise<string[]>> {
   return () => page.evaluate(() => (window as unknown as { __csp?: string[] }).__csp ?? []);
 }
 
+/**
+ * Script tags that do not load a bundled file. HTML tag and attribute names
+ * are case-insensitive, so `<SCRIPT>` must be caught as well as `<script>`.
+ */
+function unbundledScripts(page: string): string[] {
+  return (page.match(/<script\b[^>]*>/gi) ?? []).filter(tag => !/\ssrc\s*=\s*"\.\//i.test(tag));
+}
+
+function hasStyleElement(page: string): boolean {
+  return /<style\b/i.test(page);
+}
+
+test("the inline-script check sees tags in any letter case", () => {
+  expect(unbundledScripts('<SCRIPT>alert(1)</SCRIPT><Script type="module">x()</Script>')).toHaveLength(2);
+  expect(unbundledScripts('<script type="module" crossorigin src="./assets/index.js"></script>')).toEqual([]);
+  expect(hasStyleElement("<STYLE>body{}</STYLE>")).toBe(true);
+});
+
 test("the build ships a strict CSP and no inline script or style", () => {
   const page = html();
   const csp = page.match(/<meta http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1] ?? "";
@@ -29,10 +47,10 @@ test("the build ships a strict CSP and no inline script or style", () => {
   expect(csp).toContain("object-src 'none'");
   expect(csp).not.toContain("unsafe-inline");
   expect(csp).not.toContain("unsafe-eval");
-  expect(page.indexOf("Content-Security-Policy")).toBeLessThan(page.indexOf("<script"));
-  for (const tag of page.match(/<script\b[^>]*>/g) ?? []) expect(tag).toMatch(/\bsrc="\.\//);
-  expect(page).not.toMatch(/<style\b/);
-  expect(page).not.toMatch(/\s(src|href)="\//);
+  expect(page.indexOf("Content-Security-Policy")).toBeLessThan(page.search(/<script\b/i));
+  expect(unbundledScripts(page)).toEqual([]);
+  expect(hasStyleElement(page)).toBe(false);
+  expect(page).not.toMatch(/\s(src|href)="\//i);
 });
 
 test("every view renders under the CSP without a violation", async ({ page }) => {
@@ -47,7 +65,7 @@ test("every view renders under the CSP without a violation", async ({ page }) =>
 });
 
 test("the note bodies are a separate file, not part of the entry bundle", () => {
-  const entry = html().match(/<script[^>]+src="\.\/(assets\/[^"]+\.js)"/)?.[1];
+  const entry = html().match(/<script[^>]+src="\.\/(assets\/[^"]+\.js)"/i)?.[1];
   expect(entry).toBeTruthy();
   const assets = readdirSync(join(BUILD, "assets"));
   const chunk = assets.find(f => /^bodies-.*\.json$/.test(f));

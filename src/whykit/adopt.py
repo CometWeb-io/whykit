@@ -35,7 +35,7 @@ from .lint import (
     EVIDENCE_ID_RE, DECISION_ID_RE, WIKILINK_RE, _split_table_row,
     Note, check_front_matter, find_vault_root, is_vault_root, load_note,
 )
-from .console import emit_machine
+from .console import as_printed, emit_machine
 
 SKIP_DIRS = {
     ".git", ".obsidian", ".import-staging", "node_modules", "__pycache__",
@@ -455,8 +455,12 @@ def adopt(
 
 
 def _cells(text: str) -> int:
-    """Terminal columns *text* occupies: wide and fullwidth characters take two."""
-    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
+    """Terminal columns *text* occupies once printed.
+
+    Wide and fullwidth characters take two; a console that cannot encode them
+    prints escapes instead, so measure the text in the form it is printed.
+    """
+    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in as_printed(text))
 
 
 def main(argv: list[str] | None = None) -> int:

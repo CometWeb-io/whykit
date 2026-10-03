@@ -105,6 +105,24 @@ def is_utf(stream: Any) -> bool:
     return name is None or name in _UTF_CODECS
 
 
+def as_printed(text: str, stream: Any = None) -> str:
+    """*text* as ``stream`` (default stdout) will show it.
+
+    On a console that cannot encode every character the fallback handler
+    spells some of them as escapes, which changes how many columns the text
+    takes; layout code measures this form so tables stay aligned.
+    """
+    stream = sys.stdout if stream is None else stream
+    if is_utf(stream):
+        return text
+    encoding = _codec_name(stream)
+    assert encoding is not None
+    try:
+        return text.encode(encoding, getattr(stream, "errors", None) or "strict").decode(encoding, "replace")
+    except (UnicodeError, LookupError):
+        return text
+
+
 def harden_stream(stream: Any) -> None:
     """Replace unencodable characters on a non-UTF stream instead of raising.
 

@@ -373,9 +373,15 @@ class ReferencePageTests(unittest.TestCase):
 
     def test_every_repository_script_is_documented(self) -> None:
         readme = (ROOT / "scripts" / "README.md").read_text(encoding="utf-8")
-        for script in sorted((ROOT / "scripts").iterdir()):
-            if script.name == "README.md":
-                continue
+        scripts = [
+            path for path in sorted((ROOT / "scripts").iterdir())
+            # Only real script files: not README.md, bytecode caches, editor
+            # or OS dotfiles, or any other directory a local run leaves behind.
+            if path.is_file() and path.name != "README.md" and not path.name.startswith(".")
+            and path.suffix not in {".pyc", ".pyo"}
+        ]
+        self.assertIn("whykit.py", [path.name for path in scripts])
+        for script in scripts:
             with self.subTest(script=script.name):
                 self.assertRegex(readme, rf"`(?:scripts/)?{re.escape(script.name)}`")
         releasing = (DOCS / "releasing.md").read_text(encoding="utf-8")

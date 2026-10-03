@@ -249,6 +249,42 @@ class PyprojectMetadataTests(unittest.TestCase):
         listed = {pattern.strip("/").split("/")[0] for pattern in include}
         self.assertLessEqual(listed, check_dist.SDIST_TOP_LEVEL)
 
+    def test_every_third_party_import_is_known_to_the_type_gate(self) -> None:
+        # The static CI job type-checks without the optional extras, so any
+        # module imported from outside the standard library must be listed in
+        # an ignore_missing_imports override or mypy fails there only.
+        import ast
+
+        ignored: set[str] = set()
+        for override in PYPROJECT["tool"]["mypy"].get("overrides", []):
+            if override.get("ignore_missing_imports"):
+                modules = override["module"]
+                ignored.update([modules] if isinstance(modules, str) else modules)
+
+        def covered(name: str) -> bool:
+            return any(
+                name == pattern or (pattern.endswith(".*") and (name + ".").startswith(pattern[:-1]))
+                for pattern in ignored
+            )
+
+        missing: set[str] = set()
+        for path in sorted((ROOT / "src" / "whykit").rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    names = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    names = [node.module]
+                else:
+                    continue
+                for name in names:
+                    top = name.split(".")[0]
+                    if top in sys.stdlib_module_names or top in {"whykit", "__future__"}:
+                        continue
+                    if not covered(name):
+                        missing.add(f"{path.name}: {name}")
+        self.assertEqual(sorted(missing), [])
+
     def test_sbom_tool_is_pinned_in_the_release_tooling_group(self) -> None:
         dist = PYPROJECT["dependency-groups"]["dist"]
         self.assertTrue(any(re.fullmatch(r"cyclonedx-bom==\d+(\.\d+)*", r) for r in dist), dist)
