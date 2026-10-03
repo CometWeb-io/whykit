@@ -19,7 +19,7 @@ test("graph nodes are reachable and operable from the keyboard", async ({ page }
   expect(label).toMatch(/, \d+ links?$/);
 
   // Focus dims unrelated nodes and keeps neighbours lit.
-  const dimmed = await nodes.evaluateAll(els => els.filter(el => el.getAttribute("opacity") === "0.25").length);
+  const dimmed = await nodes.evaluateAll(els => els.filter(el => getComputedStyle(el).opacity === "0.25").length);
   expect(dimmed).toBeGreaterThan(0);
 
   await page.keyboard.press("Tab");

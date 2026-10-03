@@ -136,22 +136,12 @@ rule codes, error codes and contract fields as the stable interface;
 human-facing messages may be reworded. [Automation](automation.md) has the exit
 codes, the error codes and the stability policy.
 
-Use the commands for different jobs:
-
-| Need | Surface |
-|---|---|
-| Find candidate context | `query` |
-| Hand one target to an agent | `context` |
-| Hand several related records to an agent | `pack` |
-| Understand topology | `graph` |
-| Check blast radius before retiring/renaming | `impact` |
-| Revalidate freshness | `review list` / `review record` |
-| Detect byte-level drift | `snapshot` / `verify-snapshot` |
-| Gate a workflow | `check --profile …` |
-
-`context` deliberately caps the embedded body (`--max-chars`) and reports
-whether it was truncated. This makes token use explicit and prevents a single
-large note from silently becoming the entire agent context window.
+Which command fits which job (discovery, a single-record handoff, a budgeted
+bundle, topology, blast radius) is in
+[How-to: hand bounded context to an agent](guide.md#hand-bounded-context-to-an-agent).
+`context` and `pack` cap embedded bodies and report truncation, so token use is
+explicit. For MCP hosts, the [MCP server](mcp.md) exposes the same views
+read-only.
 
 The typed graph distinguishes ordinary document links from evidence support and
 decision supersession. Missing or ambiguous targets remain explicit instead of

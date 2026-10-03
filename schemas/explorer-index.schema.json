@@ -38,6 +38,14 @@
           },
           "title": {
             "type": "string"
+          },
+          "citations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^E-\\d{3,}$"
+            },
+            "description": "Every evidence ID the note cites in front matter or body, sorted and unique. IDs inside inline code or fenced code blocks are examples, not citations, and are left out (the same rule as whykit graph, impact and trace)."
           }
         },
         "additionalProperties": true
@@ -109,6 +117,34 @@
           "items": {
             "type": "object"
           }
+        }
+      },
+      "additionalProperties": true
+    },
+    "policy": {
+      "type": "object",
+      "description": "Freshness thresholds from the vault's whykit.toml (defaults when absent).",
+      "properties": {
+        "evidenceAccessAgeDays": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "decisionReviewDays": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "statusDueDays": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
         }
       },
       "additionalProperties": true

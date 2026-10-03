@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from .contract import vault_not_found
-from .graph import build_graph
+from .graph import build_graph, document_node, wikilink_resolutions
 from .lint import (
     path_cache,
     DECISION_ID_RE,
@@ -34,7 +34,7 @@ def _note_summary(root: Path, note) -> dict:
 
 
 def _evidence_ids(note) -> list[str]:
-    return sorted(set(EVIDENCE_ID_RE.findall(note.text)))
+    return list(note.cited_evidence)
 
 
 def _decision_id(note) -> str | None:
@@ -42,11 +42,67 @@ def _decision_id(note) -> str | None:
     return value if DECISION_ID_RE.fullmatch(value) else None
 
 
-def _wikilink_view(root: Path, vault_index: VaultIndex) -> tuple[dict[str, dict], dict[str, set[str]], dict[str, set[str]]]:
-    """Graph nodes by id plus wikilink adjacency, built once per vault parse.
+class _WikilinkView:
+    """Wikilink adjacency between documents, with graph nodes built on demand.
 
-    The graph also reads the evidence register, so the cache key carries its
-    stat signature: a register rewritten under a reused index is re-read.
+    Equivalent to the ``wikilink`` edges and the node map of :func:`build_graph`,
+    without materialising every node and edge dict of the whole vault (at
+    20,000 notes that graph is over a hundred megabytes, while one record needs
+    only its neighbours).
+    """
+
+    __slots__ = ("notes_by_id", "incoming", "outgoing", "nodes")
+
+    def __init__(self, root: Path, vault_index: VaultIndex) -> None:
+        ids: dict[Path, str] = {}
+
+        def node_id(path: Path) -> str:
+            value = ids.get(path)
+            if value is None:
+                value = ids[path] = vault_index.relative(path).removesuffix(".md")
+            return value
+
+        self.notes_by_id: dict[str, object] = {}
+        self.incoming: dict[str, set[str]] = {}
+        self.outgoing: dict[str, set[str]] = {}
+        for note in vault_index.notes:
+            source = node_id(note.path)
+            self.notes_by_id[source] = note
+            for _, resolved, ambiguous in wikilink_resolutions(note, vault_index):
+                if resolved is None or ambiguous:
+                    continue
+                destination = node_id(resolved)
+                self.incoming.setdefault(destination, set()).add(source)
+                self.outgoing.setdefault(source, set()).add(destination)
+        # The full graph also holds `evidence:E-NNN` nodes, which win over a
+        # document whose path happens to spell the same id.  Only then is the
+        # full node map needed to answer exactly as the graph does.
+        self.nodes: dict[str, dict] | None = None
+        if any(value.startswith("evidence:") for value in self.notes_by_id):
+            graph = build_graph(root, vault=vault_index)
+            self.nodes = {item["id"]: item for item in graph["nodes"]}
+
+    def node(self, value: str) -> dict | None:
+        if self.nodes is not None:
+            return self.nodes.get(value)
+        note = self.notes_by_id.get(value)
+        return None if note is None else document_node(note, value)
+
+    def neighbours(self, ids: list[str]) -> list[dict]:
+        out = []
+        for value in ids:
+            node = self.node(value)
+            if node is not None:
+                out.append(node)
+        return out
+
+
+def _wikilink_view(root: Path, vault_index: VaultIndex) -> _WikilinkView:
+    """The wikilink view of *vault_index*, built once per vault parse.
+
+    The cache key carries the evidence register's stat signature, because the
+    rare full-graph fallback reads the register: a register rewritten under a
+    reused index is re-read.
     """
     register = root / "00-context" / "evidence-register.md"
     try:
@@ -57,14 +113,7 @@ def _wikilink_view(root: Path, vault_index: VaultIndex) -> tuple[dict[str, dict]
     key = ("impact.wikilinks", os.fspath(root), stamp)
     cached = vault_index.derived.get(key)
     if cached is None:
-        graph = build_graph(root, vault=vault_index)
-        incoming: dict[str, set[str]] = {}
-        outgoing: dict[str, set[str]] = {}
-        for edge in graph["edges"]:
-            if edge.get("type", "wikilink") == "wikilink":
-                incoming.setdefault(edge["to"], set()).add(edge["from"])
-                outgoing.setdefault(edge["from"], set()).add(edge["to"])
-        cached = vault_index.derived[key] = ({item["id"]: item for item in graph["nodes"]}, incoming, outgoing)
+        cached = vault_index.derived[key] = _WikilinkView(root, vault_index)
     return cached
 
 
@@ -79,7 +128,7 @@ def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) 
         references = [
             _note_summary(root, note)
             for note in notes
-            if target in set(EVIDENCE_ID_RE.findall(note.text))
+            if target in note.cited_evidence
             and vault_index.relative(note.path) != "00-context/evidence-register.md"
         ]
         references.sort(key=lambda item: item["path"])
@@ -110,11 +159,9 @@ def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) 
                 "reference_count": 0,
             }
         node_id = vault_index.relative(note.path).removesuffix(".md")
-        by_node, incoming_map, outgoing_map = _wikilink_view(root, vault_index)
-        incoming_ids = sorted(incoming_map.get(node_id, ()))
-        outgoing_ids = sorted(outgoing_map.get(node_id, ()))
-        incoming = [by_node[value] for value in incoming_ids if value in by_node]
-        outgoing = [by_node[value] for value in outgoing_ids if value in by_node]
+        view = _wikilink_view(root, vault_index)
+        incoming = view.neighbours(sorted(view.incoming.get(node_id, ())))
+        outgoing = view.neighbours(sorted(view.outgoing.get(node_id, ())))
         superseded_by = sorted(
             [_note_summary(root, item) | {"decision_id": _decision_id(item)} for item in notes if str(item.front.get("supersedes") or "").strip() == target],
             key=lambda item: item["path"],
@@ -148,9 +195,9 @@ def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) 
         }
     note = vault_index.note_for(resolved)
     node_id = vault_index.relative(resolved).removesuffix(".md")
-    by_node, incoming_map, outgoing_map = _wikilink_view(root, vault_index)
-    incoming_ids = sorted(incoming_map.get(node_id, ()))
-    outgoing_ids = sorted(outgoing_map.get(node_id, ()))
+    view = _wikilink_view(root, vault_index)
+    incoming_ids = sorted(view.incoming.get(node_id, ()))
+    outgoing_ids = sorted(view.outgoing.get(node_id, ()))
     return {
         "contract_version": 1,
         "target": target,
@@ -158,8 +205,8 @@ def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) 
         "exists": True,
         "record": _note_summary(root, note) if note else {"path": rel(root, resolved)},
         "evidence": _evidence_ids(note) if note else [],
-        "incoming": [by_node[value] for value in incoming_ids if value in by_node],
-        "outgoing": [by_node[value] for value in outgoing_ids if value in by_node],
+        "incoming": view.neighbours(incoming_ids),
+        "outgoing": view.neighbours(outgoing_ids),
         "reference_count": len(incoming_ids),
     }
 
@@ -219,7 +266,3 @@ def main(argv: list[str] | None = None) -> int:
     else:
         _human(report)
     return 0 if report.get("exists") else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

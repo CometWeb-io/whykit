@@ -43,8 +43,28 @@ inputs:
       empty, the current date is used.
     required: false
     default: ""
+  annotations:
+    description: >
+      Print lint findings and failed gate checks as GitHub workflow annotations
+      (`--format github`), so they appear inline on the pull request diff.
+    required: false
+    default: "false"
+  sarif:
+    description: >
+      Also export every lint finding as SARIF 2.1.0 (`whykit lint --format sarif`)
+      and upload it to code scanning with github/codeql-action/upload-sarif.
+      The calling job needs `security-events: write` (plus `actions: read` and
+      `contents: read` in a private repository). Runs before the gate, so the
+      report is uploaded even when the gate then fails.
+    required: false
+    default: "false"
 
 outputs:
+  sarif-file:
+    description: >
+      Path of the SARIF report when `sarif` is "true" (for example to keep it
+      with actions/upload-artifact); empty otherwise.
+    value: ${{ steps.sarif.outputs.file }}
   version:
     description: >
       The WhyKit version the Action installed and ran, as printed by
@@ -96,6 +116,48 @@ runs:
           echo "version=$version"
         } >> "$GITHUB_OUTPUT"
 
+    - name: Export lint findings as SARIF
+      id: sarif
+      if: inputs.sarif != 'false'
+      shell: bash
+      env:
+        WHYKIT_ROOT: ${{ inputs.root }}
+        WHYKIT_SARIF: ${{ inputs.sarif }}
+        WHYKIT_TODAY: ${{ inputs.today }}
+        WHYKIT: ${{ steps.install.outputs.whykit }}
+      run: |
+        set -euo pipefail
+        if [ "$WHYKIT_SARIF" != "true" ]; then
+          echo "::error::sarif must be 'true' or 'false'"
+          exit 2
+        fi
+        args=("$WHYKIT" lint --root "$WHYKIT_ROOT" --format sarif)
+        if [ -n "$WHYKIT_TODAY" ]; then
+          if ! [[ "$WHYKIT_TODAY" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "::error::today must be an ISO date (YYYY-MM-DD)"
+            exit 2
+          fi
+          args+=(--today "$WHYKIT_TODAY")
+        fi
+        report="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/whykit.XXXXXX")"
+        mv "$report" "$report.sarif"
+        report="$report.sarif"
+        # Exit 1 only means "there are findings"; the gate step decides
+        # whether they fail the job. Exit 2 means no report was written.
+        status=0
+        "${args[@]}" > "$report" || status=$?
+        if [ "$status" -gt 1 ]; then
+          exit "$status"
+        fi
+        echo "file=$report" >> "$GITHUB_OUTPUT"
+
+    - name: Upload SARIF to code scanning
+      if: inputs.sarif == 'true'
+      uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      with:
+        sarif_file: ${{ steps.sarif.outputs.file }}
+        category: whykit:${{ inputs.root }}
+
     - name: Repository policy gate
       if: inputs.profile != ''
       shell: bash
@@ -107,6 +169,7 @@ runs:
         WHYKIT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         WHYKIT_EVENT: ${{ github.event_name }}
         WHYKIT_TODAY: ${{ inputs.today }}
+        WHYKIT_ANNOTATIONS: ${{ inputs.annotations }}
         WHYKIT: ${{ steps.install.outputs.whykit }}
       run: |
         set -euo pipefail
@@ -115,6 +178,11 @@ runs:
           *) echo "::error::history must be 'true' or 'false'"; exit 2 ;;
         esac
         args=("$WHYKIT" check --root "$WHYKIT_ROOT" --profile "$WHYKIT_PROFILE")
+        case "$WHYKIT_ANNOTATIONS" in
+          true) args+=(--format github) ;;
+          false) ;;
+          *) echo "::error::annotations must be 'true' or 'false'"; exit 2 ;;
+        esac
         base="$WHYKIT_BASE"
         if [ -z "$base" ] && [ "$WHYKIT_HISTORY" = "true" ] && [ "$WHYKIT_EVENT" = "pull_request" ]; then
           base="$WHYKIT_BASE_SHA"
@@ -142,6 +210,7 @@ runs:
         WHYKIT_ROOT: ${{ inputs.root }}
         WHYKIT_STRICT: ${{ inputs.strict }}
         WHYKIT_TODAY: ${{ inputs.today }}
+        WHYKIT_ANNOTATIONS: ${{ inputs.annotations }}
         WHYKIT: ${{ steps.install.outputs.whykit }}
       run: |
         set -euo pipefail
@@ -150,6 +219,11 @@ runs:
           true) args+=(--strict) ;;
           false) ;;
           *) echo "::error::strict must be 'true' or 'false'"; exit 2 ;;
+        esac
+        case "$WHYKIT_ANNOTATIONS" in
+          true) args+=(--format github) ;;
+          false) ;;
+          *) echo "::error::annotations must be 'true' or 'false'"; exit 2 ;;
         esac
         if [ -n "$WHYKIT_TODAY" ]; then
           if ! [[ "$WHYKIT_TODAY" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then

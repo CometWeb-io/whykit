@@ -1,28 +1,34 @@
 import {
-  useDeferredValue, useEffect, useMemo, useRef, useState,
-  type ChangeEvent, type ReactNode, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent,
+  useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState,
+  type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent,
 } from "react";
 import {
-  BookOpen, CheckCircle2, ChevronRight, FileText, GitBranch, HeartPulse,
-  Menu, Network, Scale, Search, Shield, X, AlertTriangle, Copy, Terminal, Inbox,
+  BookOpen, CheckCircle2, ChevronRight, FileText, GitBranch, HeartPulse, History, Hourglass,
+  Menu, Network, Scale, Search, Shield, X, AlertTriangle, Copy, Terminal,
 } from "lucide-react";
 import { vault, docs, resolveDoc, linksFor, backlinksFor, canonicalDocs, searchDocs, evidenceFor, docsForEvidence, decisionChain } from "./lib/vault.ts";
 import { createSlugger, inlineText, parseMarkdown, type MdBlock, type MdInline } from "./lib/markdown.ts";
-import { hrefFor, parseHash, type Route, type View } from "./lib/route.ts";
+import { hrefFor, type Params, type Route, type View } from "./lib/route.ts";
 import { describeDue, reviewQueue } from "./lib/reviews.ts";
-import { layoutGraph, neighbourhood, NODE_H, NODE_W } from "./lib/graph.ts";
+import { currentRoute, go, setParams, useRoute } from "./nav.ts";
+import { Empty, Metric, Sensitivity, ShowMore, StatusBadge, useIncremental } from "./ui.tsx";
+import { GraphPage } from "./views/GraphPage.tsx";
+import { TimelinePage } from "./views/TimelinePage.tsx";
+import { FreshnessPage } from "./views/FreshnessPage.tsx";
 
 const PRIMARY: { id: View; label: string; icon: typeof BookOpen }[] = [
   { id: "home", label: "Home", icon: BookOpen },
   { id: "decisions", label: "Decisions", icon: Scale },
+  { id: "timeline", label: "Timeline", icon: History },
   { id: "evidence", label: "Evidence", icon: Shield },
+  { id: "freshness", label: "Freshness", icon: Hourglass },
   { id: "reviews", label: "Reviews", icon: CheckCircle2 },
   { id: "graph", label: "Graph", icon: Network },
   { id: "health", label: "Health", icon: HeartPulse },
 ];
 
 const VIEW_TITLES: Record<View, string> = {
-  home: "Home", decisions: "Decisions", evidence: "Evidence", reviews: "Reviews",
+  home: "Home", decisions: "Decisions", timeline: "Decision timeline", evidence: "Evidence", freshness: "Evidence freshness", reviews: "Reviews",
   graph: "Knowledge graph", health: "Health", templates: "Templates", adopt: "Adopt WhyKit", doc: "Document",
 };
 
@@ -42,33 +48,6 @@ const WORKSTREAM_LABELS: Record<string, string> = {
 function humanizeDir(dir: string): string {
   const words = dir.replace(/^\d+-/, "").replaceAll("-", " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
-function go(view: View, doc?: string) {
-  location.hash = hrefFor(view, doc);
-}
-
-function useRoute(): Route {
-  const [route, setRoute] = useState<Route>(() => parseHash(location.hash) ?? { view: "home" });
-  useEffect(() => {
-    // Anchors that are not routes keep the current page rather than resetting it.
-    const on = () => setRoute(prev => parseHash(location.hash) ?? prev);
-    window.addEventListener("hashchange", on);
-    return () => window.removeEventListener("hashchange", on);
-  }, []);
-  return route;
-}
-
-function StatusBadge({ status }: { status: string }) {
-  return <span className={`status status-${status}`}>{status.replaceAll("_", " ")}</span>;
-}
-
-function Sensitivity({ value }: { value: string }) {
-  return <span className={`sensitivity sensitivity-${value}`}>{value}</span>;
-}
-
-function Empty({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "ok" }) {
-  return <div className={tone === "ok" ? "empty ok" : "empty"} role="status">{tone === "ok" ? <CheckCircle2 size={18} aria-hidden="true"/> : <Inbox size={18} aria-hidden="true"/>}<span>{children}</span></div>;
 }
 
 function Wordmark() {
@@ -124,10 +103,6 @@ function MarkdownView({ source, skipH1 = true }: { source: string; skipH1?: bool
   return <div className="markdown">{blocks.map((b, i) => <Block key={i} block={b} slug={slug} />)}</div>;
 }
 
-function Metric({ label, value, detail }: { label: string; value: string | number; detail?: string }) {
-  return <div className="metric"><span>{label}</span><strong>{value}</strong>{detail ? <small>{detail}</small> : null}</div>;
-}
-
 function DueList({ items, limit }: { items: ReturnType<typeof reviewQueue>; limit: number }) {
   return <div className="doc-list">{items.slice(0, limit).map(({ d, days }) => <button key={d.id} onClick={() => go("doc", d.id)}><div><strong>{d.title}</strong><span>{describeDue(days)} · {d.owner || "no owner"}</span></div><span className={days < 0 ? "mono small overdue" : "mono small"}>{d.reviewBy}</span></button>)}</div>;
 }
@@ -167,21 +142,27 @@ function HomePage() {
 function DecisionsPage() {
   const rows = [...vault.decisions].reverse();
   return <div className="page"><div className="eyebrow">Append-only history</div><h1>Decisions</h1><p className="lede">Material choices keep their original rationale. Reversals create new records instead of rewriting the past.</p>
+    {rows.length ? <p><a className="text-button inline" href={hrefFor("timeline")}>See how long each decision stayed in force <ChevronRight size={15} aria-hidden="true"/></a></p> : null}
     {rows.length ? <ol className="timeline">{rows.map(d => <li key={d.id}><button onClick={() => go("doc", d.recordId)}><div className="timeline-meta"><span className="mono decision-id">{d.id}</span><span>{d.date}</span><StatusBadge status={d.status}/></div><h2>{d.title}</h2><p>{d.owner}{d.supersedes ? ` · supersedes ${d.supersedes}` : ""}{d.supersededBy ? ` · superseded by ${d.supersededBy}` : ""}</p></button></li>)}</ol>
       : <Empty>The decision log is empty.</Empty>}
   </div>;
 }
 
-function EvidencePage() {
-  const [q, setQ] = useState("");
+const EVIDENCE_STEP = 150;
+
+function EvidencePage({ params }: { params: Params }) {
+  const q = params.q ?? "";
   const needle = useDeferredValue(q.trim().toLowerCase());
   const haystacks = useMemo(() => vault.evidence.map(e => ({ e, text: `${e.id} ${e.source} ${e.type} ${e.claims} ${e.location} ${e.why || ""}`.toLowerCase() })), []);
   const rows = needle ? haystacks.filter(x => x.text.includes(needle)).map(x => x.e) : vault.evidence;
+  const [limit, more] = useIncremental(needle, EVIDENCE_STEP);
   return <div className="page wide"><div className="eyebrow">Provenance</div><h1>Evidence</h1><p className="lede">Active and retired evidence keep stable IDs. Retirement preserves the source history instead of turning existing citations into dangling references.</p>
     {vault.evidence.length ? <>
-      <label className="search-field"><Search size={16} aria-hidden="true"/><span className="sr-only">Filter evidence</span><input type="search" value={q} onChange={(e: ChangeEvent<HTMLInputElement>) => setQ(e.target.value)} placeholder="Filter evidence…" /></label>
+      <label className="search-field"><Search size={16} aria-hidden="true"/><span className="sr-only">Filter evidence</span><input type="search" value={q} onChange={(e: ChangeEvent<HTMLInputElement>) => setParams({ q: e.target.value || null })} placeholder="Filter evidence…" /></label>
       <p className="muted small" role="status" aria-live="polite">{needle ? `${rows.length} of ${vault.evidence.length} rows match` : `${vault.evidence.length} rows`}</p>
-      {rows.length ? <div className="table-wrap evidence-table" tabIndex={0} role="region" aria-label="Evidence register"><table><thead><tr><th scope="col">ID</th><th scope="col">State</th><th scope="col">Source</th><th scope="col">Type / retired</th><th scope="col">Used by</th><th scope="col">Location / replacement</th><th scope="col">Claim / retirement reason</th></tr></thead><tbody>{rows.map(e => { const used = docsForEvidence(e.id); return <tr key={e.id}><td className="mono decision-id">{e.id}</td><td><StatusBadge status={e.state}/></td><td>{e.source}</td><td>{e.state === "active" ? (e.type || "—") : (e.retiredOn || "—")}</td><td><span title={used.map(d => d.title).join(" · ")}>{used.length}</span></td><td><span className="mono small">{e.state === "active" ? (e.location || "—") : (e.replacedBy ? `→ ${e.replacedBy}` : "—")}</span></td><td>{e.state === "active" ? e.claims : e.why}</td></tr>; })}</tbody></table></div>
+      {rows.length ? <div className="table-wrap evidence-table" tabIndex={0} role="region" aria-label="Evidence register"><table><thead><tr><th scope="col">ID</th><th scope="col">State</th><th scope="col">Source</th><th scope="col">Type / retired</th><th scope="col">Used by</th><th scope="col">Location / replacement</th><th scope="col">Claim / retirement reason</th></tr></thead><tbody>{rows.slice(0, limit).map(e => { const used = docsForEvidence(e.id); return <tr key={e.id}><td className="mono decision-id">{e.id}</td><td><StatusBadge status={e.state}/></td><td>{e.source}</td><td>{e.state === "active" ? (e.type || "—") : (e.retiredOn || "—")}</td><td><span title={used.map(d => d.title).join(" · ")}>{used.length}</span></td><td><span className="mono small">{e.state === "active" ? (e.location || "—") : (e.replacedBy ? `→ ${e.replacedBy}` : "—")}</span></td><td>{e.state === "active" ? e.claims : e.why}</td></tr>; })}</tbody></table></div>
+        : null}
+      {rows.length ? <ShowMore shown={Math.min(limit, rows.length)} total={rows.length} step={EVIDENCE_STEP} onMore={more} noun="rows"/>
         : <Empty>No evidence matches “{q.trim()}”.</Empty>}
     </> : <Empty>The evidence register is empty. Register a source before citing its <code>E-NNN</code> id.</Empty>}
   </div>;
@@ -197,52 +178,22 @@ function ReviewsPage() {
   </div>;
 }
 
-function GraphPage() {
-  const layout = useMemo(() => layoutGraph(
-    docs.filter(d => d.status !== "template" && d.id !== "README" && !d.id.endsWith("/README")),
-    linksFor,
-  ), []);
-  const byId = useMemo(() => new Map(layout.nodes.map(n => [n.d.id, n])), [layout]);
-  const linkCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const e of layout.edges) {
-      counts.set(e.from, (counts.get(e.from) || 0) + 1);
-      counts.set(e.to, (counts.get(e.to) || 0) + 1);
-    }
-    return counts;
-  }, [layout]);
-  const [hover, setHover] = useState<string | null>(null);
-  const connected = useMemo(() => neighbourhood(layout.edges, hover), [layout, hover]);
-  const onKey = (e: ReactKeyboardEvent<SVGGElement>, id: string) => {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go("doc", id); }
-  };
-  const cx = NODE_W / 2, cy = NODE_H / 2;
-  return <div className="page wide"><div className="eyebrow">Resolved wikilinks</div><h1>Knowledge graph</h1><p className="lede">Edges come from real Markdown links. Ambiguous aliases are lint errors rather than arbitrary graph connections.</p>
-    {layout.nodes.length ? <>
-      <div className="graph-wrap"><svg viewBox={`0 0 ${layout.width} ${layout.height}`} style={{ minWidth: Math.min(layout.width, 1400) }} aria-label={`Knowledge graph: ${layout.nodes.length} notes, ${layout.edges.length} links. Focus a note to highlight its links; press Enter to open it.`}>
-        <g aria-hidden="true">
-          {layout.groups.map(g => <text key={g.id} x={g.x} y={g.y + 12} className="graph-group">{WORKSTREAM_LABELS[g.id] || g.id}</text>)}
-          {layout.edges.map((e, i) => { const a = byId.get(e.from), b = byId.get(e.to); if (!a || !b) return null; const on = !hover || e.from === hover || e.to === hover; return <line key={i} x1={a.x + cx} y1={a.y + cy} x2={b.x + cx} y2={b.y + cy} className={on && hover ? "edge active" : "edge"} opacity={hover && !on ? 0.12 : 0.6}/>; })}
-        </g>
-        {layout.nodes.map(({ d, x, y }) => { const on = !hover || connected.has(d.id); const n = linkCounts.get(d.id) || 0; return <g key={d.id} transform={`translate(${x},${y})`} opacity={on ? 1 : 0.25} role="link" tabIndex={0} aria-label={`${d.title}, ${n} link${n === 1 ? "" : "s"}`} onMouseEnter={() => setHover(d.id)} onMouseLeave={() => setHover(null)} onFocus={() => setHover(d.id)} onBlur={() => setHover(null)} onClick={() => go("doc", d.id)} onKeyDown={e => onKey(e, d.id)} className={hover === d.id ? "graph-node current" : "graph-node"}><title>{d.title}</title><rect width={NODE_W} height={NODE_H} rx="6"/><text x="9" y="18">{d.title.length > 26 ? d.title.slice(0, 25) + "…" : d.title}</text></g>; })}
-      </svg></div><p className="muted small">{layout.nodes.length} notes · {layout.edges.length} resolved links</p>
-    </> : <Empty>No notes to draw yet. The graph appears once working documents link to each other.</Empty>}
-  </div>;
-}
+const FINDINGS_STEP = 200;
 
 function HealthPage() {
   const counts = docs.reduce<Record<string, number>>((a, d) => { a[d.status] = (a[d.status] || 0) + 1; return a; }, {});
   const reviews = reviewQueue(docs, new Date(), 30);
   const overdue = reviews.filter(x => x.days < 0);
+  const [limit, more] = useIncremental("", FINDINGS_STEP);
   return <div className="page"><div className="eyebrow">Deterministic checks</div><h1>Health</h1><p className="lede">Shape, provenance and integrity — never meaning. A clean linter does not certify that a claim is true.</p>
     <div className="metrics three"><Metric label="Errors" value={vault.lint.errors}/><Metric label="Warnings" value={vault.lint.warnings}/><Metric label="Reviews ≤30d" value={reviews.length} detail={overdue.length ? `${overdue.length} overdue` : "none overdue"}/></div>
     {reviews.length ? <section><h2>Review queue</h2><DueList items={reviews} limit={10}/></section> : null}
     <section><h2>Status mix</h2><div className="status-grid">{Object.entries(counts).sort().map(([s, n]) => <div key={s}><StatusBadge status={s}/><strong>{n}</strong></div>)}</div></section>
-    <section><h2>Findings</h2>{vault.lint.findings.length === 0 ? <Empty tone="ok">No mechanical findings in this vault.</Empty> : <ul className="findings">{vault.lint.findings.map((f, i) => {
+    <section><h2>Findings</h2>{vault.lint.findings.length === 0 ? <Empty tone="ok">No mechanical findings in this vault.</Empty> : <><ul className="findings">{vault.lint.findings.slice(0, limit).map((f, i) => {
       const d = resolveDoc(f.path.replace(/\.md$/, ""));
       const body = <><span>{f.level}</span><code>{f.code}</code><p>{f.message}</p><small>{f.path}{f.line ? `:${f.line}` : ""}</small></>;
       return <li key={i}>{d ? <a href={hrefFor("doc", d.id)} className={`finding ${f.level}`}>{body}</a> : <div className={`finding ${f.level}`}>{body}</div>}</li>;
-    })}</ul>}</section>
+    })}</ul><ShowMore shown={Math.min(limit, vault.lint.findings.length)} total={vault.lint.findings.length} step={FINDINGS_STEP} onMore={more} noun="findings"/></>}</section>
     <section><h2>What Health deliberately cannot tell you</h2><div className="card"><ul><li>whether evidence is reliable or cherry-picked;</li><li>whether a hypothesis is commercially sensible;</li><li>whether an accepted decision was a good one;</li><li>whether sensitive data should have been imported at all.</li></ul></div></section>
   </div>;
 }
@@ -317,8 +268,10 @@ function DecisionLineage({ decisionId }: { decisionId: string }) {
   </section>;
 }
 
-function SearchOverlay({ onClose }: { onClose: () => void }) {
-  const [q, setQ] = useState("");
+function SearchOverlay({ initial, onClose }: { initial: string; onClose: () => void }) {
+  // The query is mirrored into the address (`search=`), so a reload or a
+  // shared link reopens the dialog with the same results.
+  const [q, setQ] = useState(initial);
   const [active, setActive] = useState(0);
   const deferred = useDeferredValue(q);
   const results = useMemo(() => searchDocs(deferred), [deferred]);
@@ -327,7 +280,8 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
   const current = Math.min(active, Math.max(results.length - 1, 0));
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
-  useEffect(() => {
+  // Focus before the first paint so keys typed right after the shortcut land in the box.
+  useLayoutEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     input.current?.focus();
     document.body.style.overflow = "hidden";
@@ -360,7 +314,7 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
   /* eslint-disable jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus */
   return <div className="overlay" onMouseDown={(e: ReactMouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) onClose(); }}>
     <div className="palette" role="dialog" aria-modal="true" aria-label="Search vault" onKeyDown={onKeyDown}>
-      <div className="palette-input"><Search size={18} aria-hidden="true"/><input ref={input} type="text" value={q} onChange={(e: ChangeEvent<HTMLInputElement>) => { setQ(e.target.value); setActive(0); }} placeholder="Search titles, claims, tags…" aria-label="Search vault" role="combobox" aria-expanded={results.length > 0} aria-controls="search-results" aria-autocomplete="list" aria-activedescendant={results.length ? optionId(current) : undefined}/><button onClick={onClose} aria-label="Close search"><X size={17} aria-hidden="true"/></button></div>
+      <div className="palette-input"><Search size={18} aria-hidden="true"/><input ref={input} type="text" value={q} onChange={(e: ChangeEvent<HTMLInputElement>) => { setQ(e.target.value); setActive(0); setParams({ search: e.target.value }); }} placeholder="Search titles, claims, tags…" aria-label="Search vault" role="combobox" aria-expanded={results.length > 0} aria-controls="search-results" aria-autocomplete="list" aria-activedescendant={results.length ? optionId(current) : undefined}/><button onClick={onClose} aria-label="Close search"><X size={17} aria-hidden="true"/></button></div>
       <div className="palette-results" id="search-results" role="listbox" aria-label="Results" ref={list}>
         {results.map((d, i) => <div key={d.id} id={optionId(i)} data-index={i} role="option" aria-selected={i === current} className={i === current ? "option active" : "option"} onMouseMove={() => setActive(i)} onClick={() => open(d.id)}><div><strong>{d.title}</strong><small>{d.id}</small></div><StatusBadge status={d.status}/></div>)}
       </div>
@@ -371,7 +325,9 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
 }
 
 function App() {
-  const route = useRoute(); const [search, setSearch] = useState(false);
+  const route = useRoute();
+  const search = route.params?.search;
+  const setSearch = (open: boolean) => setParams({ search: open ? (currentRoute().params?.search ?? "") : null });
   // The mobile menu belongs to the route it was opened on, so any navigation
   // closes it without an effect that sets state after render.
   const [menuRoute, setMenuRoute] = useState<Route | null>(null);
@@ -379,9 +335,14 @@ function App() {
   const setMenu = (open: boolean) => setMenuRoute(open ? route : null);
   const main = useRef<HTMLElement>(null);
   const firstRender = useRef(true);
-  useEffect(() => {
+  // A layout effect: the shortcut works from the first painted frame, not after
+  // the browser gets round to passive effects on a busy main thread.
+  useLayoutEffect(() => {
     const on = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setSearch(v => !v); }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setParams({ search: currentRoute().params?.search === undefined ? "" : null });
+      }
       else if (e.key === "Escape") setMenuRoute(null);
     };
     window.addEventListener("keydown", on);
@@ -401,12 +362,13 @@ function App() {
     .filter(d => /^[^/]+\/README$/.test(d.id) && !d.id.startsWith("templates/"))
     .map(d => { const dir = d.id.split("/")[0]!; return { dir, label: WORKSTREAM_LABELS[dir] ?? (d.title === "README" ? humanizeDir(dir) : d.title), doc: d, index: dir.match(/^(\d+)-/)?.[1] }; }), []);
   const current = route.view;
+  const params = route.params ?? {};
   const navButton = (active: boolean) => ({ className: active ? "active" : "", "aria-current": active ? "page" as const : undefined });
   return <div className="app"><a className="skip" href="#content" onClick={e => { e.preventDefault(); main.current?.focus(); }}>Skip to content</a><header><button className="icon-button mobile" onClick={() => setMenu(true)} aria-label="Open navigation" aria-expanded={menu} aria-controls="sidebar"><Menu size={18} aria-hidden="true"/></button><Wordmark/><button className="search-trigger" onClick={() => setSearch(true)} aria-label="Search vault" aria-haspopup="dialog" aria-keyshortcuts="Meta+K Control+K"><Search size={15} aria-hidden="true"/><span>Search vault</span><kbd aria-hidden="true">⌘K</kbd></button><div className="header-health"><span className={vault.lint.errors ? "dot bad" : "dot"} aria-hidden="true"/>{vault.lint.errors ? `${vault.lint.errors} errors` : "Vault clean"}</div></header>
     <aside id="sidebar" className={menu ? "sidebar open" : "sidebar"}>{menu ? <button className="close-nav" onClick={() => setMenu(false)} aria-label="Close navigation"><X size={18} aria-hidden="true"/></button> : null}<nav aria-label="Vault"><div className="nav-label">Vault</div>{PRIMARY.map(x => <button {...navButton(current === x.id)} key={x.id} onClick={() => go(x.id)}><x.icon size={16} aria-hidden="true"/>{x.label}</button>)}{streamDocs.length ? <><div className="nav-label">Spine</div>{streamDocs.map(x => <button key={x.dir} {...navButton(route.doc === x.doc.id)} onClick={() => go("doc", x.doc.id)}><span className="nav-index" aria-hidden="true">{x.index ?? ""}</span>{x.label}</button>)}</> : null}<div className="nav-label">More</div><button {...navButton(current === "templates")} onClick={() => go("templates")}><FileText size={16} aria-hidden="true"/>Templates</button><button {...navButton(current === "adopt")} onClick={() => go("adopt")}><GitBranch size={16} aria-hidden="true"/>Adopt</button></nav><div className="sidebar-foot"><span>Generated from Markdown</span><small><time dateTime={vault.generatedAt}>{new Date(vault.generatedAt).toLocaleString()}</time></small></div></aside>
     {menu ? <button className="scrim" onClick={() => setMenu(false)} aria-label="Close navigation" tabIndex={-1}/> : null}
-    <main id="content" ref={main} tabIndex={-1}>{route.view === "home" ? <HomePage/> : route.view === "decisions" ? <DecisionsPage/> : route.view === "evidence" ? <EvidencePage/> : route.view === "reviews" ? <ReviewsPage/> : route.view === "graph" ? <GraphPage/> : route.view === "health" ? <HealthPage/> : route.view === "templates" ? <TemplatesPage/> : route.view === "adopt" ? <AdoptPage/> : <DocPage id={route.doc || "Home"}/>}</main>
-    {search ? <SearchOverlay onClose={() => setSearch(false)}/> : null}
+    <main id="content" ref={main} tabIndex={-1}>{route.view === "home" ? <HomePage/> : route.view === "decisions" ? <DecisionsPage/> : route.view === "timeline" ? <TimelinePage params={params}/> : route.view === "evidence" ? <EvidencePage params={params}/> : route.view === "freshness" ? <FreshnessPage params={params}/> : route.view === "reviews" ? <ReviewsPage/> : route.view === "graph" ? <GraphPage params={params}/> : route.view === "health" ? <HealthPage/> : route.view === "templates" ? <TemplatesPage/> : route.view === "adopt" ? <AdoptPage/> : <DocPage id={route.doc || "Home"}/>}</main>
+    {search !== undefined ? <SearchOverlay initial={search} onClose={() => setSearch(false)}/> : null}
   </div>;
 }
 

@@ -2,11 +2,22 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://cometweb.io/schemas/whykit/snapshot.schema.json",
   "title": "WhyKit deterministic vault snapshot",
+  "description": "Output of `whykit snapshot`. Format v2 (the default) hashes each file after the normalization it records; v1 hashes raw bytes. `whykit verify-snapshot` reads both and re-hashes the vault the way the baseline was hashed.",
   "type": "object",
   "required": ["format", "contract_version", "snapshot_id", "as_of", "files", "summary"],
   "properties": {
-    "format": {"const": "whykit.snapshot/v1"},
+    "format": {"enum": ["whykit.snapshot/v1", "whykit.snapshot/v2"]},
     "contract_version": {"const": 1},
+    "normalization": {
+      "description": "How file content was normalized before hashing (v2 only). `sha256` and `bytes` describe the normalized content.",
+      "type": "object",
+      "required": ["utf8_bom", "line_endings"],
+      "properties": {
+        "utf8_bom": {"const": "strip", "description": "One leading UTF-8 byte-order mark is removed."},
+        "line_endings": {"const": "crlf-to-lf", "description": "Every CRLF pair becomes LF; a lone CR is kept."}
+      },
+      "additionalProperties": false
+    },
     "snapshot_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "as_of": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
     "files": {
@@ -24,5 +35,8 @@
     },
     "summary": {"type": "object"}
   },
+  "if": {"properties": {"format": {"const": "whykit.snapshot/v2"}}},
+  "then": {"required": ["normalization"]},
+  "else": {"properties": {"normalization": false}},
   "additionalProperties": false
 }

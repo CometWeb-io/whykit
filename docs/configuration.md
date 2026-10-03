@@ -1,5 +1,8 @@
 # Configuration
 
+Reference for `whykit.toml`, document front matter and the flags that override
+policy for one run. Every command and flag is in the [command reference](cli.md).
+
 WhyKit has no hidden user-global configuration. A vault may carry one explicit,
 versioned `whykit.toml` in its root so the same checkout behaves the same for a
 person, CI and an agent.
@@ -59,7 +62,25 @@ history = "required"
 ```
 
 `format_version` is fail-closed. An unsupported version is an error rather than
-being interpreted approximately.
+being interpreted approximately. Unknown keys are rejected too, so a typo
+cannot silently switch a check off.
+
+| Key | Meaning |
+|---|---|
+| `defaults.owner` | Owner written into records created by `whykit new` without `--owner`. `TODO` fails the `release` profile. |
+| `defaults.sensitivity` | Sensitivity label for new records without `--sensitivity`. |
+| `defaults.decision_review_days` | Days ahead for an approved decision's `review_by`; see [Review defaults](#review-defaults). |
+| `defaults.status_due_days` | Look-ahead window of `status` and `review list`. |
+| `defaults.require_hub_links` | Make plain `whykit lint` report top-level folders that `Home.md` does not link (`hub.unlinked_workstream`). |
+| `profiles.<name>.strict` | Warnings fail the gate. |
+| `profiles.<name>.orphans`, `.secrets` | Run the orphan-note and credential checks. |
+| `profiles.<name>.require_git` | The vault must be inside a Git work tree. |
+| `profiles.<name>.require_clean_tree` | The working tree must have no uncommitted changes. |
+| `profiles.<name>.require_configured` | `whykit.toml` may not contain placeholders such as `owner = "TODO"`. |
+| `profiles.<name>.require_hub_links` | As `defaults.require_hub_links`, for this gate. |
+| `profiles.<name>.history` | `off`, `optional` (checked when `--base` is given) or `required` (fails without `--base`). |
+
+You can add profiles of your own and select them with `--profile <name>`.
 
 `history` accepts `off`, `optional` or `required`. The release profile is meant
 to be the strongest built-in gate: it requires a Git work tree, a clean working
@@ -128,58 +149,21 @@ wikilinks and relative Markdown links that escape the governed boundary.
 named profile for repeatable CI behavior rather than baking many flags into a
 workflow.
 
-## Review policy and log
+## Review defaults
 
-`status` and `review list` use `defaults.status_due_days` unless overridden:
+Two `[defaults]` keys drive the review cycle:
+
+| Key | Used by |
+|---|---|
+| `decision_review_days` | `new decision --status approved` without `--review-by`, and a `confirmed` review without `--next-review`, set `review_by` this many days ahead. |
+| `status_due_days` | `whykit status` and `whykit review list` show reviews due within this many days unless you pass `--due-days`. |
 
 ```bash
 whykit status
-whykit review list
 whykit review list --due-days 14 --owner Product
 ```
 
-Approved decisions created by `whykit new decision` receive a review date based
-on `defaults.decision_review_days` unless a date is supplied explicitly.
-
-Record the re-check instead of silently moving a date:
-
-```bash
-whykit review record D-012 \
-  --reviewer "Product" \
-  --outcome confirmed \
-  --next-review 2027-01-15 \
-  --note "Evidence rechecked"
-```
-
-`00-context/review-log.md` is append-only under `whykit history`: existing review
-events may not be changed or deleted.
-
-## Record and evidence lifecycle
-
-Use the scaffold command instead of allocating IDs by hand:
-
-```bash
-whykit new evidence \
-  --source "Interview set" --type interview \
-  --location "notes/interviews/" \
-  --claims "ICP pain is repeated across interviews"
-
-whykit new decision "Focus on one ICP" \
-  --owner "Product" --source E-001
-
-whykit new note "Competitor review" \
-  --workstream notes --type research --owner "Research" \
-  --link-from Home.md
-```
-
-Retire evidence without deleting its stable ID:
-
-```bash
-whykit evidence list --state active
-whykit evidence retire E-012 \
-  --why "Superseded by the corrected dataset" \
-  --replaced-by E-019
-```
+How reviews are recorded is in [Concepts](concepts.md#the-review-cycle).
 
 ## Evidence access age
 
@@ -202,36 +186,6 @@ checked.
 This is a warning, not proof that a source is still correct. Recent access is
 also not permission to publish a claim; publication approval belongs to the
 owner's claims or review workflow.
-
-## Graph, query and bounded context
-
-Machine consumers do not need to scrape Markdown blindly:
-
-```bash
-whykit graph --format json
-whykit query "pricing" --type decision --json
-whykit context D-012 --max-chars 12000 --json
-whykit pack D-012 --query "pricing" --max-chars 30000
-whykit impact E-012 --json
-```
-
-The graph distinguishes `wikilink`, `evidence` and `supersedes` edges. Query is
-for discovery; context is a bounded handoff around one resolved target; `pack`
-combines explicit targets and ranked query results under one total body budget; impact is
-the reverse-dependency check to run before destructive lifecycle changes.
-
-## Snapshots and drift
-
-Create a deterministic content fingerprint:
-
-```bash
-whykit snapshot --output .whykit/snapshot.json --today 2026-09-22
-whykit verify-snapshot .whykit/snapshot.json --today 2026-10-22 --json
-```
-
-`matches` / `content_matches` report byte-level governed-content identity.
-`health_changed` is separate because a vault can become review-due merely as time
-passes, without a single byte changing.
 
 ## Explorer network safety
 

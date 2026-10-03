@@ -21,7 +21,9 @@ export async function seriousViolations(page: Page): Promise<string[]> {
 export const PAGES = [
   { hash: "", nav: "Home", h1: "WhyKit — Northline example vault" },
   { hash: "#view=decisions", nav: "Decisions", h1: "Decisions" },
+  { hash: "#view=timeline", nav: "Timeline", h1: "Decision timeline" },
   { hash: "#view=evidence", nav: "Evidence", h1: "Evidence" },
+  { hash: "#view=freshness", nav: "Freshness", h1: "Evidence freshness" },
   { hash: "#view=reviews", nav: "Reviews", h1: "Reviews" },
   { hash: "#view=graph", nav: "Graph", h1: "Knowledge graph" },
   { hash: "#view=health", nav: "Health", h1: "Health" },

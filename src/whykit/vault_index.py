@@ -1,11 +1,87 @@
 """Request-scoped vault model: one parse, many consumers."""
 from __future__ import annotations
 
-from collections.abc import Callable
+import contextlib
+import contextvars
+import os
+import threading
+import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .lint import Note, _build_index, _link_key, _real, _resolve, _within, collect_markdown, load_note, path_cache, rel
+
+
+class NoteCache:
+    """Parsed notes kept across requests while their files are unchanged.
+
+    A long-lived reader (the MCP server) would otherwise read and parse every
+    note on every call.  Each entry is keyed by the file's path and checked
+    against its current ``stat`` signature (modification and change time,
+    size, inode) before it is reused, so an edit, an atomic replace, a rename
+    or a deletion is always picked up by the next call.
+
+    A file whose timestamps are within :attr:`racy_ns` of the clock is never
+    cached: a second write in the same timestamp tick, with the same size,
+    would otherwise be invisible (the "racy clean" problem Git also guards
+    against).  Only parsing is reused.  Link resolution, findings and every
+    other derived view are still computed per request, because they depend on
+    files outside the note set (attachments, symlinks, configuration).
+
+    Notes are shared between requests, so callers must treat them as read-only,
+    as every WhyKit consumer already does.
+    """
+
+    racy_ns = 2_000_000_000
+
+    def __init__(self) -> None:
+        self._entries: dict[str, tuple[tuple[int, int, int, int], Note]] = {}
+        self._lock = threading.Lock()
+        self.hits = 0
+        self.misses = 0
+
+    def load_all(self, paths: list[Path]) -> list[Note]:
+        now = time.time_ns()
+        fresh: dict[str, tuple[tuple[int, int, int, int], Note]] = {}
+        notes: list[Note] = []
+        with self._lock:
+            entries = self._entries
+        for path in paths:
+            key = os.fspath(path)
+            try:
+                info = os.stat(path)
+            except OSError:
+                notes.append(load_note(path))  # raises like an uncached load
+                continue
+            signature = (info.st_mtime_ns, info.st_ctime_ns, info.st_size, info.st_ino)
+            cached = entries.get(key)
+            if cached is not None and cached[0] == signature:
+                self.hits += 1
+                note = cached[1]
+            else:
+                self.misses += 1
+                note = load_note(path)
+            notes.append(note)
+            if now - max(info.st_mtime_ns, info.st_ctime_ns) >= self.racy_ns:
+                fresh[key] = (signature, note)
+        # Only the files of this load survive: a deleted note is dropped.
+        with self._lock:
+            self._entries = fresh
+        return notes
+
+
+_NOTE_CACHE: contextvars.ContextVar[NoteCache | None] = contextvars.ContextVar("whykit_note_cache", default=None)
+
+
+@contextlib.contextmanager
+def reuse_notes(cache: NoteCache) -> Iterator[None]:
+    """Let every :meth:`VaultIndex.load` in this context reuse *cache*."""
+    token = _NOTE_CACHE.set(cache)
+    try:
+        yield
+    finally:
+        _NOTE_CACHE.reset(token)
 
 
 @dataclass
@@ -33,7 +109,9 @@ class VaultIndex:
     @path_cache()
     def load(cls, root: Path) -> VaultIndex:
         root = Path(root).resolve()
-        notes = [load_note(path) for path in collect_markdown(root, [])]
+        paths = collect_markdown(root, [])
+        cache = _NOTE_CACHE.get()
+        notes = cache.load_all(paths) if cache is not None else [load_note(path) for path in paths]
         return cls(
             root=root,
             notes=notes,

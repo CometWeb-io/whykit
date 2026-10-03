@@ -267,7 +267,3 @@ def main(argv: list[str] | None = None) -> int:
     if args.strict and report["summary"]["live_with_gaps"]:
         return 1
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

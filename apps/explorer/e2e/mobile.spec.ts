@@ -55,9 +55,28 @@ test("the supersession chain stacks on a phone", async ({ page }) => {
   expect(boxes[1]).toBeLessThan(boxes[2] ?? 0);
 });
 
-for (const hash of ["", "#view=evidence", "#doc=06-decisions%2Fd-010-direct"]) {
+for (const hash of ["", "#view=evidence", "#doc=06-decisions%2Fd-010-direct", "#view=timeline&owner=Lena%20Kr%C3%BCger", "#view=freshness", "#view=graph&node=06-decisions%2Fd-010-direct"]) {
   test(`no serious or critical axe violations on a phone: ${hash || "home"}`, async ({ page }) => {
     await open(page, hash);
     expect(await seriousViolations(page)).toEqual([]);
   });
 }
+
+test("timeline filters stack and bars sit below the text on a phone", async ({ page }) => {
+  await open(page, "#view=timeline");
+  const row = page.locator(".lifespan").first();
+  const text = await row.locator(".lifespan-text").boundingBox();
+  const track = await row.locator(".lifespan-track").boundingBox();
+  expect(track!.y).toBeGreaterThan(text!.y + text!.height - 1);
+  await page.getByLabel("Status").selectOption("superseded");
+  await expect(page.locator(".lifespan")).toHaveCount(2);
+});
+
+test("tapping a graph node selects it instead of navigating away", async ({ page }) => {
+  await open(page, "#view=graph");
+  const node = page.locator("svg g.graph-node[data-id='06-decisions/d-010-direct']");
+  await node.scrollIntoViewIfNeeded();
+  await node.tap();
+  await expect(page).toHaveURL(/node=06-decisions%2Fd-010-direct/);
+  await expect(page.locator("main h1")).toHaveText("Knowledge graph");
+});

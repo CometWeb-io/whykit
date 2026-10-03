@@ -261,11 +261,35 @@ def _diff_failure(exc: subprocess.CalledProcessError, base: str, head: str, root
     return subprocess.CalledProcessError(exc.returncode, exc.cmd, output="", stderr=detail.lstrip("\n"))
 
 
-def changed_records(base: str, head: str, root: str | None = None) -> list[tuple[str, str]]:
-    _require_revisions(root, base, head)
+# The pseudo-revision a staged check compares against ``base``: Git's index,
+# addressed as ``:path`` by ``git show``.
+INDEX = ""
+
+
+def has_commits(root: str | None = None) -> bool:
+    """False in a repository whose HEAD is unborn (before the first commit)."""
+    try:
+        git("rev-parse", "--verify", "--quiet", "HEAD^{commit}", root=root)
+    except subprocess.CalledProcessError:
+        return False
+    return True
+
+
+def changed_records(base: str, head: str, root: str | None = None, *, staged: bool = False) -> list[tuple[str, str]]:
+    """Immutable records and review-log rows rewritten between two states.
+
+    With ``staged`` the second state is the index (what the next commit will
+    contain), not *head*: that is the pre-commit form of the check.
+    """
+    if staged:
+        _require_revisions(root, base)
+        head = INDEX
+    else:
+        _require_revisions(root, base, head)
     prefix = _git_prefix(root)
     # --relative makes paths (and pathspecs) vault-rooted when the vault is a
     # subdirectory of the work tree; -z keeps every path byte-exact.
+    revisions = ["--cached", base] if staged else [f"{base}...{head}"]
     try:
         out = git(
             "diff",
@@ -273,14 +297,14 @@ def changed_records(base: str, head: str, root: str | None = None) -> list[tuple
             "--name-status",
             "-z",
             "--no-ext-diff",
-            f"{base}...{head}",
+            *revisions,
             "--",
             RECORD_SUFFIX.rstrip("/"),
             REVIEW_LOG_SUFFIX,
             root=root,
         )
     except subprocess.CalledProcessError as exc:
-        raise _diff_failure(exc, base, head, root) from None
+        raise _diff_failure(exc, base, head or "the index", root) from None
 
     def show(rev: str, path: str) -> str:
         return git("show", f"{rev}:{_git_object_path(path, prefix)}", root=root)
@@ -321,11 +345,14 @@ def changed_records(base: str, head: str, root: str | None = None) -> list[tuple
     return blocked
 
 
-def _tracks_vault_paths(base: str, head: str, root: str | None) -> bool:
-    """True when either revision has decision records or a review log under *root*."""
-    for rev in (base, head):
+def _tracks_vault_paths(base: str, head: str, root: str | None, *, staged: bool = False) -> bool:
+    """True when either state has decision records or a review log under *root*."""
+    pathspec = ["--", RECORD_SUFFIX.rstrip("/"), REVIEW_LOG_SUFFIX]
+    listings: list[list[str]] = [["ls-tree", "--name-only", base, *pathspec]]
+    listings.append(["ls-files", "--cached", *pathspec] if staged else ["ls-tree", "--name-only", head, *pathspec])
+    for listing in listings:
         try:
-            if git("ls-tree", "--name-only", rev, "--", RECORD_SUFFIX.rstrip("/"), REVIEW_LOG_SUFFIX, root=root).strip():
+            if git(*listing, root=root).strip():
                 return True
         except subprocess.CalledProcessError:
             return True  # Unknown: do not add a misleading warning.
@@ -337,14 +364,35 @@ def main(argv: list[str] | None = None) -> int:
         prog="whykit history",
         description="Reject semantic rewrites of historical decisions and review history.",
     )
-    parser.add_argument("--base", required=True, help="base commit/ref")
-    parser.add_argument("--head", default="HEAD", help="head commit/ref")
+    parser.add_argument("--base", help="base commit/ref (default with --staged: HEAD)")
+    parser.add_argument("--head", default=None, help="head commit/ref (default: HEAD)")
+    parser.add_argument("--staged", action="store_true", help="compare the staged index with --base (pre-commit use)")
     parser.add_argument("--root", help="vault root (may be a subdirectory of the Git work tree)")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = parser.parse_args(argv)
+    if args.staged and args.head is not None:
+        return emit_error(
+            "usage",
+            "--staged compares the index with --base and does not take --head\nhint: drop --head, or drop --staged to compare two commits",
+            json_mode=args.json,
+        )
+    if not args.staged and args.base is None:
+        return emit_error(
+            "usage",
+            "whykit history needs --base <ref>, or --staged to check what is about to be committed\nhint: in CI pass the pull request base, e.g. --base origin/main",
+            json_mode=args.json,
+        )
+    base = args.base or "HEAD"
+    head = "INDEX" if args.staged else (args.head or "HEAD")
     try:
-        blocked = changed_records(args.base, args.head, args.root)
-        if not blocked and not _tracks_vault_paths(args.base, args.head, args.root):
+        if args.staged and args.base is None:
+            _require_revisions(args.root)  # a work tree, but no ref yet
+            if not has_commits(args.root):
+                # Before the first commit nothing is accepted yet, so nothing
+                # can have been rewritten.
+                return _report(args.json, base, head, [], staged=True)
+        blocked = changed_records(base, head, args.root, staged=args.staged)
+        if not blocked and not _tracks_vault_paths(base, head, args.root, staged=args.staged):
             print(
                 f"warning: no decision records or review log under {args.root or os.getcwd()} "
                 "in either revision; nothing was checked\n"
@@ -359,24 +407,26 @@ def main(argv: list[str] | None = None) -> int:
             "git is not installed or not on PATH\nhint: `whykit history` needs Git to compare revisions",
             json_mode=args.json,
         )
-    if args.json:
+    return _report(args.json, base, head, blocked, staged=args.staged)
+
+
+def _report(json_mode: bool, base: str, head: str, blocked: list[tuple[str, str]], *, staged: bool) -> int:
+    if json_mode:
         import json
         emit_machine(json.dumps({
             "contract_version": 1,
-            "base": args.base,
-            "head": args.head,
+            "base": base,
+            "head": head,
+            "staged": staged,
             "passed": not blocked,
             "blocked": [{"status": status, "path": path} for status, path in blocked],
         }, ensure_ascii=False, indent=2))
         return 1 if blocked else 0
     if not blocked:
-        print("history: immutable reasoning unchanged; review log append-only")
+        scope = "staged changes: " if staged else ""
+        print(f"history: {scope}immutable reasoning unchanged; review log append-only")
         return 0
     print("Historical decision reasoning is append-only. Supersede; do not rewrite:", file=sys.stderr)
     for status, path in blocked:
         print(f"  {status}\t{path}", file=sys.stderr)
     return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

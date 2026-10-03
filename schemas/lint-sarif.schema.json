@@ -1,0 +1,276 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/lint-sarif.schema.json",
+  "title": "WhyKit lint report as SARIF 2.1.0",
+  "description": "Output of `whykit lint --format sarif`. A subset of the OASIS SARIF 2.1.0 log format: every property listed here is required or constrained by that standard, plus WhyKit's own guarantees (ruleId is a stable rule code, helpUri addresses that code in docs/rules.md, run.properties.contract_version is 1). Unknown keys are allowed, as SARIF permits.",
+  "type": "object",
+  "required": [
+    "version",
+    "runs"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": "2.1.0"
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/run"
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "message": {
+      "type": "object",
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "level": {
+      "enum": [
+        "none",
+        "note",
+        "warning",
+        "error"
+      ]
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "tool",
+        "results",
+        "properties"
+      ],
+      "properties": {
+        "tool": {
+          "type": "object",
+          "required": [
+            "driver"
+          ],
+          "properties": {
+            "driver": {
+              "$ref": "#/$defs/driver"
+            }
+          },
+          "additionalProperties": true
+        },
+        "originalUriBaseIds": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "uri"
+            ],
+            "properties": {
+              "uri": {
+                "type": "string",
+                "pattern": "^file:.*/$"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "columnKind": {
+          "enum": [
+            "utf16CodeUnits",
+            "unicodeCodePoints"
+          ]
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/result"
+          }
+        },
+        "properties": {
+          "type": "object",
+          "required": [
+            "contract_version",
+            "files"
+          ],
+          "properties": {
+            "contract_version": {
+              "const": 1
+            },
+            "files": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "vault_prefix": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "driver": {
+      "type": "object",
+      "required": [
+        "name",
+        "rules"
+      ],
+      "properties": {
+        "name": {
+          "const": "WhyKit"
+        },
+        "semanticVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "informationUri": {
+          "type": "string",
+          "pattern": "^https://"
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/rule"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "rule": {
+      "type": "object",
+      "required": [
+        "id",
+        "shortDescription",
+        "helpUri",
+        "defaultConfiguration"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z0-9_]+$"
+        },
+        "shortDescription": {
+          "$ref": "#/$defs/message"
+        },
+        "fullDescription": {
+          "$ref": "#/$defs/message"
+        },
+        "help": {
+          "$ref": "#/$defs/message"
+        },
+        "helpUri": {
+          "type": "string",
+          "pattern": "^https://.+/docs/rules\\.md#[a-z][a-z0-9_]*\\.[a-z0-9_]+$"
+        },
+        "defaultConfiguration": {
+          "type": "object",
+          "required": [
+            "level"
+          ],
+          "properties": {
+            "level": {
+              "$ref": "#/$defs/level"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "result": {
+      "type": "object",
+      "required": [
+        "ruleId",
+        "ruleIndex",
+        "level",
+        "message",
+        "locations"
+      ],
+      "properties": {
+        "ruleId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z0-9_]+$"
+        },
+        "ruleIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "level": {
+          "enum": [
+            "warning",
+            "error"
+          ]
+        },
+        "message": {
+          "$ref": "#/$defs/message"
+        },
+        "locations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/location"
+          }
+        },
+        "partialFingerprints": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "location": {
+      "type": "object",
+      "required": [
+        "physicalLocation"
+      ],
+      "properties": {
+        "physicalLocation": {
+          "type": "object",
+          "required": [
+            "artifactLocation"
+          ],
+          "properties": {
+            "artifactLocation": {
+              "type": "object",
+              "required": [
+                "uri"
+              ],
+              "properties": {
+                "uri": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uriBaseId": {
+                  "const": "%SRCROOT%"
+                }
+              },
+              "additionalProperties": true
+            },
+            "region": {
+              "type": "object",
+              "required": [
+                "startLine"
+              ],
+              "properties": {
+                "startLine": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

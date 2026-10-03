@@ -1,6 +1,10 @@
 // Build the two static sites the end-to-end suite runs against:
 //   e2e/.build/northline  the worked example vault (rich data)
 //   e2e/.build/empty      a fresh `whykit init --minimal` vault (empty states)
+//   e2e/.build/synthetic  a 5,000-note synthetic vault (performance, policy)
+// The synthetic vault comes from tests/synthetic_vault.py and deliberately
+// carries lint errors, which `whykit explorer-index` refuses; its index is
+// therefore built by calling the same Python function without the lint gate.
 // The empty vault is built first so src/generated/vault.json is left holding
 // the example index that `npm run dev` and `npm run build` expect.
 import { execFileSync } from "node:child_process";
@@ -23,11 +27,29 @@ function build(name, vaultDir) {
   run(process.execPath, [resolve(APP, "node_modules/vite/bin/vite.js"), "build", "--outDir", join(OUT, name), "--emptyOutDir"]);
 }
 
+const SYNTHETIC_NOTES = Number(process.env.WHYKIT_SYNTHETIC_NOTES || 5000);
+
+function buildSynthetic(name, vaultDir) {
+  const code = [
+    "import datetime as dt, json, sys",
+    "from pathlib import Path",
+    `sys.path[:0] = [${JSON.stringify(resolve(REPO, "src"))}, ${JSON.stringify(resolve(REPO, "tests"))}]`,
+    "from synthetic_vault import AS_OF, generate",
+    "from whykit.explorer_index import build_explorer_index",
+    `root = generate(Path(${JSON.stringify(vaultDir)}), ${SYNTHETIC_NOTES}).resolve()`,
+    "payload = build_explorer_index(root, today=dt.date.fromisoformat(AS_OF))",
+    `Path(${JSON.stringify(resolve(APP, "src/generated/vault.json"))}).write_text(json.dumps(payload), encoding='utf-8')`,
+  ].join("\n");
+  run(PYTHON, ["-c", code]);
+  run(process.execPath, [resolve(APP, "node_modules/vite/bin/vite.js"), "build", "--outDir", join(OUT, name), "--emptyOutDir"]);
+}
+
 const scratch = mkdtempSync(join(tmpdir(), "whykit-explorer-e2e-"));
 try {
   const fresh = join(scratch, "fresh");
   run(PYTHON, [resolve(REPO, "scripts/whykit.py"), "init", "--minimal", fresh]);
   build("empty", fresh);
+  buildSynthetic("synthetic", join(scratch, "synthetic"));
   build("northline", resolve(REPO, "examples/northline"));
 } finally {
   rmSync(scratch, { recursive: true, force: true });

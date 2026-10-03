@@ -35,7 +35,8 @@
             "git_error",
             "vault_invalid",
             "io_error",
-            "interrupted"
+            "interrupted",
+            "internal_error"
           ]
         },
         "message": {

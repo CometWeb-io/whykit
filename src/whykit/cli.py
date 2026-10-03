@@ -15,11 +15,20 @@ import re
 import shutil
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 from typing import NoReturn
 
 from . import __version__
-from .contract import CONTRACT_VERSION, argv_wants_json, describe_os_error, emit_error, error_payload, vault_not_found
+from .contract import (
+    CONTRACT_VERSION,
+    ISSUES_URL,
+    argv_wants_json,
+    describe_os_error,
+    emit_error,
+    error_payload,
+    vault_not_found,
+)
 from .lint import find_vault_root, is_vault_root, lint as run_lint, rel
 from .completion import SHELLS, render_completion
 from .messages import print_no_vault
@@ -240,7 +249,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     if minimal_layout:
         print("Layout: vendor-neutral (default)")
     else:
-        print("Layout: full GTM workstream starter (--full)")
+        print("Layout: full starter with optional workstreams (--full)")
     print()
     print("Next, in order:")
     print("  1. Answer every TODO in AGENTS.md - that file is the contract agents work under.")
@@ -264,6 +273,8 @@ def cmd_lint(args: argparse.Namespace) -> int:
             argv.append("--" + flag.replace("_", "-"))
     if getattr(args, "today", None):
         argv += ["--today", args.today]
+    if getattr(args, "format", None):
+        argv += ["--format", args.format]
     from .lint import main as lint_main
     return lint_main(argv)
 
@@ -484,6 +495,8 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
         argv += ["--output", args.output]
     if args.compact:
         argv.append("--compact")
+    if args.snapshot_format:
+        argv += ["--format", args.snapshot_format]
     return main_snapshot(argv)
 
 
@@ -510,6 +523,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         argv += ["--today", args.today]
     if args.json:
         argv.append("--json")
+    if args.format:
+        argv += ["--format", args.format]
     return check_main(argv)
 
 
@@ -577,13 +592,19 @@ def cmd_adopt(args: argparse.Namespace) -> int:
 
 def cmd_history(args: argparse.Namespace) -> int:
     from .immutability import main as immutability_main
-    argv = ["--base", args.base, "--head", args.head]
+    argv: list[str] = []
+    if args.base is not None:
+        argv += ["--base", args.base]
+    if args.head is not None:
+        argv += ["--head", args.head]
+    if args.staged:
+        argv.append("--staged")
     if args.root:
         argv += ["--root", args.root]
     if args.json:
         argv.append("--json")
     code = immutability_main(argv)
-    if code in (0, 1) and args.head == "HEAD":
+    if code in (0, 1) and not args.staged and args.head in (None, "HEAD"):
         _warn_uncommitted_markdown(_resolve_vault(args.root))
     return code
 
@@ -913,7 +934,7 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument(
         "--full",
         action="store_true",
-        help="include the optional GTM workstreams (strategy, website, research, etc.)",
+        help="also create the optional starter workstreams (strategy, website, automation, operations, research) and their templates",
     )
     init.add_argument("--json", action="store_true", help=JSON_HELP)
     init.set_defaults(func=cmd_init)
@@ -927,6 +948,7 @@ def build_parser() -> argparse.ArgumentParser:
     lint_cmd.add_argument("--no-orphans", action="store_true", help="skip orphan-note warnings")
     lint_cmd.add_argument("--no-secrets", action="store_true", help="skip the secret scan")
     lint_cmd.add_argument("--today", help=TODAY_HELP)
+    lint_cmd.add_argument("--format", choices=("text", "json", "sarif", "github"), default=None, help="output format: text (default), json, sarif (SARIF 2.1.0) or github (workflow annotations)")
     lint_cmd.set_defaults(func=cmd_lint)
 
     new = sub.add_parser("new", help="create a decision, evidence row or note", description="Create a record and keep the vault indexes in sync.")
@@ -1065,6 +1087,11 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot.add_argument("--today", help=TODAY_HELP)
     snapshot.add_argument("--output", metavar="PATH", help="write the JSON snapshot here instead of stdout")
     snapshot.add_argument("--compact", action="store_true", help="emit compact JSON")
+    snapshot.add_argument(
+        "--format", dest="snapshot_format", choices=("v1", "v2"), default=None,
+        help="snapshot format: v2 (default) hashes text with CRLF line endings and a UTF-8 BOM "
+        "normalized, so checkouts on different platforms match; v1 hashes raw bytes",
+    )
     snapshot.set_defaults(func=cmd_snapshot)
 
     verify_snapshot = sub.add_parser("verify-snapshot", help="compare the vault with a prior snapshot")
@@ -1081,6 +1108,7 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--head", default="HEAD", metavar="REF", help="head Git ref (default: %(default)s)")
     check.add_argument("--today", help=TODAY_HELP)
     check.add_argument("--json", action="store_true", help=JSON_HELP)
+    check.add_argument("--format", choices=("text", "json", "github"), default=None, help="output format: text (default), json or github (workflow annotations)")
     check.set_defaults(func=cmd_check)
 
     policy = sub.add_parser("policy", help="show the effective repository-local policy")
@@ -1115,8 +1143,9 @@ def build_parser() -> argparse.ArgumentParser:
     adopt.set_defaults(func=cmd_adopt)
 
     history = sub.add_parser("history", help="verify that accepted decisions were not rewritten")
-    history.add_argument("--base", required=True, metavar="REF", help="base commit or ref, e.g. origin/main")
-    history.add_argument("--head", default="HEAD", metavar="REF", help="head commit or ref (default: %(default)s)")
+    history.add_argument("--base", metavar="REF", help="base commit or ref, e.g. origin/main (required unless --staged, which defaults to HEAD)")
+    history.add_argument("--head", default=None, metavar="REF", help="head commit or ref (default: HEAD)")
+    history.add_argument("--staged", action="store_true", help="check the staged changes against --base instead of a head commit (for pre-commit hooks)")
     history.add_argument("--root", help=ROOT_HELP)
     history.add_argument("--json", action="store_true", help=JSON_HELP)
     history.set_defaults(func=cmd_history)
@@ -1187,6 +1216,8 @@ def _wants_json(args: argparse.Namespace) -> bool:
         return not getattr(args, "output", None)
     if command in ("graph", "pack") and getattr(args, "format", None) in (None, "json"):
         return True
+    if command in ("lint", "check") and getattr(args, "format", None) == "json":
+        return True
     return bool(getattr(args, "json", False))
 
 
@@ -1227,6 +1258,20 @@ def main(argv: list[str] | None = None) -> int:
             "io_error",
             f"cannot complete `whykit {args.command}`: {describe_os_error(exc)}\n"
             "hint: check the path and its permissions; set WHYKIT_DEBUG=1 for a traceback",
+            json_mode=_wants_json(args),
+        )
+    except Exception as exc:  # noqa: BLE001 - the last line of defence for the contract
+        # A bug in WhyKit. Keep stdout one JSON document under --json, and keep
+        # the traceback (which can quote vault paths and content) off by default.
+        if os.environ.get("WHYKIT_DEBUG"):
+            traceback.print_exc(file=sys.stderr)
+        detail = str(exc).strip().splitlines()
+        reason = f"{type(exc).__name__}: {detail[0]}" if detail else type(exc).__name__
+        return emit_error(
+            "internal_error",
+            f"internal error in `whykit {args.command}`: {reason}\n"
+            f"hint: this is a bug in WhyKit; please report it at {ISSUES_URL} "
+            "with the command you ran and the output of the same command under WHYKIT_DEBUG=1",
             json_mode=_wants_json(args),
         )
 

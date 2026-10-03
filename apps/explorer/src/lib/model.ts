@@ -61,7 +61,9 @@ export function createVaultModel(vault: VaultIndex) {
   const evidenceByKey = new Map(vault.evidence.map(row => [row.id, row]));
   const evidenceUsage = new Map<string, VaultDoc[]>();
   for (const doc of docs) {
-    for (const sourceId of new Set(doc.sourceIds)) {
+    // `citations` covers body mentions too, which is what `whykit trace` counts;
+    // an index from an older release only has front-matter source_ids.
+    for (const sourceId of new Set([...doc.sourceIds, ...(doc.citations ?? [])])) {
       const list = evidenceUsage.get(sourceId);
       if (list) list.push(doc);
       else evidenceUsage.set(sourceId, [doc]);

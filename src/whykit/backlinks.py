@@ -93,7 +93,3 @@ def main(argv: list[str] | None = None) -> int:
         for item in report["backlinks"]:
             print(f"  {item['type']:<10} {item['from']}")
     return 0 if report["exists"] else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

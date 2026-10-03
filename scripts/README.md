@@ -25,7 +25,7 @@ WhyKit is not published to PyPI yet. Do not run `uv tool install whykit` or
 `pipx install whykit` until a release is announced; those commands would resolve
 the public package index, not install this source checkout. For now, clone this
 repository and use the checkout-based commands above or the [README quick
-start](../README.md#start-here). After publication, the package install will be:
+start](../README.md#60-second-quickstart). After publication, the package install will be:
 
 ```bash
 uv tool install whykit
@@ -43,6 +43,8 @@ python3 scripts/bench.py --notes 5000                      # timings
 python3 scripts/bench.py --notes 5000 --record /tmp/before # save outputs
 python3 scripts/bench.py --notes 5000 --compare /tmp/before
 python3 scripts/bench.py --vault examples/northline --profile /tmp/prof
+python3 scripts/bench.py --notes 5000 --mcp                # MCP tool latency, cold and repeated
+python3 scripts/bench.py --notes 5000 --memory             # peak traced memory per command
 ```
 
 ## `check_dist.py`

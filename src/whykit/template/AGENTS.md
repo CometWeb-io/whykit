@@ -20,7 +20,7 @@ point. Clear them, then delete this section.
 
 ## Repository purpose
 
-This repository is the operating knowledge base for go-to-market work. It stores
+This repository is the team's operating knowledge base. It stores
 durable context, strategic documents, research, specifications and accepted
 decisions. It is not a task tracker, not a CRM, and not a place for credentials.
 

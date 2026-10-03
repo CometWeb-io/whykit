@@ -16,7 +16,31 @@ from .status import build_status
 from .vault_index import VaultIndex
 from .console import emit_machine
 
-SNAPSHOT_FORMAT = "whykit.snapshot/v1"
+SNAPSHOT_FORMAT_V1 = "whykit.snapshot/v1"
+SNAPSHOT_FORMAT_V2 = "whykit.snapshot/v2"
+# What `whykit snapshot` writes. verify-snapshot reads every format in
+# SNAPSHOT_FORMATS and re-hashes the vault the way the baseline was hashed.
+SNAPSHOT_FORMAT = SNAPSHOT_FORMAT_V2
+SNAPSHOT_FORMATS = {"v1": SNAPSHOT_FORMAT_V1, "v2": SNAPSHOT_FORMAT_V2}
+
+# v1 hashes raw bytes, so a checkout with `core.autocrlf=true` (Windows) or an
+# editor that adds a byte-order mark reports every file as changed. v2 hashes
+# the text after this normalization, and records it in the snapshot so a
+# reader never has to guess how a digest was computed.
+NORMALIZATION_V2 = {"utf8_bom": "strip", "line_endings": "crlf-to-lf"}
+
+_BOM = b"\xef\xbb\xbf"
+
+
+def normalize_content(data: bytes) -> bytes:
+    """The bytes a v2 snapshot hashes: one leading UTF-8 BOM removed, CRLF as LF.
+
+    Lone CR and every other byte are kept, so any edit a reader could see is
+    still a change.
+    """
+    if data.startswith(_BOM):
+        data = data[len(_BOM):]
+    return data.replace(b"\r\n", b"\n")
 
 
 def _sha256(path: Path) -> str:
@@ -25,6 +49,14 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(65536), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _digest(path: Path, snapshot_format: str) -> tuple[str, int]:
+    """(sha256, byte count) of ``path`` as ``snapshot_format`` defines them."""
+    if snapshot_format == SNAPSHOT_FORMAT_V1:
+        return _sha256(path), path.stat().st_size
+    data = normalize_content(path.read_bytes())
+    return hashlib.sha256(data).hexdigest(), len(data)
 
 
 def _snapshot_files(root: Path, vault: VaultIndex | None = None) -> list[Path]:
@@ -36,11 +68,14 @@ def _snapshot_files(root: Path, vault: VaultIndex | None = None) -> list[Path]:
     return sorted(files, key=relative)
 
 
-def _file_entry(root: Path, path: Path, vault: VaultIndex | None = None) -> dict[str, Any]:
+def _file_entry(
+    root: Path, path: Path, vault: VaultIndex | None = None, *, snapshot_format: str = SNAPSHOT_FORMAT,
+) -> dict[str, Any]:
+    sha256, size = _digest(path, snapshot_format)
     entry: dict[str, Any] = {
         "path": vault.relative(path) if vault is not None else rel(root, path),
-        "sha256": _sha256(path),
-        "bytes": path.stat().st_size,
+        "sha256": sha256,
+        "bytes": size,
     }
     if path.suffix.lower() == ".md":
         note = (vault.note_for(path) if vault is not None else None) or load_note(path)
@@ -68,22 +103,33 @@ def _snapshot_id(entries: list[dict[str, Any]]) -> str:
 
 
 @path_cache()
-def build_snapshot(root: Path, *, today: dt.date | None = None) -> dict[str, Any]:
+def build_snapshot(
+    root: Path, *, today: dt.date | None = None, snapshot_format: str = SNAPSHOT_FORMAT,
+) -> dict[str, Any]:
+    if snapshot_format not in SNAPSHOT_FORMATS.values():
+        raise ValueError(f"unsupported snapshot format: {snapshot_format!r}")
     today = today or dt.date.today()
     root = root.resolve()
     # One parse feeds the file table, status and graph; each used to re-read
     # every note, which tripled the cost of a snapshot on a large vault.
     vault = VaultIndex.load(root)
-    entries = [_file_entry(root, path, vault) for path in _snapshot_files(root, vault)]
+    entries = [
+        _file_entry(root, path, vault, snapshot_format=snapshot_format)
+        for path in _snapshot_files(root, vault)
+    ]
     status = build_status(root, today=today, vault=vault)
     graph = build_graph(root, vault=vault)
     edges_by_type: dict[str, int] = {}
     for edge in graph.get("edges", []):
         edge_type = str(edge.get("type") or "wikilink")
         edges_by_type[edge_type] = edges_by_type.get(edge_type, 0) + 1
-    return {
-        "format": SNAPSHOT_FORMAT,
+    payload: dict[str, Any] = {
+        "format": snapshot_format,
         "contract_version": 1,
+    }
+    if snapshot_format != SNAPSHOT_FORMAT_V1:
+        payload["normalization"] = dict(NORMALIZATION_V2)
+    return payload | {
         "snapshot_id": _snapshot_id(entries),
         "as_of": today.isoformat(),
         "files": entries,
@@ -106,9 +152,20 @@ def build_snapshot(root: Path, *, today: dt.date | None = None) -> dict[str, Any
 
 @path_cache()
 def compare_snapshot(root: Path, baseline: dict[str, Any], *, today: dt.date | None = None) -> dict[str, Any]:
-    if baseline.get("format") != SNAPSHOT_FORMAT:
-        raise ValueError(f"unsupported snapshot format: {baseline.get('format')!r}")
-    current = build_snapshot(root, today=today)
+    snapshot_format = baseline.get("format")
+    if snapshot_format not in SNAPSHOT_FORMATS.values():
+        supported = ", ".join(sorted(SNAPSHOT_FORMATS.values()))
+        raise ValueError(f"unsupported snapshot format: {snapshot_format!r} (this WhyKit reads {supported})")
+    if snapshot_format == SNAPSHOT_FORMAT_V2 and baseline.get("normalization") != NORMALIZATION_V2:
+        # Digests computed under another normalization cannot be compared;
+        # reporting every file as changed would be a false alarm.
+        raise ValueError(
+            f"unsupported snapshot normalization: {baseline.get('normalization')!r} "
+            f"(this WhyKit hashes {SNAPSHOT_FORMAT_V2} with {NORMALIZATION_V2})"
+        )
+    # Re-hash the vault the way the baseline was hashed: a v1 baseline keeps
+    # its exact byte semantics, so upgrading WhyKit never turns MATCH into DRIFT.
+    current = build_snapshot(root, today=today, snapshot_format=str(snapshot_format))
     before = {item["path"]: item for item in baseline.get("files", []) if isinstance(item, dict) and item.get("path")}
     after = {item["path"]: item for item in current["files"]}
     added = sorted(set(after) - set(before))
@@ -132,6 +189,7 @@ def compare_snapshot(root: Path, baseline: dict[str, Any], *, today: dt.date | N
     }
     return {
         "contract_version": 1,
+        "format": snapshot_format,
         "baseline_snapshot_id": baseline.get("snapshot_id"),
         "current_snapshot_id": current["snapshot_id"],
         # `matches` remains content identity for backwards compatibility. A
@@ -174,6 +232,10 @@ def main_snapshot(argv: list[str] | None = None) -> int:
     parser.add_argument("--today", help="evaluate health/review status as of this ISO date")
     parser.add_argument("--output", help="write JSON to this path instead of stdout")
     parser.add_argument("--compact", action="store_true", help="emit compact JSON")
+    parser.add_argument(
+        "--format", dest="snapshot_format", choices=tuple(SNAPSHOT_FORMATS), default="v2",
+        help="v2 (default) hashes text with CRLF and a UTF-8 BOM normalized; v1 hashes raw bytes",
+    )
     args = parser.parse_args(argv)
     # Without --output the command's stdout is JSON, so failures are too.
     json_mode = not args.output
@@ -187,7 +249,7 @@ def main_snapshot(argv: list[str] | None = None) -> int:
             today = dt.date.fromisoformat(args.today)
         except ValueError:
             return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=json_mode)
-    payload = build_snapshot(root, today=today)
+    payload = build_snapshot(root, today=today, snapshot_format=SNAPSHOT_FORMATS[args.snapshot_format])
     rendered = json.dumps(payload, ensure_ascii=False, indent=None if args.compact else 2, sort_keys=args.compact)
     if args.output:
         target = Path(args.output).expanduser()
@@ -251,7 +313,3 @@ def main_verify(argv: list[str] | None = None) -> int:
             for key, delta in report["health_delta"].items():
                 print(f"    {key}: {delta['before']} -> {delta['after']}")
     return 0 if report["matches"] else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main_snapshot())

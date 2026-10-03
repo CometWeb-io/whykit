@@ -62,7 +62,9 @@ That appends one row to `00-context/evidence-register.md`:
 Rules worth knowing:
 
 - **IDs are stable and never reused.** `E-001` means the same source forever.
-  Other documents cite it in their `source_ids` front matter or inline.
+  Other documents cite it in their `source_ids` front matter or inline. An ID
+  inside `inline code` or a fenced code block is an example of the syntax, not a
+  citation: `graph`, `impact`, `context`, `query` and `trace` all ignore it.
 - **A row with no source and no location is a placeholder, not evidence.** The
   linter will not let a document cite it.
 - **Evidence is retired, not deleted.** When a source turns out to be wrong or is
@@ -192,6 +194,8 @@ WhyKit checks **shape and traceability**:
 - every decision record is indexed in the decision log with matching ID and status;
 - supersession chains have no forks, cycles or dangling references;
 - approved decisions carry a review date, and overdue ones are reported;
+- decision records that are drafted, in review or approved no longer hold the
+  scaffold's prompts (`decision.placeholder`);
 - accepted reasoning and earlier review events were not rewritten (`history`);
 - front matter is complete, links resolve, and nothing looks like a credential.
 

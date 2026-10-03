@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://cometweb.io/schemas/whykit/history-report.schema.json",
   "title": "WhyKit immutable-history report",
-  "description": "Output of `whykit history --json`. Blocked rewrites are a report with `passed: false` (exit 1).",
+  "description": "Output of `whykit history --json`. Blocked rewrites are a report with `passed: false` (exit 1). With `--staged`, `head` is `INDEX` and `staged` is true.",
   "type": "object",
   "required": [
     "contract_version",
@@ -20,6 +20,10 @@
     },
     "head": {
       "type": "string"
+    },
+    "staged": {
+      "type": "boolean",
+      "description": "True for `whykit history --staged`: head is the Git index (reported as INDEX), not a commit."
     },
     "passed": {
       "type": "boolean"

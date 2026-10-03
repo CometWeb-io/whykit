@@ -99,7 +99,7 @@ def build_context(
     if not include_body:
         content = ""
 
-    source_ids = sorted(set(EVIDENCE_ID_RE.findall(note.text)))
+    source_ids = list(note.cited_evidence)
     note_path = rel(root, note.path)
     _, scoped_findings = lint(root, [note_path], orphans=False, secrets=False, vault=vault_index)
     scoped_findings = [item for item in scoped_findings if item.path == note_path]
@@ -169,7 +169,3 @@ def main(argv: list[str] | None = None) -> int:
     else:
         _human(report)
     return 0 if report.get("exists") else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

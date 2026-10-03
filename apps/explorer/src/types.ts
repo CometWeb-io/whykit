@@ -13,6 +13,8 @@ export interface VaultDoc {
   sourceOfTruth: boolean;
   sensitivity: string;
   sourceIds: string[];
+  /** Every E-NNN the note mentions (front matter or body); absent in older indexes. */
+  citations?: string[];
   tags: string[];
   workstream: string;
   decisionId: string | null;
@@ -55,4 +57,11 @@ export interface VaultIndex {
   decisions: DecisionRow[];
   reviews: ReviewRow[];
   lint: { files: number; errors: number; warnings: number; findings: Finding[] };
+  /** Freshness thresholds from whykit.toml; absent in indexes built by older releases. */
+  policy?: VaultPolicy;
+}
+export interface VaultPolicy {
+  evidenceAccessAgeDays: Record<string, number>;
+  decisionReviewDays: number | null;
+  statusDueDays: number | null;
 }

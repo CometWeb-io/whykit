@@ -315,8 +315,11 @@ class ContractTests(unittest.TestCase):
         self.assertIn("https://docs.astral.sh/uv/getting-started/installation/", readme)
         self.assertIn("init ../my-ledger", readme)
         self.assertIn("lint --root ../my-ledger", readme)
-        self.assertIn("adopt ../old-docs --into ../my-ledger --profile obsidian-loose", readme)
-        self.assertIn("adopt ../old-docs --into ../my-ledger --profile generic --write", readme)
+        # The adopt walk-through moved to the how-to guide; the README links to it.
+        guide = (ROOT / "docs" / "guide.md").read_text(encoding="utf-8")
+        self.assertIn("adopt ../old-docs --into ../my-ledger --profile obsidian-loose", guide)
+        self.assertIn("adopt ../old-docs --into ../my-ledger --profile generic --write", guide)
+        self.assertIn("docs/guide.md", readme)
         self.assertIn(
             "[Code of Conduct](CODE_OF_CONDUCT.md)",
             readme,

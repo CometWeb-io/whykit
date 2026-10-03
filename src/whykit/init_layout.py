@@ -5,8 +5,8 @@ import datetime as dt
 import re
 from pathlib import Path
 
-# Marketing / GTM-shaped workstreams from the full template. Minimal layout drops them.
-GTM_WORKSTREAMS = (
+# Optional starter workstreams from the full template. Minimal layout drops them.
+OPTIONAL_WORKSTREAMS = (
     "01-strategy",
     "02-discoverability",
     "03-website",
@@ -15,7 +15,7 @@ GTM_WORKSTREAMS = (
     "07-research",
 )
 
-GTM_TEMPLATES = (
+OPTIONAL_TEMPLATES = (
     "automation-spec-template.md",
     "page-brief-template.md",
 )
@@ -136,7 +136,7 @@ def apply_minimal_layout(target: Path, *, today: dt.date | None = None) -> None:
     today = today or dt.date.today()
     stamp = today.isoformat()
 
-    for name in GTM_WORKSTREAMS:
+    for name in OPTIONAL_WORKSTREAMS:
         path = target / name
         if path.is_dir():
             for child in sorted(path.rglob("*"), reverse=True):
@@ -147,7 +147,7 @@ def apply_minimal_layout(target: Path, *, today: dt.date | None = None) -> None:
             path.rmdir()
 
     templates = target / "templates"
-    for name in GTM_TEMPLATES:
+    for name in OPTIONAL_TEMPLATES:
         path = templates / name
         if path.is_file():
             path.unlink()
@@ -169,7 +169,7 @@ def apply_minimal_layout(target: Path, *, today: dt.date | None = None) -> None:
             flags=re.S,
         )
         text = text.replace(
-            "This repository is the operating knowledge base for go-to-market work. It stores\n"
+            "This repository is the team's operating knowledge base. It stores\n"
             "durable context, strategic documents, research, specifications and accepted\n"
             "decisions. It is not a task tracker, not a CRM, and not a place for credentials.\n",
             "",
@@ -193,7 +193,7 @@ def apply_minimal_layout(target: Path, *, today: dt.date | None = None) -> None:
 
 def removed_workstream_mentions(root: Path) -> list[str]:
     """Paths of generated files that still name a workstream minimal layout deletes."""
-    needles = tuple(f"{name}/" for name in GTM_WORKSTREAMS)
+    needles = tuple(f"{name}/" for name in OPTIONAL_WORKSTREAMS)
     hits: list[str] = []
     for path in sorted(root.rglob("*")):
         if not path.is_file() or path.suffix not in {".md", ".toml", ".txt", ".yml", ".yaml"}:

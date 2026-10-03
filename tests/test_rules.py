@@ -22,7 +22,7 @@ class RuleCatalogTests(unittest.TestCase):
 
     def test_docs_rule_table_covers_the_public_catalog(self) -> None:
         docs = (ROOT / "docs/rules.md").read_text(encoding="utf-8")
-        documented = set(re.findall(r"\| `([a-z][a-z0-9_]+\.[a-z0-9_]+)` \|", docs))
+        documented = set(re.findall(r'\| <a name="[^"]+"></a>`([a-z][a-z0-9_]+\.[a-z0-9_]+)` \|', docs))
         self.assertEqual(set(RULE_BY_CODE) - documented, set())
 
     def test_markdown_catalog_is_generated_from_the_same_rule_registry(self) -> None:

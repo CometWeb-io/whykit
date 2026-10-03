@@ -59,6 +59,13 @@ dist = [
   "twine==7.0.0",
 ]
 
+# The pre-commit framework, for the test that installs this repository's
+# .pre-commit-hooks.yaml through `pre-commit try-repo`. Opt in with
+# `uv sync --group hooks`; the test skips when it is absent.
+hooks = [
+  "pre-commit==4.6.2",
+]
+
 [project.urls]
 Homepage = "https://github.com/CometWeb-io/whykit"
 Documentation = "https://github.com/CometWeb-io/whykit#readme"
@@ -91,6 +98,7 @@ include = [
   "/examples",
   "/README.md",
   "/CHANGELOG.md",
+  "/hatch_build.py",
   "/LICENSE",
   "/NOTICE",
 ]
@@ -112,6 +120,14 @@ replacement = '![\1](https://raw.githubusercontent.com/CometWeb-io/whykit/main/\
 [[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
 pattern = '(?<!!)\[([^\]]*)\]\((?![a-zA-Z][a-zA-Z0-9+.-]*:|#)([^)\s]+)\)'
 replacement = '[\1](https://github.com/CometWeb-io/whykit/blob/main/\2)'
+
+# Runs after the hook above (hooks run in the order they are declared). For a
+# release version it repins those `main` URLs to the matching `vX.Y.Z` tag, so
+# a published version's PyPI page keeps linking to the docs it shipped with.
+# Development versions keep `main`. See hatch_build.py; check_dist.py verifies
+# the result on the real archives.
+[tool.hatch.metadata.hooks.custom]
+path = "hatch_build.py"
 
 # Dev/CI use Astral uv. Runtime stays dependency-free; the lockfile pins the
 # empty graph so `uv sync --locked` fails closed if someone adds a dependency

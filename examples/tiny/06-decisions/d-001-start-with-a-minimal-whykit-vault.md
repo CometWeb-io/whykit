@@ -3,7 +3,7 @@ title: "Start with a minimal WhyKit vault"
 aliases: []
 type: decision
 decision_id: D-001
-status: approved
+status: superseded
 owner: "Vault owner"
 created: 2026-09-17
 last_updated: 2026-09-17
@@ -12,6 +12,7 @@ sensitivity: internal
 source_ids: ["E-001", "E-002"]
 tags: []
 review_by: 2027-03-17
+superseded_by: D-002
 ---
 
 # Decision record: Start with a minimal WhyKit vault

@@ -98,8 +98,9 @@ publishing. No API token exists anywhere.
 8. **Approve the `pypi` deployment** only after the `build` job is green and
    the digests match.
 9. **Verify the published release:**
-   - the PyPI project page renders the README, its links and the overview
-     image, and shows the expected licence, classifiers and project URLs;
+   - the PyPI project page renders the README, its links (pointing at the
+     `vX.Y.Z` tag) and the overview image, and shows the expected licence,
+     classifiers and project URLs;
    - each file on PyPI shows a provenance attestation from
      `CometWeb-io/whykit`, workflow `release.yml`;
    - the SHA-256 digests on PyPI equal those from step 7;
@@ -129,9 +130,16 @@ publishing. No API token exists anywhere.
   rebuild check confirms the new backend is still deterministic.
 - `SOURCE_DATE_EPOCH` must come from the commit (`git log -1 --format=%ct`),
   never from the clock.
-- The README on PyPI links to `main` on GitHub. The link rewriting lives in
-  `[tool.hatch.metadata.hooks.fancy-pypi-readme]` in `pyproject.toml`, and
-  `check_dist.py` fails the build if a relative link survives it.
+- The README on PyPI links to GitHub at the release tag, so a published
+  version keeps pointing at the docs it shipped with. Two metadata hooks do it:
+  `[tool.hatch.metadata.hooks.fancy-pypi-readme]` in `pyproject.toml` rewrites
+  relative links to `main`, then [`hatch_build.py`](../hatch_build.py) repins
+  them to `vX.Y.Z` when the version has no `.dev` or local segment. The tag is
+  derived from the version, not from Git, so the sdist and the wheel built from
+  it agree and the build stays reproducible; the release workflow already
+  refuses a tag that differs from `__version__`. Development builds keep
+  `main`. `check_dist.py` fails the build if a relative link survives or a
+  repository link uses the wrong ref.
 
 ## Changelog section template
 

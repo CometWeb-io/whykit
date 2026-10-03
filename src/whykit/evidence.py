@@ -178,7 +178,3 @@ def main(argv: list[str] | None = None) -> int:
         if payload["current_references"]:
             print(f"next: `whykit impact {payload['id']}` lists what still cites it")
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

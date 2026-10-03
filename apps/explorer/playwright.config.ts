@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { EMPTY_PORT, NORTHLINE_PORT } from "./e2e/ports.ts";
+import { EMPTY_PORT, NORTHLINE_PORT, SYNTHETIC_PORT } from "./e2e/ports.ts";
 
 // The suite runs against static production builds (see scripts/build-e2e.mjs),
 // served by `vite preview`, using Playwright's own bundled Chromium only.
@@ -30,5 +30,5 @@ export default defineConfig({
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1360, height: 900 } }, testIgnore: /mobile\.spec\.ts/ },
     { name: "mobile", use: { ...devices["Pixel 7"] }, testMatch: /mobile\.spec\.ts/ },
   ],
-  webServer: [preview("northline", NORTHLINE_PORT), preview("empty", EMPTY_PORT)],
+  webServer: [preview("northline", NORTHLINE_PORT), preview("empty", EMPTY_PORT), preview("synthetic", SYNTHETIC_PORT)],
 });

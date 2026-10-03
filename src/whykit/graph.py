@@ -7,15 +7,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+from collections.abc import Iterator
 from pathlib import Path
 
 from .contract import emit_error, vault_not_found
 from .lint import (
     path_cache,
     DECISION_ID_RE,
-    EVIDENCE_ID_RE,
     WIKILINK_RE,
-    _mask_code,
     evidence_register,
     find_vault_root,
     is_vault_root,
@@ -23,6 +23,31 @@ from .lint import (
 )
 from .vault_index import VaultIndex
 from .console import emit_machine
+
+
+def document_node(note, node_id: str) -> dict:
+    """The graph node for one note (``kind: document``)."""
+    return {
+        "id": node_id,
+        "kind": "document",
+        "title": str(note.front.get("title") or note.path.stem),
+        "type": str(note.front.get("type") or ""),
+        "status": str(note.front.get("status") or ""),
+        "owner": str(note.front.get("owner") or ""),
+        "sensitivity": str(note.front.get("sensitivity") or ""),
+        "decision_id": str(note.front.get("decision_id") or "") or None,
+        "source_of_truth": note.front.get("source_of_truth") is True,
+    }
+
+
+def wikilink_resolutions(note, vault_index: VaultIndex) -> Iterator[tuple[str, Path | None, bool]]:
+    """Yield ``(target, resolved, ambiguous)`` for each wikilink outside code."""
+    for match in WIKILINK_RE.finditer(note.masked):
+        target = match.group(1).strip()
+        if not target or target.startswith(("http://", "https://")):
+            continue
+        resolved, ambiguous = vault_index.resolve_link(target)
+        yield target, resolved, ambiguous
 
 
 @path_cache()
@@ -65,22 +90,8 @@ def build_graph(
 
     for note in selected:
         source = node_id(note.path)
-        nodes.append({
-            "id": source,
-            "kind": "document",
-            "title": str(note.front.get("title") or note.path.stem),
-            "type": str(note.front.get("type") or ""),
-            "status": str(note.front.get("status") or ""),
-            "owner": str(note.front.get("owner") or ""),
-            "sensitivity": str(note.front.get("sensitivity") or ""),
-            "decision_id": str(note.front.get("decision_id") or "") or None,
-            "source_of_truth": note.front.get("source_of_truth") is True,
-        })
-        for match in WIKILINK_RE.finditer(_mask_code(note.text)):
-            target = match.group(1).strip()
-            if not target or target.startswith(("http://", "https://")):
-                continue
-            resolved, ambiguous = vault_index.resolve_link(target)
+        nodes.append(document_node(note, source))
+        for target, resolved, ambiguous in wikilink_resolutions(note, vault_index):
             if resolved is None or ambiguous:
                 unresolved.append({
                     "from": source,
@@ -95,7 +106,7 @@ def build_graph(
             add_edge(source, destination, "wikilink")
 
         if source != "00-context/evidence-register":
-            for evidence_id in sorted(set(EVIDENCE_ID_RE.findall(note.text))):
+            for evidence_id in note.cited_evidence:
                 add_edge(source, f"evidence:{evidence_id}", "evidence")
 
         supersedes = str(note.front.get("supersedes") or "").strip()
@@ -147,8 +158,21 @@ def build_graph(
     }
 
 
+# Characters that end a line for some reader of the output: Python's
+# ``splitlines`` and most editors, not only Graphviz.
+_LINE_BREAKS = re.compile(r"\r\n|[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
 def _dot_escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    """Quote-safe text for a DOT string, kept on one physical line.
+
+    A line break becomes Graphviz's ``\\n`` label escape, so a multi-line
+    title still renders on two lines without splitting the statement; any
+    other control character becomes a space.
+    """
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return _CONTROL.sub(" ", _LINE_BREAKS.sub("\\\\n", text))
 
 
 def as_obsidian(graph: dict) -> dict:
@@ -201,8 +225,8 @@ def as_dot(graph: dict) -> str:
 def _mermaid_label(value: str) -> str:
     # Mermaid has no backslash escapes inside quoted labels; it uses HTML-style
     # entity codes.  Newlines would end the statement, so they become spaces.
-    text = " ".join(str(value).split())
-    for raw, code in (("#", "#35;"), ('"', "#quot;"), ("<", "#lt;"), (">", "#gt;")):
+    text = " ".join(_CONTROL.sub(" ", str(value)).split())
+    for raw, code in (("#", "#35;"), ('"', "#quot;"), ("&", "#amp;"), ("<", "#lt;"), (">", "#gt;")):
         text = text.replace(raw, code)
     return text
 
@@ -292,7 +316,3 @@ def main(argv: list[str] | None = None) -> int:
     else:
         emit_machine(rendered)
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

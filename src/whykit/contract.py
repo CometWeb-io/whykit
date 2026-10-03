@@ -42,15 +42,23 @@ ERROR_CODES: dict[str, str] = {
     "vault_invalid": "The vault is broken in a way that blocks this command: lint errors, or a missing register or log.",
     "io_error": "The filesystem refused a read or write.",
     "interrupted": "The command was interrupted.",
+    "internal_error": "WhyKit itself failed: an unexpected exception, which is a bug to report.",
 }
+
+# Where the internal_error hint sends people. Kept here so the CLI and the docs
+# test agree on one address.
+ISSUES_URL = "https://github.com/CometWeb-io/whykit/issues"
 
 # Each code has exactly one exit code. 1 means the command ran and the answer is
 # a problem with the vault (a missing target, a broken vault); 2 means it could
-# not run as asked. Everything not listed here exits 2.
+# not run as asked; 70 means WhyKit crashed. Everything not listed here exits 2.
 ERROR_EXIT_CODES: dict[str, int] = {code: 2 for code in ERROR_CODES} | {
     "not_found": 1,
     "vault_invalid": 1,
     "interrupted": 130,
+    # EX_SOFTWARE from sysexits.h: distinct from 1 and 2, so a CI job can tell
+    # "WhyKit broke" from "the vault is wrong" and "the job is misconfigured".
+    "internal_error": 70,
 }
 
 
@@ -96,6 +104,13 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "explorer-index": "explorer-index.schema.json",
 }
 ERROR_SCHEMA = "error.schema.json"
+
+# Non-default machine formats that are not the JSON contract itself (so they
+# carry no top-level ``contract_version``) but still have a published schema.
+# ``--format github`` is GitHub's workflow-command text and has none.
+FORMAT_SCHEMAS: dict[str, str] = {
+    "lint --format sarif": "lint-sarif.schema.json",
+}
 
 _HINT_PREFIX = "hint: "
 

@@ -21,6 +21,13 @@
     "contract_version": {
       "const": 1
     },
+    "format": {
+      "enum": [
+        "whykit.snapshot/v1",
+        "whykit.snapshot/v2"
+      ],
+      "description": "Format of the baseline; the vault was re-hashed the same way."
+    },
     "baseline_snapshot_id": {
       "type": [
         "string",

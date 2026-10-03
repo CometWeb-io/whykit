@@ -21,7 +21,7 @@ def _as_list(value: object) -> list[str]:
 
 def _summary(index: VaultIndex, note) -> dict:
     path = index.relative(note.path)
-    inline_ids = set() if path == "00-context/evidence-register.md" else set(EVIDENCE_ID_RE.findall(note.text))
+    inline_ids = set() if path == "00-context/evidence-register.md" else set(note.cited_evidence)
     source_ids = sorted(set(_as_list(note.front.get("source_ids"))) | inline_ids)
     return {
         "path": path,
@@ -169,7 +169,3 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{item['path']}  [{item['status'] or 'no-status'}/{item['type'] or 'no-type'}{decision}{canonical}]  {item['title']}")
         print(f"\n{report['returned']} returned / {report['total']} matched")
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

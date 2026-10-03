@@ -23,8 +23,10 @@ whatever the console's encoding: on a Windows `cp1252` console or under
 included. Human text on stderr degrades to ASCII spellings instead of crashing.
 
 A command is in JSON mode when you pass `--json`. `graph` and `pack` are also in
-JSON mode when `--format` is `json` (their default), `snapshot` when it writes
-to stdout (no `--output`), and `explorer-index` always.
+JSON mode when `--format` is `json` (their default), `lint` and `check` when
+`--format` is `json`, `snapshot` when it writes to stdout (no `--output`), and
+`explorer-index` always. The CI formats (`--format sarif` and
+`--format github`) are not JSON mode; see [CI formats](#ci-formats).
 
 ## Exit codes
 
@@ -33,6 +35,7 @@ to stdout (no `--output`), and `explorer-index` always.
 | `0` | Success. The report says everything is fine (or, for read-only queries, here is the answer). |
 | `1` | The command ran and the answer is a problem with the vault: lint errors (or warnings under `--strict`), a failed policy gate, rewritten history, a target that does not exist, a vault too broken for the command. |
 | `2` | The command could not run as asked: no vault, a malformed option, an invalid `whykit.toml`, a refused path or change. stdout is an **error object**. |
+| `70` | WhyKit crashed: a bug, not a problem with the vault or the job. stdout is an error object with code `internal_error`. |
 | `130` | Interrupted. stdout is an error object with code `interrupted`. |
 
 With exit code 1, stdout is usually the command's report. It is an error object
@@ -92,9 +95,14 @@ Schema: [`schemas/error.schema.json`](../schemas/error.schema.json).
 | `vault_invalid` | 1 | The vault is too broken for the command: lint errors block `explorer-index`, or `new` cannot find the evidence register or decision log. |
 | `io_error` | 2 | The filesystem refused a read or write, including a file marked read-only that a change would rewrite (refused before anything is written). Set `WHYKIT_DEBUG=1` to get the traceback instead. |
 | `interrupted` | 130 | The command was interrupted. |
+| `internal_error` | 70 | WhyKit itself failed with an unexpected exception. This is a bug: the hint links the issue tracker. The message names the exception type; set `WHYKIT_DEBUG=1` to also print the Python traceback on stderr (stdout is still the error object). |
 
-A crash that is a bug in WhyKit still prints a Python traceback and no error
-object. Treat unparseable stdout as "report a bug", not as a vault problem.
+A crash that is a bug in WhyKit is reported like any other failure: under
+`--json` stdout is an `internal_error` object, and stderr carries one line
+naming the exception plus a hint to report it. No traceback is printed unless
+`WHYKIT_DEBUG=1` is set, because a traceback can quote vault paths and content
+you may not want in a CI log. Exit code 70 (`EX_SOFTWARE`) keeps "WhyKit broke"
+apart from "fix the vault" (1) and "fix the job" (2).
 
 ## Missing targets
 
@@ -132,6 +140,11 @@ stderr only, and the exit code and JSON report are what they would have been:
   revision (usually the wrong `--root` for a vault in a subdirectory).
 - `history --head HEAD` runs while Markdown in the vault has uncommitted
   changes, which it does not check.
+
+`history --staged` compares the Git index with `--base` (default `HEAD`), which
+is what a pre-commit hook needs. Its report has `"head": "INDEX"` and
+`"staged": true`. Before the first commit there is nothing accepted to rewrite,
+so it passes.
 
 ## Schemas
 
@@ -173,6 +186,40 @@ The same table is available to Python callers as
 `whykit.contract.OUTPUT_SCHEMAS`, and the error codes as
 `whykit.contract.ERROR_CODES`.
 
+## CI formats
+
+Two more output formats exist for tools that already read a standard format.
+They render the same findings as `lint --json` and keep its exit codes, but they
+are not the JSON contract: no `contract_version` at the top level, and no error
+object. When the command cannot run (no vault, a bad option), stdout is empty
+and the human error goes to stderr, so an upload step never receives a document
+that is not what it expects.
+
+| Format | Output | Schema |
+|---|---|---|
+| `lint --format sarif` | A SARIF 2.1.0 log for code-scanning dashboards. | `lint-sarif.schema.json` |
+| `lint --format github`, `check --format github` | GitHub Actions workflow commands (`::error file=…,line=…::…`), which the runner turns into annotations. | none (GitHub's text protocol) |
+
+The SARIF log has one run. `tool.driver.rules` is the whole rule catalog in
+`whykit rules` order, and each rule's `helpUri` is its anchor in the
+[rule reference](rules.md), for example `docs/rules.md#evidence.missing`. Each
+result has `ruleId` set to the stable rule code (the same value as
+`findings[].code`), `level` `error` or `warning`, and a location relative to
+`%SRCROOT%`: the Git work tree root, so a vault in `knowledge/` reports
+`knowledge/Home.md`. Outside Git, locations are vault-relative.
+`partialFingerprints` ignores the line number, so editing text above a finding
+does not open a new code-scanning alert. `runs[0].properties` carries
+`contract_version`, the file count and the vault's prefix in the work tree.
+`whykit.contract.FORMAT_SCHEMAS` maps the format to its schema.
+
+`--format github` prints one workflow command per finding at its own level,
+then a plain summary line. When `--strict` (or a strict profile) fails on
+warnings alone, a final `::error` says so, because GitHub shows warnings as
+warnings. `check --format github` also annotates a rewritten decision record on
+its file and prints the usual gate report after the annotations.
+
+`--json` and a different `--format` conflict and exit 2 with a `usage` error.
+
 ## Using it in CI
 
 The exit code is the gate; the JSON is for the summary you attach to the run.
@@ -189,7 +236,7 @@ exit $status
 
 Tell "the vault is wrong" from "the job is misconfigured" by the exit code: `1`
 means fix the vault, `2` means fix the job (wrong `--root`, missing Git
-history, a malformed date).
+history, a malformed date), `70` means report a WhyKit bug.
 
 ## Using it from an agent
 
@@ -203,6 +250,8 @@ on `error.code`:
   person; do not work around it.
 - `io_error`, `git_error`, `missing_dependency`: an environment problem; surface
   the `hint`.
+- `internal_error`: a WhyKit bug. Do not retry in a loop or work around it;
+  surface the message and the issue-tracker hint to the person.
 
 ```bash
 whykit query "pricing" --json
@@ -223,7 +272,55 @@ The contract is versioned by `contract_version`. Within one version:
 - **Never part of the contract:** `message` and `hint` wording, stderr text,
   key order and whitespace.
 
+Snapshot files have their own `format` (see
+[Snapshot formats](#snapshot-formats)); a new snapshot format is introduced
+alongside the old one, never in place of it.
+
 Lint rule codes (`findings[].code`) follow the same rule and are listed in the
 [rule reference](rules.md). The vault data format (front matter, evidence
 rows, decision records) is a separate contract, described by the other schemas
 in `schemas/`.
+
+## Snapshot formats
+
+`whykit snapshot` writes a baseline that `whykit verify-snapshot` later
+compares the vault against. The baseline's `format` decides how every file is
+hashed, and `verify-snapshot` always re-hashes the current vault the same way,
+so a baseline keeps meaning what it meant when it was written.
+
+| `format` | Hashes | Written by |
+|---|---|---|
+| `whykit.snapshot/v2` | The file's text after the normalization recorded in the snapshot's `normalization` object: one leading UTF-8 byte-order mark removed, every CRLF turned into LF. `sha256` and `bytes` describe the normalized content. | `whykit snapshot` (default) |
+| `whykit.snapshot/v1` | The raw bytes on disk. | `whykit snapshot --format v1`, and WhyKit releases before v2 |
+
+Why v2: a baseline taken on Linux used to report every file as changed when
+verified on a Windows checkout with `core.autocrlf=true`, or after an editor
+added a byte-order mark, although nobody had changed a word. v2 treats those
+as the same content. Anything else is still a change, including a lone CR, a
+BOM that is not at the start of the file, whitespace and any edited character.
+
+```json
+{
+  "format": "whykit.snapshot/v2",
+  "contract_version": 1,
+  "normalization": {"utf8_bom": "strip", "line_endings": "crlf-to-lf"},
+  "snapshot_id": "…",
+  "files": [{"path": "Home.md", "sha256": "…", "bytes": 1234}]
+}
+```
+
+- Existing v1 baselines keep working unchanged: `verify-snapshot` hashes raw
+  bytes for them, exactly as before. Re-create a baseline with
+  `whykit snapshot` to get the portable format.
+- A file with LF line endings and no BOM has the same `sha256` in both formats,
+  and `snapshot_id` is computed the same way from it, so on such a vault the
+  two formats give the same ID.
+- A v2 snapshot whose `normalization` this WhyKit does not implement, or a
+  `format` it does not know, is refused with `invalid_argument` (exit 2),
+  never reported as drift.
+- `verify-snapshot --json` echoes the baseline's `format`.
+- Consumers that pinned `"format": "whykit.snapshot/v1"` should accept v2 as
+  well, or produce baselines with `--format v1` until they do.
+
+Schemas: [`snapshot.schema.json`](../schemas/snapshot.schema.json) and
+[`snapshot-verify.schema.json`](../schemas/snapshot-verify.schema.json).

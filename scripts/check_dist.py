@@ -14,7 +14,9 @@ project promises. This script checks those promises on the real archives:
 * PEP 639 metadata: ``License-Expression``, both license files, and no
   superseded ``License ::`` classifier;
 * zero runtime dependencies (only the optional ``mcp`` extra);
-* the PyPI long description has no relative links, which would 404 there;
+* the PyPI long description has no relative links, which would 404 there,
+  and its links into the repository use the release tag ``v<version>`` for a
+  release and ``main`` for a development build;
 * the sdist holds the documented allowlist and nothing from ``tests/``;
 * optionally, byte-identical rebuilds and a CycloneDX SBOM that lists WhyKit
   at the built version and no other runtime component.
@@ -44,12 +46,23 @@ ALLOWED_EXTRAS = {"mcp"}
 # .gitignore hatchling always adds. Mirrors [tool.hatch.build.targets.sdist].
 SDIST_TOP_LEVEL = {
     "src", "schemas", "examples", "README.md", "CHANGELOG.md", "LICENSE", "NOTICE",
-    "pyproject.toml", "PKG-INFO", ".gitignore",
+    "hatch_build.py", "pyproject.toml", "PKG-INFO", ".gitignore",
 }
 FORBIDDEN_PARTS = {"__pycache__", "tests", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".DS_Store"}
 # A Markdown link or image whose target has no URL scheme and is not an anchor.
 RELATIVE_LINK = re.compile(r"\]\((?![a-zA-Z][a-zA-Z0-9+.-]*:|#)([^)\s]+)\)")
 VERSION = re.compile(r'(?m)^__version__ = "([^"]+)"$')
+# Links from the long description into this repository, and the ref they use.
+REPO_LINK_REF = re.compile(
+    r"https://(?:github\.com/CometWeb-io/whykit/(?:blob|tree)|raw\.githubusercontent\.com/CometWeb-io/whykit)/([^/\s)]+)/"
+)
+# A version without a dev or local segment is released from tag v<version>;
+# mirrors readme_ref() in hatch_build.py.
+RELEASE_VERSION = re.compile(r"^(?:\d+!)?\d+(?:\.\d+)*(?:(?:a|b|rc)\d+)?(?:\.post\d+)?$")
+
+
+def expected_readme_ref(version: str) -> str:
+    return f"v{version}" if RELEASE_VERSION.match(version) else "main"
 
 
 def package_version(root: Path = ROOT) -> str:
@@ -128,6 +141,11 @@ def check_metadata(text: str, version: str, where: str) -> list[str]:
         body = re.sub(r"(?ms)^```.*?^```\s*", "", body)
         for target in RELATIVE_LINK.findall(body):
             problems.append(f"{where}: long description has relative link {target!r}, which 404s on PyPI")
+        expected_ref = expected_readme_ref(version)
+        for ref in sorted(set(REPO_LINK_REF.findall(body)) - {expected_ref}):
+            problems.append(
+                f"{where}: long description links to repository ref {ref!r}; version {version} must link to {expected_ref!r}"
+            )
     return problems
 
 
@@ -188,7 +206,7 @@ def check_sdist(path: Path, version: str) -> list[str]:
             problems.append(f"{path.name}: unexpected top-level entry {'/'.join(parts[1:])!r}")
     for name in _forbidden(names, strip_top=True):
         problems.append(f"{path.name}: must not ship {name!r}")
-    for required in ("pyproject.toml", "README.md", "LICENSE", "NOTICE", f"src/{NAME}/__init__.py", f"src/{NAME}/py.typed"):
+    for required in ("pyproject.toml", "hatch_build.py", "README.md", "LICENSE", "NOTICE", f"src/{NAME}/__init__.py", f"src/{NAME}/py.typed"):
         if f"{prefix}/{required}" not in names:
             problems.append(f"{path.name}: {required} is missing; the sdist cannot rebuild the wheel")
     return problems

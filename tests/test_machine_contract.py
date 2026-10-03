@@ -355,6 +355,30 @@ class ErrorObjectTests(unittest.TestCase):
         with mock.patch.object(cli, "cmd_status", side_effect=KeyboardInterrupt):
             self.assertJsonError(["status", *root, "--json"], "interrupted")
 
+    def test_a_crash_is_an_internal_error_object_without_a_traceback(self) -> None:
+        root = ["--root", str(self.vault)]
+        boom = RuntimeError("unexpected state\nsecond line")
+        with mock.patch.dict(os.environ, {"WHYKIT_DEBUG": ""}), \
+                mock.patch.object(cli, "cmd_status", side_effect=boom):
+            payload = self.assertJsonError(["status", *root, "--json"], "internal_error",
+                                           human_argv=["status", *root])
+            _, _, err = call("status", *root)
+        self.assertEqual(ERROR_EXIT_CODES["internal_error"], 70)
+        self.assertEqual(payload["error"]["message"], "internal error in `whykit status`: RuntimeError: unexpected state")
+        self.assertIn("github.com/CometWeb-io/whykit/issues", payload["error"]["hint"])
+        self.assertIn("WHYKIT_DEBUG=1", payload["error"]["hint"])
+        self.assertNotIn("Traceback", err)
+
+    def test_whykit_debug_adds_the_traceback_on_stderr_only(self) -> None:
+        root = ["--root", str(self.vault)]
+        with mock.patch.dict(os.environ, {"WHYKIT_DEBUG": "1"}), \
+                mock.patch.object(cli, "cmd_status", side_effect=ZeroDivisionError("x")):
+            status, out, err = call("status", *root, "--json")
+        self.assertEqual(status, 70)
+        self.assertEqual(json.loads(out)["error"]["code"], "internal_error")
+        self.assertIn("Traceback (most recent call last)", err)
+        self.assertNotIn("Traceback", out)
+
     def test_every_error_code_is_exercised_by_this_suite(self) -> None:
         source = Path(__file__).read_text(encoding="utf-8")
         for code in ERROR_CODES:
