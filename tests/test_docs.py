@@ -27,6 +27,7 @@ from whykit.cli import build_parser  # noqa: E402
 DOC_FILES = (
     ROOT / "README.md",
     ROOT / "CONTRIBUTING.md",
+    ROOT / "apps" / "explorer" / "README.md",
     *sorted((ROOT / "docs").glob("*.md")),
     *sorted((ROOT / "examples").glob("*/README.md")),
 )
@@ -78,11 +79,11 @@ class DocumentedCommandTests(unittest.TestCase):
                     except SystemExit as exc:
                         self.assertEqual(exc.code, 0, stderr.getvalue())
 
-    def test_the_extractor_catches_a_misplaced_root(self) -> None:
-        # `--root` belongs before the subcommand of `new`; this is the mistake
-        # the docs warn about, so the test must be able to see it.
+    def test_the_extractor_catches_a_misplaced_option(self) -> None:
+        # A leaf option on the parent of a nested command is a real parse
+        # error, so a documented command that does it must fail this check.
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            build_parser().parse_args(["new", "decision", "Title", "--root", "vault"])
+            build_parser().parse_args(["new", "--owner", "Ops", "decision", "Title"])
 
 
 class QuickstartTests(unittest.TestCase):
@@ -108,13 +109,14 @@ class QuickstartTests(unittest.TestCase):
                 argv = [str(vault) if arg == "../my-ledger" else arg
                         for arg in shlex.split(line.removeprefix("uv run whykit "))]
                 result = subprocess.run([sys.executable, str(CLI), *argv], cwd=ROOT,
-                                        text=True, capture_output=True, timeout=60)
+                                        text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=60)
                 self.assertEqual(result.returncode, 0, f"{line}\n{result.stdout}{result.stderr}")
                 outputs.append(result.stdout)
             combined = "".join(outputs)
             self.assertIn("created E-001: 00-context/evidence-register.md", combined)
             self.assertIn("created D-001: 06-decisions/d-001-ship-sso-before-audit-logs.md", combined)
-            self.assertRegex(combined, r"\d+ files — 0 error\(s\), 4 warning\(s\)")
+            # The separator is an em dash on UTF-8 consoles and "-" or a code-page byte elsewhere.
+            self.assertRegex(combined, r"\d+ files \S 0 error\(s\), 4 warning\(s\)")
             self.assertIn("06-decisions/d-001-ship-sso-before-audit-logs.md  (Platform)", combined)
 
 
@@ -158,13 +160,13 @@ class VaultGitignoreTests(unittest.TestCase):
                                             capture_output=True).returncode, 0)
             created = subprocess.run(
                 [sys.executable, str(CLI), "new", "--root", str(vault), "decision", "Example", "--json"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
             )
             self.assertEqual(created.returncode, 0, created.stderr)
             self.assertTrue((vault / ".whykit" / "mutation.lock").exists())
             subprocess.run(["git", "init", "-q", str(vault)], check=True, capture_output=True)
             tracked = subprocess.run(["git", "-C", str(vault), "status", "--porcelain", "--untracked-files=all"],
-                                     check=True, capture_output=True, text=True).stdout
+                                     check=True, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
             self.assertNotIn(".whykit/", tracked)
             self.assertIn("06-decisions/d-001-example.md", tracked)
 

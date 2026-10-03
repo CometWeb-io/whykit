@@ -240,21 +240,27 @@ jobs:
         run: |
           uv sync --locked --no-dev --extra mcp
           uv run python -m unittest discover -s tests -p 'test_mcp_runtime.py' -v
-      - run: uv build
+      - name: Build twice from the same commit
+        # SOURCE_DATE_EPOCH pins archive timestamps to the commit, so two
+        # builds of one commit must be byte-identical. The release workflow
+        # builds the same way; see docs/releasing.md.
+        run: |
+          set -euo pipefail
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          uv build --out-dir dist
+          uv build --out-dir "$RUNNER_TEMP/dist-rebuild"
+      - name: Check the distributions against the packaging invariants
+        # Version, py.typed, template completeness, PEP 639 licensing, zero
+        # runtime dependencies, PyPI-safe README links, sdist allowlist, and
+        # byte-identical rebuilds.
+        run: python3 scripts/check_dist.py dist --reproducible-against "$RUNNER_TEMP/dist-rebuild"
       - name: Check distribution metadata renders on PyPI
         run: uv run --locked --only-group dist twine check --strict dist/*
-      - name: Keep checkout-only tests out of the installable source distribution
+      - name: Install and smoke-test the wheel on the lowest supported Python
         run: |
           set -euo pipefail
-          tar -tzf dist/*.tar.gz > "$RUNNER_TEMP/sdist-files.txt"
-          if grep -Eq '^whykit-[^/]+/tests/' "$RUNNER_TEMP/sdist-files.txt"; then
-            echo "source distribution must not contain checkout-only tests" >&2
-            exit 1
-          fi
-      - name: Install and smoke-test the wheel in a clean environment
-        run: |
-          set -euo pipefail
-          uv venv "$RUNNER_TEMP/wheel-venv"
+          uv venv --python "3.11" "$RUNNER_TEMP/wheel-venv"
           uv pip install --python "$RUNNER_TEMP/wheel-venv/bin/python" dist/*.whl
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/wheel-venv/bin/whykit" --version
@@ -273,6 +279,25 @@ jobs:
           cd packaged-sdist-vault
           "$RUNNER_TEMP/sdist-venv/bin/whykit" lint
           "$RUNNER_TEMP/sdist-venv/bin/whykit" doctor
+      - name: Generate a CycloneDX SBOM of the clean wheel install
+        # The core package has no runtime dependencies; the SBOM documents that
+        # and check_dist.py fails if anything else appears in it.
+        run: |
+          set -euo pipefail
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          uv run --locked --only-group dist cyclonedx-py environment \
+            --sv 1.6 --output-reproducible --of JSON \
+            -o "$RUNNER_TEMP/whykit.cdx.json" "$RUNNER_TEMP/wheel-venv/bin/python"
+          python3 scripts/check_dist.py dist --sbom "$RUNNER_TEMP/whykit.cdx.json"
+          cp "$RUNNER_TEMP/whykit.cdx.json" dist/
+      - name: Keep the checked distributions and SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: distributions
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
 
   windows-portability:
     name: Windows portability (Python 3.12)
@@ -297,6 +322,35 @@ jobs:
         run: uv run whykit lint examples/northline --strict --today 2026-09-17
       - name: Run the CI policy profile
         run: uv run whykit check --root examples/northline --profile ci --today 2026-09-17
+      - name: Report on the runner's legacy code page without crashing
+        # PYTHONUTF8=0 keeps stdout on the ANSI code page (cp1252), which has
+        # no Ł or arrow. Human output must degrade; JSON must stay UTF-8.
+        shell: bash
+        env:
+          PYTHONUTF8: "0"
+        run: |
+          set -uo pipefail
+          vault="$RUNNER_TEMP/codepage-vault"
+          cp -R examples/tiny "$vault"
+          printf '\n- [[\xc5\x81\xc3\xb3d\xc5\xba \xe2\x86\x92 caf\xc3\xa9]]\n' >> "$vault/Home.md"
+          # Actions runs bash with -e; lint exits 1 on purpose here, so capture it.
+          status=0
+          uv run whykit lint --root "$vault" > "$RUNNER_TEMP/human.txt" 2> "$RUNNER_TEMP/human.err" || status=$?
+          if [ "$status" -ne 1 ] || grep -q Traceback "$RUNNER_TEMP/human.err"; then
+            cat "$RUNNER_TEMP/human.txt" "$RUNNER_TEMP/human.err"
+            echo "human lint output must report the broken link (exit 1), not crash" >&2
+            exit 1
+          fi
+          uv run whykit lint --root "$vault" --json > "$RUNNER_TEMP/lint.json" || [ $? -eq 1 ]
+          uv run python - "$RUNNER_TEMP/lint.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          report = json.loads(Path(sys.argv[1]).read_bytes().decode("utf-8"))
+          if "[[Łódź → café]]" not in report["findings"][0]["message"]:
+              raise SystemExit("JSON output was not UTF-8 on a legacy code page")
+          PY
 
   decision-history:
     name: Decision and review history is append-only
@@ -376,3 +430,33 @@ jobs:
       - run: npm ci --prefix apps/explorer
       - name: Build from the Markdown example vault
         run: npm run check --prefix apps/explorer
+
+  explorer-e2e:
+    name: Explorer end-to-end (optional)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Same contract as the Explorer job: useful signal, never a merge blocker.
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/explorer/package-lock.json
+      - run: npm ci --prefix apps/explorer
+      - name: Install Playwright's bundled Chromium
+        working-directory: apps/explorer
+        run: npx playwright install --with-deps chromium
+      - name: Run the end-to-end suite against static builds
+        working-directory: apps/explorer
+        env:
+          CI: "true"
+        run: npm run e2e

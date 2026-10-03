@@ -6,28 +6,29 @@ import datetime as dt
 import json
 import shutil
 import subprocess
-import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from .messages import print_no_vault
+from .contract import emit_error, vault_not_found
 from .config import ConfigError, configuration_readiness, get_profile, load_config
 from .immutability import changed_records
-from .lint import _parse_date, find_vault_root, is_vault_root, lint, rel
+from .lint import _parse_date, find_vault_root, is_vault_root, lint, rel, path_cache
+from .console import emit_machine
 
 
 def _git_repo(root: Path) -> bool:
     if not shutil.which("git"):
         return False
-    result = subprocess.run(["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True)
+    result = subprocess.run(["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, encoding="utf-8", errors="replace")
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
 def _git_clean(root: Path) -> bool:
-    result = subprocess.run(["git", "-C", str(root), "status", "--porcelain"], capture_output=True, text=True)
+    result = subprocess.run(["git", "-C", str(root), "status", "--porcelain"], capture_output=True, text=True, encoding="utf-8", errors="replace")
     return result.returncode == 0 and not result.stdout.strip()
 
 
+@path_cache()
 def run_check(
     root: Path,
     *,
@@ -130,33 +131,63 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print_no_vault(args.root)
-        return 2
+        return vault_not_found(args.root, json_mode=args.json)
     today = None
     if args.today:
         # Same YYYY-MM-DD contract as `whykit lint --today`; fromisoformat alone
         # would also accept forms such as 20260917 or 2026-W38-4.
         today = _parse_date(args.today)
         if today is None:
-            print(f"--today is not a real ISO date: {args.today}", file=sys.stderr)
-            return 2
+            return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=args.json)
     try:
         report = run_check(root, profile_name=args.profile, base=args.base, head=args.head, today=today)
     except ConfigError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+        return emit_error("invalid_config", str(exc), json_mode=args.json)
     if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         state = "PASS" if report["passed"] else "FAIL"
         print(f"WhyKit {report['profile']} gate — {state}")
         print(f"  config  {report['config_source']}")
+        width = max(len(check["name"]) for check in report["checks"])
         for check in report["checks"]:
             marker = "OK" if check["passed"] else "FAIL"
-            print(f"  {marker:<4} {check['name']:<16} {check['detail']}")
+            print(f"  {marker:<4} {check['name']:<{width}}  {check['detail']}")
+            for item in check.get("blocked", []):
+                print(f"         {item['status']}  {item['path']}")
         if report["lint"]["errors"] or report["lint"]["warnings"]:
-            print(f"  lint findings       {report['lint']['errors']} error(s), {report['lint']['warnings']} warning(s)")
+            print(f"  lint findings  {report['lint']['errors']} error(s), {report['lint']['warnings']} warning(s)")
+        _print_gate_findings(report)
     return 0 if report["passed"] else 1
+
+
+MAX_GATE_FINDINGS = 20
+
+
+def _print_gate_findings(report: dict) -> None:
+    """Show the findings that failed the lint check.
+
+    A CI log is often all a reviewer sees; a bare "5 warnings" sends them off
+    to rerun the linter locally just to learn what broke the gate.
+    """
+    lint_check = next((c for c in report["checks"] if c["name"] == "lint"), None)
+    if lint_check is None or lint_check["passed"]:
+        return
+    strict = bool(report["profile_config"].get("strict"))
+    failing = [
+        item for item in report["lint"]["findings"]
+        if item["level"] == "error" or (strict and item["level"] == "warning")
+    ]
+    failing.sort(key=lambda item: (item["level"] != "error", item["path"], item["line"] or 0))
+    print("")
+    print("  findings that fail this gate:")
+    for item in failing[:MAX_GATE_FINDINGS]:
+        location = f"{item['path']}:{item['line']}" if item["line"] else item["path"]
+        print(f"    {item['level']:<7} {location}  [{item['code']}] {item['message']}")
+    if len(failing) > MAX_GATE_FINDINGS:
+        print(f"    ... {len(failing) - MAX_GATE_FINDINGS} more; run `whykit lint` for the full list")
+    if strict and any(item["level"] == "warning" for item in failing):
+        print("  this profile is strict: warnings fail it (see `whykit policy`)")
 
 
 if __name__ == "__main__":

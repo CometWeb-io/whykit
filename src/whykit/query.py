@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
-from .messages import print_no_vault
-from .lint import EVIDENCE_ID_RE, find_vault_root, is_vault_root
+from .contract import emit_error, vault_not_found
+from .lint import EVIDENCE_ID_RE, find_vault_root, is_vault_root, path_cache
 from .vault_index import VaultIndex
+from .console import emit_machine
 
 
 def _as_list(value: object) -> list[str]:
@@ -38,6 +38,7 @@ def _summary(index: VaultIndex, note) -> dict:
     }
 
 
+@path_cache()
 def query_vault(
     root: Path,
     *,
@@ -64,6 +65,11 @@ def query_vault(
         if allowed_sensitivities is not None and record_sensitivity not in allowed_sensitivities:
             continue
         if doc_type and summary["type"] != doc_type:
+            continue
+        # A template declares the type it is a starter for, but it is not a
+        # record of that type: `--type decision` lists decisions. Ask for
+        # `--status template` to see templates.
+        if doc_type and summary["status"] == "template" and status != "template":
             continue
         if status and summary["status"] != status:
             continue
@@ -136,15 +142,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     if args.limit < 0:
-        print("--limit must be >= 0", file=sys.stderr)
-        return 2
+        return emit_error("invalid_argument", "--limit must be >= 0", json_mode=args.json)
     if args.source_id and not EVIDENCE_ID_RE.fullmatch(args.source_id):
-        print("--source must be an E-NNN identifier", file=sys.stderr)
-        return 2
+        return emit_error("invalid_argument", "--source must be an E-NNN identifier", json_mode=args.json)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print_no_vault(args.root)
-        return 2
+        return vault_not_found(args.root, json_mode=args.json)
     report = query_vault(
         root,
         text=args.text,
@@ -158,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
         limit=args.limit,
     )
     if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         for item in report["results"]:
             decision = f" {item['decision_id']}" if item.get("decision_id") else ""

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/lint-report.schema.json",
+  "title": "WhyKit lint report",
+  "description": "Output of `whykit lint --json`. Rule codes in `findings[].code` are a stable API; messages are not.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "root",
+    "files",
+    "errors",
+    "warnings",
+    "findings"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "root": {
+      "type": "string"
+    },
+    "files": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "errors": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "warnings": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "line",
+          "level",
+          "code",
+          "message"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "level": {
+            "enum": [
+              "error",
+              "warning"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

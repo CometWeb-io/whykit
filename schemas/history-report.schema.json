@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/history-report.schema.json",
+  "title": "WhyKit immutable-history report",
+  "description": "Output of `whykit history --json`. Blocked rewrites are a report with `passed: false` (exit 1).",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "base",
+    "head",
+    "passed",
+    "blocked"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "base": {
+      "type": "string"
+    },
+    "head": {
+      "type": "string"
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "blocked": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "status",
+          "path"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

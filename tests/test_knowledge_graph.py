@@ -31,7 +31,7 @@ TODAY = dt.date(2026, 9, 17)
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(CLI), *args], text=True, capture_output=True, timeout=60)
+    return subprocess.run([sys.executable, str(CLI), *args], text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=60)
 
 
 def _set_front(path: Path, key: str, value: str) -> None:

@@ -129,9 +129,12 @@ whykit policy --json                    # effective repository policy
 whykit rules --json                     # stable rule-code catalog
 ```
 
-All new machine reports carry `contract_version: 1`. JSON Schemas for the main
-handoff surfaces live in `schemas/`. Treat rule codes and contract fields as the
-stable interface; human-facing messages may be reworded.
+Every machine report carries `contract_version: 1`, and every command's JSON
+output has a schema in `schemas/`. Under `--json`, a command that cannot run
+writes a structured error object with a stable code instead of a report. Treat
+rule codes, error codes and contract fields as the stable interface;
+human-facing messages may be reworded. [Automation](automation.md) has the exit
+codes, the error codes and the stability policy.
 
 Use the commands for different jobs:
 

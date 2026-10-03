@@ -21,16 +21,20 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import os
 import re
-import sys
+import secrets
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .contract import emit_error
 from .io import atomic_write_bytes, atomic_write_text, safe_vault_dir, safe_vault_target, vault_mutation_lock
 from .lint import (
     EVIDENCE_ID_RE, DECISION_ID_RE, WIKILINK_RE, _split_table_row,
-    check_front_matter, find_vault_root, is_vault_root, load_note,
+    Note, check_front_matter, find_vault_root, is_vault_root, load_note,
 )
+from .console import emit_machine
 
 SKIP_DIRS = {
     ".git", ".obsidian", ".import-staging", "node_modules", "__pycache__",
@@ -58,6 +62,7 @@ class Candidate:
     looks_like_decision: bool
     duplicate_of: str | None = None
     whykit_ready: bool = False
+    decision_id: str | None = None
     format_warnings: list[str] = field(default_factory=list)
 
     def destination_for(self, profile: str) -> str:
@@ -70,14 +75,6 @@ class Candidate:
         return "notes/ or a workstream (human choice)"
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(65536), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _looks_like_decision(name: str, text: str) -> bool:
     if ADR_FILENAME_RE.match(name):
         return True
@@ -85,12 +82,12 @@ def _looks_like_decision(name: str, text: str) -> bool:
     return {"context", "decision"}.issubset(headings)
 
 
-def _whykit_ready(path: Path, source: Path, text: str) -> bool:
+def _whykit_ready(path: Path, source: Path, text: str, note: Note | None = None) -> bool:
     """Check front matter with the same parser and rules as `whykit lint`.
 
     This does not certify links, evidence or the containing vault.
     """
-    note = load_note(path, text=text)
+    note = note or load_note(path, text=text)
     if not note.has_front:
         return False
     findings = []
@@ -123,12 +120,20 @@ def _format_warnings(relative: str, text: str) -> list[str]:
     return warnings
 
 
+def _has_front_matter(text: str) -> bool:
+    # A UTF-8 byte-order mark is not content; the linter skips it too.
+    return bool(FRONT_MATTER_RE.match(text.removeprefix("\ufeff")))
+
+
 def _assess(text: str, *, profile: str, name: str) -> str:
     stripped = text.strip()
     if not stripped:
         return "empty"
     body = re.sub(r"(?m)^#{1,6}\s+.*$", "", stripped).strip()
-    if len(body.split()) < 15:
+    # Short is not the same as empty: a terse ADR or a note somebody gave front
+    # matter is structured work, so only unstructured stubs are left behind.
+    structured = _has_front_matter(text) or _looks_like_decision(name, text)
+    if len(body.split()) < 15 and not structured:
         return "heading-only"
     if profile == "adr-only" and not _looks_like_decision(name, text):
         return "unsupported"
@@ -158,6 +163,9 @@ def scan(source: Path, *, profile: str = "generic") -> list[Candidate]:
             text = data.decode("utf-8")
         except (UnicodeDecodeError, OSError):
             continue
+        if "\0" in text:
+            # Valid UTF-8 but not text: a binary renamed to .md.
+            continue
         digest = hashlib.sha256(data).hexdigest()
         relative = path.relative_to(source).as_posix()
         assessment = _assess(text, profile=profile, name=path.name)
@@ -166,6 +174,8 @@ def scan(source: Path, *, profile: str = "generic") -> list[Candidate]:
             assessment, duplicate_of = "duplicate", seen[digest]
         else:
             seen[digest] = relative
+        note = load_note(path, text=text)
+        declared = str(note.front.get("decision_id") or "").strip() if note.has_front else ""
         out.append(Candidate(
             path=path,
             relative=relative,
@@ -173,16 +183,57 @@ def scan(source: Path, *, profile: str = "generic") -> list[Candidate]:
             bytes=len(data),
             words=len(text.split()),
             assessment=assessment,
-            has_front_matter=bool(FRONT_MATTER_RE.match(text)),
+            has_front_matter=_has_front_matter(text),
             looks_like_decision=_looks_like_decision(path.name, text),
             duplicate_of=duplicate_of,
-            whykit_ready=_whykit_ready(path, source, text),
+            whykit_ready=_whykit_ready(path, source, text, note),
+            decision_id=declared if DECISION_ID_RE.fullmatch(declared) else None,
             format_warnings=_format_warnings(relative, text),
         ))
     return out
 
 
-def score_adoption(candidates: list[Candidate]) -> dict:
+def _vault_decision_ids(vault: Path) -> dict[str, str]:
+    """Map each decision ID already declared in the vault to its record path."""
+    owners: dict[str, str] = {}
+    folder = vault / "06-decisions"
+    if folder.is_symlink() or not folder.is_dir():
+        return owners
+    for path in sorted(folder.glob("*.md")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            note = load_note(path)
+        except (OSError, UnicodeDecodeError):
+            continue
+        declared = str(note.front.get("decision_id") or "").strip()
+        if DECISION_ID_RE.fullmatch(declared):
+            owners.setdefault(declared, path.relative_to(vault).as_posix())
+    return owners
+
+
+def id_conflicts(candidates: list[Candidate], vault: Path | None = None) -> list[str]:
+    """Report decision IDs claimed twice: within the import, or by the vault already.
+
+    Two ADR folders that both start at D-001 are the normal case, not the edge
+    case. Staging both is fine; finding out at lint time after normalizing is not.
+    """
+    claims: dict[str, list[str]] = {}
+    for candidate in candidates:
+        if candidate.assessment == "useful" and candidate.decision_id:
+            claims.setdefault(candidate.decision_id, []).append(candidate.relative)
+    existing = _vault_decision_ids(vault) if vault is not None else {}
+    conflicts = []
+    for decision_id, paths in sorted(claims.items()):
+        listed = ", ".join(f"`{path}`" for path in paths)
+        if len(paths) > 1:
+            conflicts.append(f"{decision_id} is declared by {len(paths)} source files: {listed}")
+        if decision_id in existing:
+            conflicts.append(f"{decision_id} ({listed}) is already used in the vault by `{existing[decision_id]}`")
+    return conflicts
+
+
+def score_adoption(candidates: list[Candidate], vault: Path | None = None) -> dict:
     total = len(candidates)
     useful = [c for c in candidates if c.assessment == "useful"]
     ready = [c for c in useful if c.whykit_ready]
@@ -206,6 +257,7 @@ def score_adoption(candidates: list[Candidate]) -> dict:
         "estimated_minutes_to_first_green_lint": minutes,
         "readiness_pct": round(100.0 * len(ready) / total, 1) if total else 0.0,
         "format_warnings": [warning for c in candidates for warning in c.format_warnings],
+        "id_conflicts": id_conflicts(candidates, vault),
     }
 
 
@@ -227,6 +279,11 @@ def _migration_md(source: Path, candidates: list[Candidate], score: dict, profil
         "",
         *(f"- {warning}" for warning in score["format_warnings"]),
         *(["- None detected."] if not score["format_warnings"] else []),
+        "",
+        "## ID conflicts",
+        "",
+        *(f"- {conflict}" for conflict in score["id_conflicts"]),
+        *(["- None detected."] if not score["id_conflicts"] else []),
         "",
         "## Bring into the vault",
         "",
@@ -330,7 +387,7 @@ def adopt(
 ) -> tuple[list[Candidate], Path | None, Path | None, dict]:
     today = today or dt.date.today()
     candidates = scan(source, profile=profile)
-    score = score_adoption(candidates)
+    score = score_adoption(candidates, vault)
     if not write:
         return candidates, None, None, score
 
@@ -341,39 +398,54 @@ def adopt(
         while (staging_root / batch).exists() or (staging_root / batch).is_symlink():
             suffix += 1
             batch = f"{today.isoformat()}-{suffix}"
-        staging = safe_vault_dir(vault, Path(".import-staging") / batch)
-        for candidate in candidates:
-            if candidate.assessment != "useful":
-                continue
-            relative = Path(".import-staging") / batch / candidate.relative
-            target = safe_vault_target(vault, relative)
-            data = candidate.path.read_bytes()
-            current_digest = hashlib.sha256(data).hexdigest()
-            if current_digest != candidate.sha256:
-                raise RuntimeError(
-                    f"source changed during adoption: {candidate.relative} "
-                    f"({candidate.sha256[:12]} -> {current_digest[:12]})"
-                )
-            atomic_write_bytes(target, data)
+        # Stage into a hidden directory and rename it into place only once it
+        # is complete. A failure removes everything this run created, and a
+        # crash leaves a `.partial-*` directory that no later run mistakes for
+        # a finished batch.
+        partial_rel = Path(".import-staging") / f".partial-{secrets.token_hex(6)}"
+        partial = safe_vault_dir(vault, partial_rel)
+        final = staging_root / batch
+        created = partial
+        try:
+            for candidate in candidates:
+                if candidate.assessment != "useful":
+                    continue
+                target = safe_vault_target(vault, partial_rel / candidate.relative)
+                data = candidate.path.read_bytes()
+                current_digest = hashlib.sha256(data).hexdigest()
+                if current_digest != candidate.sha256:
+                    raise RuntimeError(
+                        f"source changed during adoption: {candidate.relative} "
+                        f"({candidate.sha256[:12]} -> {current_digest[:12]})"
+                    )
+                atomic_write_bytes(target, data)
 
-        sources_dir = _ingestion_dir(vault)
-        record_name = f"ingestion-{batch}.md"
-        record = sources_dir / record_name
-        suffix = 1
-        while record.exists():
-            suffix += 1
-            record_name = f"ingestion-{batch}-{suffix}.md"
+            migration_name = "MIGRATION.md"
+            suffix = 1
+            while (partial / migration_name).exists() or (partial / migration_name).is_symlink():
+                suffix += 1
+                migration_name = f"MIGRATION-{suffix}.md"
+            atomic_write_text(
+                safe_vault_target(vault, partial_rel / migration_name),
+                _migration_md(source, candidates, score, profile),
+            )
+            os.rename(partial, final)
+            created = final
+
+            sources_dir = _ingestion_dir(vault)
+            record_name = f"ingestion-{batch}.md"
             record = sources_dir / record_name
-        record = safe_vault_target(vault, record.relative_to(vault.resolve()))
-        atomic_write_text(record, _ingestion_record(batch, today, source, candidates, owner, profile))
-        migration_name = "MIGRATION.md"
-        suffix = 1
-        while (staging / migration_name).exists() or (staging / migration_name).is_symlink():
-            suffix += 1
-            migration_name = f"MIGRATION-{suffix}.md"
-        migration = safe_vault_target(vault, Path(".import-staging") / batch / migration_name)
-        atomic_write_text(migration, _migration_md(source, candidates, score, profile))
-        return candidates, record, migration, score
+            suffix = 1
+            while record.exists() or record.is_symlink():
+                suffix += 1
+                record_name = f"ingestion-{batch}-{suffix}.md"
+                record = sources_dir / record_name
+            record = safe_vault_target(vault, record.relative_to(vault.resolve()))
+            atomic_write_text(record, _ingestion_record(batch, today, source, candidates, owner, profile))
+        except BaseException:
+            shutil.rmtree(created, ignore_errors=True)
+            raise
+        return candidates, record, final / migration_name, score
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -391,24 +463,24 @@ def main(argv: list[str] | None = None) -> int:
 
     source = Path(args.source).expanduser().resolve()
     if not source.is_dir():
-        print(f"not a directory: {source}", file=sys.stderr)
-        return 2
+        return emit_error("invalid_target", f"not a directory: {source}", json_mode=args.json)
 
     vault = Path(args.into).expanduser().resolve() if args.into else find_vault_root()
     if vault is None or not is_vault_root(vault):
-        print("no WhyKit vault found — run `whykit init <dir>` first, or pass --into", file=sys.stderr)
-        return 2
+        return emit_error(
+            "vault_not_found",
+            "no WhyKit vault found — run `whykit init <dir>` first, or pass --into",
+            json_mode=args.json,
+        )
     if source == vault or vault in source.parents or source in vault.parents:
-        print("refusing to adopt overlapping source/vault directories", file=sys.stderr)
-        return 2
+        return emit_error("invalid_target", "refusing to adopt overlapping source/vault directories", json_mode=args.json)
 
     try:
         candidates, record, migration, score = adopt(
             source, vault, write=args.write, owner=args.owner, profile=args.profile,
         )
     except (OSError, RuntimeError) as exc:
-        print(f"adoption failed: {exc}", file=sys.stderr)
-        return 2
+        return emit_error("io_error", f"adoption failed: {exc}", json_mode=args.json)
 
     visible_files = [
         path for path in source.rglob("*")
@@ -426,7 +498,7 @@ def main(argv: list[str] | None = None) -> int:
         "Only UTF-8 *.md files were scanned; "
         f"{len(omitted)} other file(s) excluded"
         + (f" (e.g. {', '.join(omitted[:5])})" if omitted else "")
-        + f"; {len(unreadable_markdown)} Markdown file(s) unreadable or non-UTF-8"
+        + f"; {len(unreadable_markdown)} Markdown file(s) unreadable, binary or non-UTF-8"
         + (f" (e.g. {', '.join(unreadable_markdown[:5])})" if unreadable_markdown else "")
         + ". Front matter readiness is not full vault lint."
     )
@@ -455,10 +527,10 @@ def main(argv: list[str] | None = None) -> int:
                 }
                 for c in candidates
             ],
-            "ingestion_record": str(record.relative_to(vault)) if record else None,
-            "migration": str(migration.relative_to(vault)) if migration else None,
+            "ingestion_record": record.relative_to(vault).as_posix() if record else None,
+            "migration": migration.relative_to(vault).as_posix() if migration else None,
         }
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
     if not candidates:
@@ -482,6 +554,8 @@ def main(argv: list[str] | None = None) -> int:
     print(scope_note)
     for warning in score["format_warnings"]:
         print(f"Format warning: {warning}")
+    for conflict in score["id_conflicts"]:
+        print(f"ID conflict: {conflict}")
     if decisions:
         print(f"{len(decisions)} look like existing decision records — they need D-NNN IDs and log rows.")
 
@@ -490,9 +564,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"under {vault}/.import-staging/ and create an ingestion record + MIGRATION.md.")
         return 0
 
-    print(f"\nStaged under {vault}/.import-staging/")
-    print(f"Ingestion record: {record.relative_to(vault) if record else '—'}")
-    print(f"Migration guide: {migration.relative_to(vault) if migration else '—'}")
+    print(f"\nStaged under {vault / '.import-staging'}{os.sep}")
+    print(f"Ingestion record: {record.relative_to(vault).as_posix() if record else '—'}")
+    print(f"Migration guide: {migration.relative_to(vault).as_posix() if migration else '—'}")
     print("Staging is gitignored on purpose. Normalize into a workstream before committing.")
     return 0
 

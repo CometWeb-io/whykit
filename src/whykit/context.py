@@ -3,16 +3,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from .messages import print_no_vault
+from .contract import emit_error, vault_not_found
 from .impact import analyze_impact
 from .lint import (
+    path_cache,
     DECISION_ID_RE,
     EVIDENCE_ID_RE,
-    _resolve,
     evidence_register,
     find_vault_root,
     is_vault_root,
@@ -20,6 +19,7 @@ from .lint import (
     rel,
 )
 from .vault_index import VaultIndex
+from .console import emit_machine
 
 
 def _resolve_note(root: Path, target: str, vault: VaultIndex):
@@ -29,7 +29,7 @@ def _resolve_note(root: Path, target: str, vault: VaultIndex):
             if str(note.front.get("decision_id") or "").strip() == target
         ]
         return (matches[0], False) if len(matches) == 1 else (None, len(matches) > 1)
-    path, ambiguous = _resolve(root, target, vault.link_index)
+    path, ambiguous = vault.resolve_link(target)
     if path is None:
         return None, ambiguous
     return vault.note_for(path), ambiguous
@@ -48,6 +48,7 @@ def _evidence_details(root: Path, ids: list[str]) -> list[dict]:
     return out
 
 
+@path_cache()
 def build_context(
     root: Path,
     target: str,
@@ -158,15 +159,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     if args.max_chars < 0:
-        print("--max-chars must be >= 0", file=sys.stderr)
-        return 2
+        return emit_error("invalid_argument", "--max-chars must be >= 0", json_mode=args.json)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print_no_vault(args.root)
-        return 2
+        return vault_not_found(args.root, json_mode=args.json)
     report = build_context(root, args.target, max_chars=args.max_chars, include_body=not args.no_body)
     if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         _human(report)
     return 0 if report.get("exists") else 1

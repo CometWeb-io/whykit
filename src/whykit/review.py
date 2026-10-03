@@ -5,15 +5,16 @@ import argparse
 import datetime as dt
 import json
 import re
-import sys
 from pathlib import Path
 
-from .messages import print_no_vault
+from .contract import TargetNotFound, describe_os_error, emit_error, vault_not_found
 from .io import apply_transaction, safe_vault_target, vault_mutation_lock
 from .config import ConfigError, load_config
-from .lint import DECISION_ID_RE, _build_index, _parse_date, _resolve, collect_markdown, find_vault_root, is_vault_root, load_note, rel
+from .lint import DECISION_ID_RE, _build_index, _parse_date, _resolve, collect_markdown, find_vault_root, is_vault_root, load_note, rel, path_cache
 from .scaffold import _frontmatter_replace, _table_cell
-from .status import build_status
+from .status import build_review_queue
+from .vault_index import VaultIndex
+from .console import emit_machine
 
 OUTCOMES = ("confirmed", "update-required", "supersede-required", "archived")
 
@@ -88,9 +89,10 @@ def _resolve_note(root: Path, target: str):
     return by_path.get(path.resolve()), ambiguous
 
 
+@path_cache()
 def review_queue(root: Path, *, today: dt.date | None = None, due_days: int = 30, owner: str | None = None, overdue_only: bool = False) -> list[dict]:
     today = today or dt.date.today()
-    queue = build_status(root, today=today, due_days=due_days)["review_queue"]
+    queue = build_review_queue(VaultIndex.load(root), today=today, due_days=due_days)
     if owner:
         needle = owner.casefold()
         queue = [item for item in queue if needle in str(item.get("owner") or "").casefold()]
@@ -118,8 +120,10 @@ def record_review(
 
     with vault_mutation_lock(root):
         note, ambiguous = _resolve_note(root, target)
+        if note is None and not ambiguous:
+            raise TargetNotFound(f"review target is missing: {target}")
         if note is None:
-            raise ValueError(f"review target is {'ambiguous' if ambiguous else 'missing'}: {target}")
+            raise ValueError(f"review target is ambiguous: {target}")
         if rel(root, note.path) == "00-context/review-log.md":
             raise ValueError("the review log cannot review itself")
 
@@ -213,8 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print_no_vault(args.root)
-        return 2
+        return vault_not_found(args.root, json_mode=args.json)
 
     if args.review_command == "list":
         today = None
@@ -222,21 +225,18 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 today = dt.date.fromisoformat(args.today)
             except ValueError:
-                print(f"--today is not a real ISO date: {args.today}", file=sys.stderr)
-                return 2
+                return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=args.json)
         try:
             config, _ = load_config(root)
         except ConfigError as exc:
-            print(str(exc), file=sys.stderr)
-            return 2
+            return emit_error("invalid_config", str(exc), json_mode=args.json)
         due_days = args.due_days if args.due_days is not None else int(config["defaults"]["status_due_days"])
         if due_days < 0:
-            print("--due-days must be >= 0", file=sys.stderr)
-            return 2
+            return emit_error("invalid_argument", "--due-days must be >= 0", json_mode=args.json)
         queue = review_queue(root, today=today, due_days=due_days, owner=args.owner, overdue_only=args.overdue_only)
         payload = {"contract_version": 1, "due_days": due_days, "count": len(queue), "reviews": queue}
         if args.json:
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             for item in queue:
                 marker = "OVERDUE" if item["state"] == "overdue" else "DUE"
@@ -249,18 +249,20 @@ def main(argv: list[str] | None = None) -> int:
         try:
             today = dt.date.fromisoformat(args.today)
         except ValueError:
-            print(f"--today is not a real ISO date: {args.today}", file=sys.stderr)
-            return 2
+            return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=args.json)
     try:
         result = record_review(
             root, args.target, reviewer=args.reviewer, outcome=args.outcome,
             note_text=args.note_text, next_review=args.next_review, today=today,
         )
-    except (ValueError, OSError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+    except TargetNotFound as exc:
+        return emit_error("not_found", str(exc), json_mode=args.json)
+    except ValueError as exc:
+        return emit_error("operation_rejected", str(exc), json_mode=args.json)
+    except OSError as exc:
+        return emit_error("io_error", describe_os_error(exc), json_mode=args.json)
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         print(f"review recorded: {result['target']} -> {result['outcome']}")
         if result.get("next_review"):

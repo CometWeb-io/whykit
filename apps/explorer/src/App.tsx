@@ -6,7 +6,7 @@ import {
   BookOpen, CheckCircle2, ChevronRight, FileText, GitBranch, HeartPulse,
   Menu, Network, Scale, Search, Shield, X, AlertTriangle, Copy, Terminal, Inbox,
 } from "lucide-react";
-import { vault, docs, resolveDoc, linksFor, backlinksFor, canonicalDocs, searchDocs, evidenceFor, docsForEvidence } from "./lib/vault.ts";
+import { vault, docs, resolveDoc, linksFor, backlinksFor, canonicalDocs, searchDocs, evidenceFor, docsForEvidence, decisionChain } from "./lib/vault.ts";
 import { createSlugger, inlineText, parseMarkdown, type MdBlock, type MdInline } from "./lib/markdown.ts";
 import { hrefFor, parseHash, type Route, type View } from "./lib/route.ts";
 import { describeDue, reviewQueue } from "./lib/reviews.ts";
@@ -37,6 +37,12 @@ const WORKSTREAM_LABELS: Record<string, string> = {
   "07-research": "Research",
   reports: "Reports",
 };
+
+/** `07-research` → `Research`; used when a workstream README has no title. */
+function humanizeDir(dir: string): string {
+  const words = dir.replace(/^\d+-/, "").replaceAll("-", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
 function go(view: View, doc?: string) {
   location.hash = hrefFor(view, doc);
@@ -91,7 +97,7 @@ function Inline({ nodes }: { nodes: MdInline[] }) {
 
 function Block({ block, slug }: { block: MdBlock; slug: (text: string) => string }) {
   if (block.t === "h") {
-    const Tag = `h${block.level}` as "h1" | "h2" | "h3" | "h4";
+    const Tag = `h${block.level}` as const;
     return <Tag id={slug(inlineText(block.children))}><Inline nodes={block.children} /></Tag>;
   }
   if (block.t === "p") return <p><Inline nodes={block.children} /></p>;
@@ -266,7 +272,7 @@ function AdoptPage() {
   };
   return <div className="page"><div className="eyebrow">Portable by default</div><h1>Adopt WhyKit</h1><p className="lede">The core format is Markdown + Git. Explorer, Obsidian and agent adapters are optional.</p>
     <div className="notice"><Shield size={16} aria-hidden="true"/><span>The template can be public. Your real company vault should normally be private.</span></div>
-    <section><h2>1. Create a clean vault</h2><div className="command"><Terminal size={16} aria-hidden="true"/><code>{command}</code><button onClick={copy}><Copy size={15} aria-hidden="true"/>{copied === "ok" ? "Copied" : copied === "failed" ? "Copy failed" : "Copy"}<span className="sr-only"> command</span></button></div><p className="sr-only" role="status" aria-live="polite">{copied === "ok" ? "Command copied to clipboard" : copied === "failed" ? "Clipboard unavailable; select the command to copy it" : ""}</p></section>
+    <section><h2>1. Create a clean vault</h2><div className="command"><Terminal size={16} aria-hidden="true"/><code>{command}</code><button onClick={() => void copy()}><Copy size={15} aria-hidden="true"/>{copied === "ok" ? "Copied" : copied === "failed" ? "Copy failed" : "Copy"}<span className="sr-only"> command</span></button></div><p className="sr-only" role="status" aria-live="polite">{copied === "ok" ? "Command copied to clipboard" : copied === "failed" ? "Clipboard unavailable; select the command to copy it" : ""}</p></section>
     <section><h2>2. Establish the foundations</h2><ol className="steps"><li>Replace <code>TODO</code> owners and fill <code>00-context/company.md</code>, <code>goals.md</code> and <code>terminology.md</code>.</li><li>Populate evidence before citing <code>E-NNN</code> identifiers.</li><li>Only set <code>source_of_truth: true</code> after a document is approved.</li><li>Run <code>uv run whykit lint --root ../my-ledger</code> before committing.</li></ol></section>
     <section><h2>3. Keep integrations downstream</h2><p>Agents, CRMs, task managers and code repositories can produce or consume handoffs. None of them becomes a second canonical copy of the reasoning ledger.</p></section>
     <section><h2>License</h2><div className="card"><strong>Apache License 2.0</strong><p>Reusable for commercial and private work, with an explicit patent grant. See the repository <code>LICENSE</code> and <code>NOTICE</code> files.</p></div></section>
@@ -282,6 +288,7 @@ function DocPage({ id }: { id: string }) {
   return <div className="page doc-page"><nav aria-label="Breadcrumb"><a className="crumb" href={hrefFor("home")}>WhyKit <ChevronRight size={13} aria-hidden="true"/> <span>{doc.id}</span></a></nav>
     <div className="doc-meta"><StatusBadge status={doc.status}/><Sensitivity value={doc.sensitivity}/><span className="mono">{doc.type}</span>{doc.sourceOfTruth ? <span className="canonical">source of truth</span> : null}</div>
     <h1>{doc.title}</h1><div className="doc-sub"><span>{doc.owner || "No owner"}</span><span>Updated {doc.lastUpdated || "—"}</span>{doc.reviewBy ? <span>Review by {doc.reviewBy}</span> : null}{doc.sourceIds.length ? <span>{doc.sourceIds.length} evidence ID{doc.sourceIds.length === 1 ? "" : "s"}</span> : null}</div>
+    {doc.decisionId ? <DecisionLineage decisionId={doc.decisionId}/> : null}
     <MarkdownView source={doc.body}/>
     {(evidenceRows.length || missing.length) ? <section><h2>Registered evidence</h2>
       {evidenceRows.length ? <div className="cards two">{evidenceRows.map(e => <div className="card" key={e.id}><div className="eyebrow">{e.id} · {e.state === "active" ? (e.type || "evidence") : "retired"}</div><h3>{e.source}</h3><p>{e.state === "active" ? e.claims : e.why}</p><small className="mono">{e.state === "active" ? e.location : (e.replacedBy ? `replacement: ${e.replacedBy}` : `retired ${e.retiredOn || ""}`)}</small></div>)}</div> : null}
@@ -291,14 +298,35 @@ function DocPage({ id }: { id: string }) {
   </div>;
 }
 
+function DecisionLineage({ decisionId }: { decisionId: string }) {
+  const chain = decisionChain(decisionId);
+  if (chain.length < 2) return null;
+  const latest = chain.at(-1);
+  const isLatest = latest?.id === decisionId;
+  return <section className="lineage" aria-labelledby="lineage-title">
+    <div className="eyebrow">Append-only history</div>
+    <h2 id="lineage-title">Supersession chain</h2>
+    {!isLatest && latest ? <p className="notice"><AlertTriangle size={16} aria-hidden="true"/><span>{decisionId} is no longer current. The latest decision in this chain is <a href={hrefFor("doc", latest.recordId)}>{latest.id}: {latest.title}</a>.</span></p> : null}
+    <ol className="chain">{chain.map((d, i) => {
+      const here = d.id === decisionId;
+      const body = <><span className="chain-head"><span className="mono decision-id">{d.id}</span><StatusBadge status={d.status}/></span><span className="chain-title">{d.title}</span><span className="muted small">{d.date}{i > 0 ? ` · supersedes ${chain[i - 1]?.id ?? ""}` : ""}</span></>;
+      return <li key={d.id} className={here ? "chain-step current" : "chain-step"} aria-current={here ? "step" : undefined}>
+        {here ? <div className="chain-card">{body}</div> : <a className="chain-card" href={hrefFor("doc", d.recordId)}>{body}</a>}
+      </li>;
+    })}</ol>
+  </section>;
+}
+
 function SearchOverlay({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
   const deferred = useDeferredValue(q);
   const results = useMemo(() => searchDocs(deferred), [deferred]);
+  // The highlighted row resets when the query changes; clamp while the
+  // deferred result list catches up so it never points past the end.
+  const current = Math.min(active, Math.max(results.length - 1, 0));
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
-  useEffect(() => setActive(0), [deferred]);
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     input.current?.focus();
@@ -306,8 +334,8 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
     return () => { document.body.style.overflow = ""; opener?.focus?.(); };
   }, []);
   useEffect(() => {
-    list.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [active]);
+    list.current?.querySelector<HTMLElement>(`[data-index="${current}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [current]);
   const open = (id: string) => { onClose(); go("doc", id); };
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
@@ -320,36 +348,46 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
       return;
     }
     if (!results.length) return;
-    if (e.key === "ArrowDown") { e.preventDefault(); setActive(i => (i + 1) % results.length); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setActive(i => (i - 1 + results.length) % results.length); }
-    else if (e.key === "Enter" && e.target === input.current) { e.preventDefault(); const hit = results[active]; if (hit) open(hit.id); }
+    if (e.key === "ArrowDown") { e.preventDefault(); setActive((current + 1) % results.length); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((current - 1 + results.length) % results.length); }
+    else if (e.key === "Enter" && e.target === input.current) { e.preventDefault(); const hit = results[current]; if (hit) open(hit.id); }
   };
   const optionId = (i: number) => `search-option-${i}`;
+  // The backdrop is a pointer-only convenience: Escape and the close button
+  // are the keyboard paths out, and the dialog owns its own key handling.
+  // Options are reached through aria-activedescendant on the combobox, so they
+  // are intentionally not focusable themselves.
+  /* eslint-disable jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus */
   return <div className="overlay" onMouseDown={(e: ReactMouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) onClose(); }}>
     <div className="palette" role="dialog" aria-modal="true" aria-label="Search vault" onKeyDown={onKeyDown}>
-      <div className="palette-input"><Search size={18} aria-hidden="true"/><input ref={input} type="text" value={q} onChange={(e: ChangeEvent<HTMLInputElement>) => setQ(e.target.value)} placeholder="Search titles, claims, tags…" aria-label="Search vault" role="combobox" aria-expanded={results.length > 0} aria-controls="search-results" aria-autocomplete="list" aria-activedescendant={results.length ? optionId(active) : undefined}/><button onClick={onClose} aria-label="Close search"><X size={17} aria-hidden="true"/></button></div>
+      <div className="palette-input"><Search size={18} aria-hidden="true"/><input ref={input} type="text" value={q} onChange={(e: ChangeEvent<HTMLInputElement>) => { setQ(e.target.value); setActive(0); }} placeholder="Search titles, claims, tags…" aria-label="Search vault" role="combobox" aria-expanded={results.length > 0} aria-controls="search-results" aria-autocomplete="list" aria-activedescendant={results.length ? optionId(current) : undefined}/><button onClick={onClose} aria-label="Close search"><X size={17} aria-hidden="true"/></button></div>
       <div className="palette-results" id="search-results" role="listbox" aria-label="Results" ref={list}>
-        {results.map((d, i) => <div key={d.id} id={optionId(i)} data-index={i} role="option" aria-selected={i === active} className={i === active ? "option active" : "option"} onMouseMove={() => setActive(i)} onClick={() => open(d.id)}><div><strong>{d.title}</strong><small>{d.id}</small></div><StatusBadge status={d.status}/></div>)}
+        {results.map((d, i) => <div key={d.id} id={optionId(i)} data-index={i} role="option" aria-selected={i === current} className={i === current ? "option active" : "option"} onMouseMove={() => setActive(i)} onClick={() => open(d.id)}><div><strong>{d.title}</strong><small>{d.id}</small></div><StatusBadge status={d.status}/></div>)}
       </div>
       <p className="palette-status" role="status" aria-live="polite">{!deferred.trim() ? "Type to search. ↑↓ to move, Enter to open, Esc to close." : results.length ? `${results.length} result${results.length === 1 ? "" : "s"}` : "No matching notes."}</p>
     </div>
   </div>;
+  /* eslint-enable jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus */
 }
 
 function App() {
-  const route = useRoute(); const [menu, setMenu] = useState(false); const [search, setSearch] = useState(false);
+  const route = useRoute(); const [search, setSearch] = useState(false);
+  // The mobile menu belongs to the route it was opened on, so any navigation
+  // closes it without an effect that sets state after render.
+  const [menuRoute, setMenuRoute] = useState<Route | null>(null);
+  const menu = menuRoute === route;
+  const setMenu = (open: boolean) => setMenuRoute(open ? route : null);
   const main = useRef<HTMLElement>(null);
   const firstRender = useRef(true);
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setSearch(v => !v); }
-      else if (e.key === "Escape") setMenu(false);
+      else if (e.key === "Escape") setMenuRoute(null);
     };
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
   }, []);
   useEffect(() => {
-    setMenu(false);
     const doc = route.view === "doc" && route.doc ? resolveDoc(route.doc) : undefined;
     document.title = `${doc ? doc.title : VIEW_TITLES[route.view]} · WhyKit Explorer`;
     // A route change replaces the whole page: start at the top and move focus
@@ -361,10 +399,10 @@ function App() {
   }, [route.view, route.doc]);
   const streamDocs = useMemo(() => docs
     .filter(d => /^[^/]+\/README$/.test(d.id) && !d.id.startsWith("templates/"))
-    .map(d => { const dir = d.id.split("/")[0]!; return { dir, label: WORKSTREAM_LABELS[dir] || d.title, doc: d, index: dir.match(/^(\d+)-/)?.[1] }; }), []);
+    .map(d => { const dir = d.id.split("/")[0]!; return { dir, label: WORKSTREAM_LABELS[dir] ?? (d.title === "README" ? humanizeDir(dir) : d.title), doc: d, index: dir.match(/^(\d+)-/)?.[1] }; }), []);
   const current = route.view;
   const navButton = (active: boolean) => ({ className: active ? "active" : "", "aria-current": active ? "page" as const : undefined });
-  return <div className="app"><a className="skip" href="#content" onClick={e => { e.preventDefault(); main.current?.focus(); }}>Skip to content</a><header><button className="icon-button mobile" onClick={() => setMenu(true)} aria-label="Open navigation" aria-expanded={menu} aria-controls="sidebar"><Menu size={18} aria-hidden="true"/></button><Wordmark/><button className="search-trigger" onClick={() => setSearch(true)} aria-haspopup="dialog" aria-keyshortcuts="Meta+K Control+K"><Search size={15} aria-hidden="true"/><span>Search vault</span><kbd aria-hidden="true">⌘K</kbd></button><div className="header-health"><span className={vault.lint.errors ? "dot bad" : "dot"} aria-hidden="true"/>{vault.lint.errors ? `${vault.lint.errors} errors` : "Vault clean"}</div></header>
+  return <div className="app"><a className="skip" href="#content" onClick={e => { e.preventDefault(); main.current?.focus(); }}>Skip to content</a><header><button className="icon-button mobile" onClick={() => setMenu(true)} aria-label="Open navigation" aria-expanded={menu} aria-controls="sidebar"><Menu size={18} aria-hidden="true"/></button><Wordmark/><button className="search-trigger" onClick={() => setSearch(true)} aria-label="Search vault" aria-haspopup="dialog" aria-keyshortcuts="Meta+K Control+K"><Search size={15} aria-hidden="true"/><span>Search vault</span><kbd aria-hidden="true">⌘K</kbd></button><div className="header-health"><span className={vault.lint.errors ? "dot bad" : "dot"} aria-hidden="true"/>{vault.lint.errors ? `${vault.lint.errors} errors` : "Vault clean"}</div></header>
     <aside id="sidebar" className={menu ? "sidebar open" : "sidebar"}>{menu ? <button className="close-nav" onClick={() => setMenu(false)} aria-label="Close navigation"><X size={18} aria-hidden="true"/></button> : null}<nav aria-label="Vault"><div className="nav-label">Vault</div>{PRIMARY.map(x => <button {...navButton(current === x.id)} key={x.id} onClick={() => go(x.id)}><x.icon size={16} aria-hidden="true"/>{x.label}</button>)}{streamDocs.length ? <><div className="nav-label">Spine</div>{streamDocs.map(x => <button key={x.dir} {...navButton(route.doc === x.doc.id)} onClick={() => go("doc", x.doc.id)}><span className="nav-index" aria-hidden="true">{x.index ?? ""}</span>{x.label}</button>)}</> : null}<div className="nav-label">More</div><button {...navButton(current === "templates")} onClick={() => go("templates")}><FileText size={16} aria-hidden="true"/>Templates</button><button {...navButton(current === "adopt")} onClick={() => go("adopt")}><GitBranch size={16} aria-hidden="true"/>Adopt</button></nav><div className="sidebar-foot"><span>Generated from Markdown</span><small><time dateTime={vault.generatedAt}>{new Date(vault.generatedAt).toLocaleString()}</time></small></div></aside>
     {menu ? <button className="scrim" onClick={() => setMenu(false)} aria-label="Close navigation" tabIndex={-1}/> : null}
     <main id="content" ref={main} tabIndex={-1}>{route.view === "home" ? <HomePage/> : route.view === "decisions" ? <DecisionsPage/> : route.view === "evidence" ? <EvidencePage/> : route.view === "reviews" ? <ReviewsPage/> : route.view === "graph" ? <GraphPage/> : route.view === "health" ? <HealthPage/> : route.view === "templates" ? <TemplatesPage/> : route.view === "adopt" ? <AdoptPage/> : <DocPage id={route.doc || "Home"}/>}</main>

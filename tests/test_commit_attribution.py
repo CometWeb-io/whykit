@@ -16,7 +16,7 @@ from check_commit_attribution import scan_repository  # noqa: E402
 class CommitAttributionTests(unittest.TestCase):
     def git(self, repo: Path, *args: str) -> str:
         result = subprocess.run(
-            ["git", *args], cwd=repo, check=True, capture_output=True, text=True
+            ["git", *args], cwd=repo, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace"
         )
         return result.stdout.strip()
 
@@ -64,7 +64,7 @@ class CommitAttributionTests(unittest.TestCase):
                 cwd=repo,
                 check=False,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
 
         self.assertEqual(result.returncode, 1)

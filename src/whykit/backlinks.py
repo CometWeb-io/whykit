@@ -6,15 +6,17 @@ import json
 import sys
 from pathlib import Path
 
-from .messages import print_no_vault
+from .contract import vault_not_found
 from .graph import build_graph
 from .lint import (
+    path_cache,
     DECISION_ID_RE,
     EVIDENCE_ID_RE,
     find_vault_root,
     is_vault_root,
 )
 from .vault_index import VaultIndex
+from .console import emit_machine
 
 
 def _normalize_target(root: Path, target: str, vault: VaultIndex) -> tuple[str, str]:
@@ -42,6 +44,7 @@ def _normalize_target(root: Path, target: str, vault: VaultIndex) -> tuple[str, 
     return "document", raw.removesuffix(".md")
 
 
+@path_cache()
 def build_backlinks(root: Path, target: str, *, vault: VaultIndex | None = None) -> dict:
     root = root.resolve()
     vault = vault or VaultIndex.load(root)
@@ -78,11 +81,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print_no_vault(args.root)
-        return 2
+        return vault_not_found(args.root, json_mode=args.json)
     report = build_backlinks(root, args.target)
     if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         if not report["exists"]:
             print(f"target not found in graph: {report['id']}", file=sys.stderr)

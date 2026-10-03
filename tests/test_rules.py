@@ -28,7 +28,7 @@ class RuleCatalogTests(unittest.TestCase):
     def test_markdown_catalog_is_generated_from_the_same_rule_registry(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(CLI), "rules", "--markdown"],
-            text=True, capture_output=True, timeout=20,
+            text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=20,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         for code in RULE_BY_CODE:
@@ -37,7 +37,7 @@ class RuleCatalogTests(unittest.TestCase):
     def test_rules_command_explains_a_known_rule(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(CLI), "rules", "evidence.missing"],
-            text=True, capture_output=True, timeout=20,
+            text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=20,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("Why:", proc.stdout)
@@ -46,6 +46,6 @@ class RuleCatalogTests(unittest.TestCase):
     def test_unknown_rule_is_usage_error(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(CLI), "rules", "does.not_exist"],
-            text=True, capture_output=True, timeout=20,
+            text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=20,
         )
         self.assertEqual(proc.returncode, 2)

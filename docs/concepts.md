@@ -68,7 +68,8 @@ Rules worth knowing:
 - **Evidence is retired, not deleted.** When a source turns out to be wrong or is
   replaced, `whykit evidence retire E-001 --why "..." --replaced-by E-014` moves
   it to the *Retired sources* table. Existing citations keep resolving, and the
-  linter warns (`evidence.retired`) wherever a document still leans on it.
+  linter warns (`evidence.retired`) wherever a current document still leans on
+  it. Superseded and archived records are history and are not flagged.
 - **Freshness is opt-in.** If some source types go stale quickly, set an
   access-age window per type in `whykit.toml` (see
   [Configuration](configuration.md#evidence-access-age)). That produces a warning

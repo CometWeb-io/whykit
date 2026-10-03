@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/error.schema.json",
+  "title": "WhyKit command error",
+  "description": "Written to stdout instead of a report when a command run with --json (or another JSON stdout) cannot produce its report. The exit code is unchanged; the same human text also goes to stderr.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "error"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "error": {
+      "type": "object",
+      "required": [
+        "code",
+        "message",
+        "hint"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "usage",
+            "invalid_argument",
+            "invalid_target",
+            "vault_not_found",
+            "invalid_config",
+            "not_found",
+            "unsafe_path",
+            "target_exists",
+            "operation_rejected",
+            "missing_dependency",
+            "git_error",
+            "vault_invalid",
+            "io_error",
+            "interrupted"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

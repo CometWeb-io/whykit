@@ -5,16 +5,16 @@ import argparse
 import datetime as dt
 import hashlib
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
-from .messages import print_no_vault
+from .contract import emit_error, vault_not_found
 from .graph import build_graph
 from .io import atomic_write_text, safe_vault_target
-from .lint import collect_markdown, find_vault_root, is_vault_root, load_note, rel
+from .lint import collect_markdown, find_vault_root, is_vault_root, load_note, rel, path_cache
 from .status import build_status
 from .vault_index import VaultIndex
+from .console import emit_machine
 
 SNAPSHOT_FORMAT = "whykit.snapshot/v1"
 
@@ -67,6 +67,7 @@ def _snapshot_id(entries: list[dict[str, Any]]) -> str:
     return digest.hexdigest()
 
 
+@path_cache()
 def build_snapshot(root: Path, *, today: dt.date | None = None) -> dict[str, Any]:
     today = today or dt.date.today()
     root = root.resolve()
@@ -103,6 +104,7 @@ def build_snapshot(root: Path, *, today: dt.date | None = None) -> dict[str, Any
     }
 
 
+@path_cache()
 def compare_snapshot(root: Path, baseline: dict[str, Any], *, today: dt.date | None = None) -> dict[str, Any]:
     if baseline.get("format") != SNAPSHOT_FORMAT:
         raise ValueError(f"unsupported snapshot format: {baseline.get('format')!r}")
@@ -173,18 +175,18 @@ def main_snapshot(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", help="write JSON to this path instead of stdout")
     parser.add_argument("--compact", action="store_true", help="emit compact JSON")
     args = parser.parse_args(argv)
+    # Without --output the command's stdout is JSON, so failures are too.
+    json_mode = not args.output
     requested_root = Path(args.root).expanduser().absolute() if args.root else find_vault_root()
     root = requested_root.resolve() if requested_root is not None else None
     if root is None or not is_vault_root(root):
-        print_no_vault(args.root)
-        return 2
+        return vault_not_found(args.root, json_mode=json_mode)
     today = None
     if args.today:
         try:
             today = dt.date.fromisoformat(args.today)
         except ValueError:
-            print(f"--today is not a real ISO date: {args.today}", file=sys.stderr)
-            return 2
+            return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=json_mode)
     payload = build_snapshot(root, today=today)
     rendered = json.dumps(payload, ensure_ascii=False, indent=None if args.compact else 2, sort_keys=args.compact)
     if args.output:
@@ -199,12 +201,11 @@ def main_snapshot(argv: list[str] | None = None) -> int:
                 relative = target
             target = safe_vault_target(root, relative)
         except (OSError, RuntimeError, ValueError) as exc:
-            print(f"--output must be a safe path inside the vault: {exc}", file=sys.stderr)
-            return 2
+            return emit_error("unsafe_path", f"--output must be a safe path inside the vault: {exc}", json_mode=json_mode)
         atomic_write_text(target, rendered + "\n")
         print(f"snapshot {payload['snapshot_id']}: {rel(root, target)}")
     else:
-        print(rendered)
+        emit_machine(rendered)
     return 0
 
 
@@ -217,8 +218,7 @@ def main_verify(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print_no_vault(args.root)
-        return 2
+        return vault_not_found(args.root, json_mode=args.json)
     snapshot_path = Path(args.snapshot).expanduser()
     if not snapshot_path.is_absolute():
         snapshot_path = (root / snapshot_path).resolve()
@@ -227,15 +227,13 @@ def main_verify(argv: list[str] | None = None) -> int:
         try:
             today = dt.date.fromisoformat(args.today)
         except ValueError:
-            print(f"--today is not a real ISO date: {args.today}", file=sys.stderr)
-            return 2
+            return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=args.json)
     try:
         report = compare_snapshot(root, _load_baseline(snapshot_path), today=today)
     except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+        return emit_error("invalid_argument", str(exc), json_mode=args.json)
     if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         state = "MATCH" if report["matches"] else "DRIFT"
         print(f"snapshot verification: {state}")

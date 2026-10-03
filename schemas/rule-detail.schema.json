@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/rule-detail.schema.json",
+  "title": "WhyKit lint rule",
+  "description": "Output of `whykit rules <code> --json`.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "code",
+    "default_level",
+    "summary",
+    "why",
+    "fix"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+\\.[a-z0-9_]+$"
+    },
+    "default_level": {
+      "enum": [
+        "error",
+        "warning"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "why": {
+      "type": "string"
+    },
+    "fix": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

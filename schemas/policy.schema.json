@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/policy.schema.json",
+  "title": "WhyKit effective policy",
+  "description": "Output of `whykit policy --json`.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "source",
+    "configured",
+    "config"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "source": {
+      "type": "string"
+    },
+    "configured": {
+      "type": "boolean"
+    },
+    "config": {
+      "type": "object",
+      "required": [
+        "defaults",
+        "profiles"
+      ],
+      "properties": {
+        "format_version": {
+          "type": "integer"
+        },
+        "evidence_access_age_days": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "defaults": {
+          "type": "object"
+        },
+        "profiles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

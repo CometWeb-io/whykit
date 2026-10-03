@@ -24,7 +24,7 @@ DECISION_ID_RE = re.compile(r"^D-\d{3,}$")
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(CLI), *args], text=True, capture_output=True)
+    return subprocess.run([sys.executable, str(CLI), *args], text=True, encoding="utf-8", errors="replace", capture_output=True)
 
 
 class MutationLockTests(unittest.TestCase):

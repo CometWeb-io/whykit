@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/doctor-report.schema.json",
+  "title": "WhyKit doctor report",
+  "description": "Output of `whykit doctor --json`. A missing vault is a failed report (exit 1), not an error object.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "root",
+    "passed",
+    "checks"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "root": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "passed",
+          "detail",
+          "required"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

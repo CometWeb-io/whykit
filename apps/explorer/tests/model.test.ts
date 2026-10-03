@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createVaultModel } from "../src/lib/model.ts";
+import type { DecisionRow } from "../src/types.ts";
 import { doc, index } from "./fixtures.ts";
 
 test("resolves ids, stems and aliases case-insensitively", () => {
@@ -78,4 +79,32 @@ test("indexing a large vault stays fast", () => {
   assert.equal(m.linksFor(docs[0]!).length, 2);
   assert.equal(m.backlinksFor(docs[1]!).length, 2);
   assert.ok(elapsed < 2000, `indexing took ${elapsed.toFixed(0)} ms`);
+});
+
+function decision(id: string, over: Partial<DecisionRow> = {}): DecisionRow {
+  return { id, title: id, date: "2026-01-01", owner: "Owner", status: "accepted", recordId: `06-decisions/${id}`, supersedes: null, ...over };
+}
+
+test("decision chains walk back to the root and forward to the latest successor", () => {
+  const m = createVaultModel(index([], { decisions: [
+    decision("D-001"),
+    decision("D-009", { status: "superseded", supersededBy: "D-010" }),
+    decision("D-010", { status: "superseded", supersedes: "D-009" }),
+    decision("D-011", { supersedes: "D-010" }),
+  ] }));
+  for (const id of ["D-009", "D-010", "D-011"]) {
+    assert.deepEqual(m.decisionChain(id).map(d => d.id), ["D-009", "D-010", "D-011"], id);
+  }
+  assert.deepEqual(m.decisionChain("D-001").map(d => d.id), ["D-001"]);
+  assert.deepEqual(m.decisionChain("D-404"), []);
+});
+
+test("decision chains stop at cycles and dangling references", () => {
+  const m = createVaultModel(index([], { decisions: [
+    decision("D-001", { supersedes: "D-002" }),
+    decision("D-002", { supersedes: "D-001" }),
+    decision("D-003", { supersedes: "D-999", supersededBy: "D-998" }),
+  ] }));
+  assert.deepEqual(m.decisionChain("D-001").map(d => d.id), ["D-002", "D-001"]);
+  assert.deepEqual(m.decisionChain("D-003").map(d => d.id), ["D-003"]);
 });

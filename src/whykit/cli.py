@@ -16,12 +16,15 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 from . import __version__
+from .contract import CONTRACT_VERSION, argv_wants_json, describe_os_error, emit_error, error_payload, vault_not_found
 from .lint import find_vault_root, is_vault_root, lint as run_lint, rel
 from .completion import SHELLS, render_completion
 from .messages import print_no_vault
 from .vault_index import VaultIndex
+from .console import emit_machine, harden_stdio
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "template"
 
@@ -136,9 +139,9 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     from .io import atomic_write_bytes, atomic_write_text, safe_vault_dir, safe_vault_target
 
+    json_mode = bool(getattr(args, "json", False))
     if getattr(args, "minimal", False) and getattr(args, "full", False):
-        print("--minimal and --full cannot be used together", file=sys.stderr)
-        return 2
+        return emit_error("usage", "--minimal and --full cannot be used together", json_mode=json_mode)
 
     minimal_layout = not getattr(args, "full", False)
     # Do not Path.resolve(): that follows symlinks and can write outside the
@@ -146,25 +149,24 @@ def cmd_init(args: argparse.Namespace) -> int:
     target = _absolute_without_following_symlinks(args.target)
     linked = _first_symlink_on_path(target)
     if linked is not None:
-        print(f"refusing to initialize through a symlink: {linked}", file=sys.stderr)
-        return 2
+        return emit_error("unsafe_path", f"refusing to initialize through a symlink: {linked}", json_mode=json_mode)
     if _is_whykit_package_source_root(target):
-        print(
-            "refusing to initialize inside WhyKit's own package source tree: "
-            f"{target}",
-            file=sys.stderr,
+        return emit_error(
+            "invalid_target",
+            f"refusing to initialize inside WhyKit's own package source tree: {target}",
+            json_mode=json_mode,
         )
-        return 2
     if target.exists() and not target.is_dir():
-        print(f"refusing to initialize a non-directory target: {target}", file=sys.stderr)
-        return 2
+        return emit_error("invalid_target", f"refusing to initialize a non-directory target: {target}", json_mode=json_mode)
     if target.exists() and any(target.iterdir()) and not args.force:
-        print(f"refusing to write into non-empty directory: {target}", file=sys.stderr)
-        print("use --force only when you have reviewed the destination", file=sys.stderr)
-        return 2
+        return emit_error(
+            "target_exists",
+            f"refusing to write into non-empty directory: {target}",
+            hint="use --force only when you have reviewed the destination",
+            json_mode=json_mode,
+        )
     if not TEMPLATE_DIR.is_dir():
-        print("template is missing from this installation", file=sys.stderr)
-        return 2
+        return emit_error("missing_dependency", "template is missing from this installation", json_mode=json_mode)
 
     # Prepare the selected layout in an isolated staging directory first.
     # The vendor-neutral layout trims the workstream-rich starter here, never
@@ -184,8 +186,7 @@ def cmd_init(args: argparse.Namespace) -> int:
                 raise RuntimeError(f"expected a regular .gitignore file: {gitignore}")
             existing_ignore = gitignore.read_text(encoding="utf-8") if gitignore.exists() else None
         except (OSError, RuntimeError, ValueError) as exc:
-            print(f"refusing unsafe init destination: {exc}", file=sys.stderr)
-            return 2
+            return emit_error("unsafe_path", f"refusing unsafe init destination: {exc}", json_mode=json_mode)
         preserved = 0
         for source in sorted(prepared.rglob("*")):
             relative = source.relative_to(prepared)
@@ -195,18 +196,18 @@ def cmd_init(args: argparse.Namespace) -> int:
                     continue
                 destination = safe_vault_target(target, relative)
             except (OSError, RuntimeError, ValueError) as exc:
-                print(f"refusing unsafe init destination: {exc}", file=sys.stderr)
-                return 2
+                return emit_error("unsafe_path", f"refusing unsafe init destination: {exc}", json_mode=json_mode)
             if destination.is_symlink():
-                print(f"refusing to overwrite symlink: {destination}", file=sys.stderr)
-                return 2
+                return emit_error("unsafe_path", f"refusing to overwrite symlink: {destination}", json_mode=json_mode)
             if destination.exists():
                 if not destination.is_file():
-                    print(f"refusing to replace a non-file destination: {destination}", file=sys.stderr)
-                    return 2
+                    return emit_error(
+                        "invalid_target",
+                        f"refusing to replace a non-file destination: {destination}",
+                        json_mode=json_mode,
+                    )
                 if not args.force:
-                    print(f"refusing to overwrite existing file: {destination}", file=sys.stderr)
-                    return 2
+                    return emit_error("target_exists", f"refusing to overwrite existing file: {destination}", json_mode=json_mode)
                 preserved += 1
                 continue
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -224,10 +225,10 @@ def cmd_init(args: argparse.Namespace) -> int:
             existing_ignore + separator + "\n" + VAULT_GITIGNORE_MARKER + "\n" + VAULT_GITIGNORE,
         )
 
-    if getattr(args, "json", False):
+    if json_mode:
         import json
-        print(json.dumps({
-            "contract_version": 1,
+        emit_machine(json.dumps({
+            "contract_version": CONTRACT_VERSION,
             "root": str(target),
             "layout": "minimal" if minimal_layout else "full",
             "preserved": preserved,
@@ -245,8 +246,12 @@ def cmd_init(args: argparse.Namespace) -> int:
     print("  1. Answer every TODO in AGENTS.md - that file is the contract agents work under.")
     print("  2. Replace the starter content in 00-context/ before treating anything as canonical.")
     # Match the README cold-install path (`uv sync` + `uv run whykit` from the
-    # checkout). Bare `whykit` is not on PATH after that install.
-    print(f"  3. From the WhyKit checkout: uv run whykit lint --root {target}")
+    # checkout), where bare `whykit` is not on PATH. An installed tool has no
+    # checkout to run from, so it gets the bare command instead.
+    if _is_whykit_package_source_root(SOURCE_ROOT):
+        print(f"  3. From the WhyKit checkout: uv run whykit lint --root {target}")
+    else:
+        print(f"  3. Check it: whykit lint --root {target}")
     return 0
 
 
@@ -327,8 +332,11 @@ def _json_format(args: argparse.Namespace, command: str) -> str | None:
     if not getattr(args, "json", False):
         return args.format or "json"
     if args.format not in (None, "json"):
-        print(f"--json conflicts with --format {args.format}", file=sys.stderr)
-        print(f"hint: pass one of them to `whykit {command}`", file=sys.stderr)
+        emit_error(
+            "usage",
+            f"--json conflicts with --format {args.format}\nhint: pass one of them to `whykit {command}`",
+            json_mode=True,
+        )
         return None
     return "json"
 
@@ -509,16 +517,14 @@ def cmd_policy(args: argparse.Namespace) -> int:
     from .config import ConfigError, config_summary
     vault = _resolve_vault(args.root)
     if vault is None:
-        print_no_vault(args.root)
-        return 2
+        return vault_not_found(args.root, json_mode=args.json)
     try:
         payload = config_summary(vault)
     except ConfigError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+        return emit_error("invalid_config", str(exc), json_mode=args.json)
     if args.json:
         import json
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         print(f"WhyKit policy — {payload['source']}")
         defaults = payload["config"]["defaults"]
@@ -576,7 +582,50 @@ def cmd_history(args: argparse.Namespace) -> int:
         argv += ["--root", args.root]
     if args.json:
         argv.append("--json")
-    return immutability_main(argv)
+    code = immutability_main(argv)
+    if code in (0, 1) and args.head == "HEAD":
+        _warn_uncommitted_markdown(_resolve_vault(args.root))
+    return code
+
+
+def _uncommitted_markdown(vault: Path) -> list[str]:
+    """Markdown under *vault* that differs from HEAD (staged, unstaged or new)."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(vault), "status", "--porcelain", "--untracked-files=all", "--", "."],
+            capture_output=True, text=True, check=False,
+        )
+    except OSError:
+        return []
+    if result.returncode != 0:
+        return []
+    paths = []
+    for line in result.stdout.splitlines():
+        path = line[3:].split(" -> ")[-1].strip().strip('"')
+        if path.endswith(".md"):
+            paths.append(path)
+    return paths
+
+
+def _warn_uncommitted_markdown(vault: Path | None) -> None:
+    """Say so when `history` compared commits but the edits are not committed yet.
+
+    `history` checks revisions, so an uncommitted rewrite of accepted reasoning
+    passes locally and only fails once it reaches CI. That reads as a false OK.
+    """
+    if vault is None:
+        return
+    pending = _uncommitted_markdown(vault)
+    if not pending:
+        return
+    sys.stdout.flush()
+    print(
+        f"note: {len(pending)} uncommitted Markdown change(s) were not checked; "
+        "history compares commits only (e.g. "
+        f"{pending[0]})",
+        file=sys.stderr,
+    )
+    print("hint: commit the change, then rerun `whykit history --base <ref>`", file=sys.stderr)
 
 
 PRE_COMMIT_HOOK = """#!/bin/sh
@@ -657,9 +706,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     record("whykit", True, __version__)
     if vault is None:
         record("vault_root", False, "no vault found - run `whykit init <dir>` or pass --root")
-        payload: dict[str, object] = {"contract_version": 1, "root": None, "passed": False, "checks": checks}
+        payload: dict[str, object] = {"contract_version": CONTRACT_VERSION, "root": None, "passed": False, "checks": checks}
         if args.json:
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             for item in checks:
                 marker = "OK" if item["passed"] else "FAIL"
@@ -682,7 +731,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     record("git", bool(git), git or "not found")
     tracked = False
     if git:
-        inside = subprocess.run(["git", "-C", str(vault), "rev-parse", "--git-dir"], capture_output=True, text=True)
+        inside = subprocess.run(["git", "-C", str(vault), "rev-parse", "--git-dir"], capture_output=True, text=True, encoding="utf-8", errors="replace")
         tracked = inside.returncode == 0
         record("git_repository", tracked, "tracked" if tracked else "not a git repository yet - `git init`", required=False)
         hook = vault / ".git" / "hooks" / "pre-commit"
@@ -706,9 +755,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     record("sensitive_docs", True, f"{len(sensitive)} confidential/restricted document(s)", required=False)
 
     passed = all(bool(item["passed"]) for item in checks if item["required"])
-    payload = {"contract_version": 1, "root": str(vault), "passed": passed, "checks": checks}
+    payload = {"contract_version": CONTRACT_VERSION, "root": str(vault), "passed": passed, "checks": checks}
     if args.json:
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         for item in checks:
             if item["passed"]:
@@ -798,8 +847,53 @@ Run `whykit <command> -h` for a command's options.
 Docs: https://github.com/CometWeb-io/whykit#readme"""
 
 
+class _Parser(argparse.ArgumentParser):
+    """ArgumentParser whose usage errors honour the machine contract.
+
+    argparse reports a bad command line before any command runs, so the
+    ``--json`` choice is read from the raw arguments (see ``main``). Human
+    output and the exit code (2) are exactly argparse's own.
+    """
+
+    json_errors = False
+
+    def error(self, message: str) -> NoReturn:
+        hint = _usage_hint(message)
+        self.print_usage(sys.stderr)
+        sys.stderr.write(f"{self.prog}: error: {message}\n")
+        if hint:
+            sys.stderr.write(f"hint: {hint}\n")
+        if _Parser.json_errors:
+            import json
+            emit_machine(json.dumps(
+                error_payload("usage", f"{self.prog}: error: {message}", hint or f"run `{self.prog} -h` for the accepted options"),
+                ensure_ascii=False,
+                indent=2,
+            ))
+        self.exit(2)
+
+
+def _usage_hint(message: str) -> str | None:
+    """A next step for argparse errors where the message alone misleads."""
+    if "invalid choice: 'accepted'" in message and "approved" in message:
+        # Decision logs render the approved state as "Accepted", so people type it.
+        return "decision logs display approved decisions as \"Accepted\"; on the command line use --status approved"
+    return None
+
+
+def _add_leaf_root(parser: argparse.ArgumentParser) -> None:
+    """Accept ``--root`` after a nested action as well as before it.
+
+    ``whykit new --root V decision ...`` was the only spelling that worked,
+    and ``whykit new decision ... --root V`` -- the form every other command
+    accepts -- failed with "unrecognized arguments". SUPPRESS keeps a value
+    given at the parent level from being overwritten by the leaf default.
+    """
+    parser.add_argument("--root", default=argparse.SUPPRESS, help=ROOT_HELP)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _Parser(
         prog="whykit",
         description="WhyKit - a Git-native evidence and decision ledger.",
         epilog=EPILOG,
@@ -847,6 +941,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_decision.add_argument("--review-by", metavar="YYYY-MM-DD", help="date by which the decision must be re-checked")
     new_decision.add_argument("--supersedes", metavar="D-NNN", help="decision this one replaces")
     new_decision.add_argument("--json", action="store_true", help=JSON_HELP)
+    _add_leaf_root(new_decision)
     new_decision.set_defaults(func=cmd_new)
 
     new_evidence = new_sub.add_parser("evidence", help="append a source to the evidence register")
@@ -857,6 +952,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_evidence.add_argument("--date", metavar="YYYY-MM-DD", help="when the source was produced (default: today)")
     new_evidence.add_argument("--accessed", metavar="YYYY-MM-DD", help="when it was last checked (default: today)")
     new_evidence.add_argument("--json", action="store_true", help=JSON_HELP)
+    _add_leaf_root(new_evidence)
     new_evidence.set_defaults(func=cmd_new)
 
     new_note = new_sub.add_parser("note", help="create a draft note in a workstream")
@@ -867,6 +963,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_note.add_argument("--sensitivity", choices=SENSITIVITIES, help="default: policy defaults.sensitivity")
     new_note.add_argument("--link-from", metavar="PATH", help="vault-relative Markdown map to link the new note from")
     new_note.add_argument("--json", action="store_true", help=JSON_HELP)
+    _add_leaf_root(new_note)
     new_note.set_defaults(func=cmd_new)
 
     status = sub.add_parser("status", help="summarize vault health and review queue")
@@ -950,6 +1047,7 @@ def build_parser() -> argparse.ArgumentParser:
     review_list.add_argument("--owner", help="only reviews owned by this person")
     review_list.add_argument("--overdue-only", action="store_true", help="hide reviews that are not yet due")
     review_list.add_argument("--json", action="store_true", help=JSON_HELP)
+    _add_leaf_root(review_list)
     review_list.set_defaults(func=cmd_review)
     review_record = review_sub.add_parser("record", help="record a review event")
     review_record.add_argument("target", help="vault-relative path or D-NNN")
@@ -959,6 +1057,7 @@ def build_parser() -> argparse.ArgumentParser:
     review_record.add_argument("--note", default="", dest="note_text", help="short note for the review log")
     review_record.add_argument("--today", help="record the review as of this YYYY-MM-DD date")
     review_record.add_argument("--json", action="store_true", help=JSON_HELP)
+    _add_leaf_root(review_record)
     review_record.set_defaults(func=cmd_review)
 
     snapshot = sub.add_parser("snapshot", help="create a deterministic vault snapshot")
@@ -995,6 +1094,7 @@ def build_parser() -> argparse.ArgumentParser:
     evidence_list = evidence_sub.add_parser("list", help="list evidence rows")
     evidence_list.add_argument("--state", choices=("all", "active", "retired"), default="all", help="which rows to list (default: %(default)s)")
     evidence_list.add_argument("--json", action="store_true", help=JSON_HELP)
+    _add_leaf_root(evidence_list)
     evidence_list.set_defaults(func=cmd_evidence)
     evidence_retire = evidence_sub.add_parser("retire", help="retire active evidence")
     evidence_retire.add_argument("id", metavar="E-NNN", help="evidence ID to retire")
@@ -1002,6 +1102,7 @@ def build_parser() -> argparse.ArgumentParser:
     evidence_retire.add_argument("--replaced-by", metavar="E-NNN", help="evidence that supersedes it")
     evidence_retire.add_argument("--today", help="retire as of this YYYY-MM-DD date")
     evidence_retire.add_argument("--json", action="store_true", help=JSON_HELP)
+    _add_leaf_root(evidence_retire)
     evidence_retire.set_defaults(func=cmd_evidence)
 
     adopt = sub.add_parser("adopt", help="inventory existing Markdown and stage it for a vault")
@@ -1077,18 +1178,29 @@ def cmd_completion(args: argparse.Namespace) -> int:
     return 0
 
 
-def _describe_os_error(exc: OSError) -> str:
-    reason = exc.strerror or exc.__class__.__name__
-    if exc.filename is not None and exc.filename2 is not None:
-        return f"{reason}: {exc.filename} -> {exc.filename2}"
-    if exc.filename is not None:
-        return f"{reason}: {exc.filename}"
-    return str(exc) or reason
+def _wants_json(args: argparse.Namespace) -> bool:
+    """Whether this invocation's stdout is a JSON document."""
+    command = getattr(args, "command", None)
+    if command == "explorer-index":
+        return True
+    if command == "snapshot":
+        return not getattr(args, "output", None)
+    if command in ("graph", "pack") and getattr(args, "format", None) in (None, "json"):
+        return True
+    return bool(getattr(args, "json", False))
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Before any output: an ASCII or legacy code-page console must degrade
+    # glyphs, not abort the report with UnicodeEncodeError.
+    harden_stdio()
     parser = build_parser()
-    args = parser.parse_args(argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    _Parser.json_errors = argv_wants_json(raw)
+    try:
+        args = parser.parse_args(raw)
+    finally:
+        _Parser.json_errors = False
     func = getattr(args, "func", None)
     if func is None:
         parser.print_help(sys.stderr)
@@ -1096,8 +1208,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return func(args)
     except KeyboardInterrupt:
-        print("interrupted", file=sys.stderr)
-        return 130
+        return emit_error("interrupted", "interrupted", json_mode=_wants_json(args))
     except BrokenPipeError:
         # The reader went away (`whykit query | head`). Point stdout at devnull
         # so the interpreter's final flush does not print a second traceback.
@@ -1112,9 +1223,12 @@ def main(argv: list[str] | None = None) -> int:
         # WHYKIT_DEBUG=1 restores the traceback for bug reports.
         if os.environ.get("WHYKIT_DEBUG"):
             raise
-        print(f"cannot complete `whykit {args.command}`: {_describe_os_error(exc)}", file=sys.stderr)
-        print("hint: check the path and its permissions; set WHYKIT_DEBUG=1 for a traceback", file=sys.stderr)
-        return 2
+        return emit_error(
+            "io_error",
+            f"cannot complete `whykit {args.command}`: {describe_os_error(exc)}\n"
+            "hint: check the path and its permissions; set WHYKIT_DEBUG=1 for a traceback",
+            json_mode=_wants_json(args),
+        )
 
 
 if __name__ == "__main__":

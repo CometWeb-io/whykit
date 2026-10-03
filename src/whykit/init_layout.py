@@ -70,7 +70,7 @@ Map of content for this WhyKit vault. Keep it current — every session starts h
 """
 
 MINIMAL_README = """---
-title: README
+title: Company knowledge vault
 aliases: []
 type: guide
 status: approved
@@ -82,7 +82,7 @@ sensitivity: public
 tags: []
 ---
 
-# This vault
+# Company knowledge vault
 
 An [Obsidian](https://obsidian.md)-compatible Markdown vault checked by
 [WhyKit](https://github.com/CometWeb-io/whykit): evidence, decisions, and review

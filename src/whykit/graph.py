@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
-from .messages import print_no_vault
+from .contract import emit_error, vault_not_found
 from .lint import (
+    path_cache,
     DECISION_ID_RE,
     EVIDENCE_ID_RE,
     WIKILINK_RE,
@@ -22,8 +22,10 @@ from .lint import (
     rel,
 )
 from .vault_index import VaultIndex
+from .console import emit_machine
 
 
+@path_cache()
 def build_graph(
     root: Path,
     *,
@@ -253,8 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     requested_root = Path(args.root).expanduser().absolute() if args.root else find_vault_root()
     root = requested_root.resolve() if requested_root is not None else None
     if root is None or not is_vault_root(root):
-        print_no_vault(args.root)
-        return 2
+        return vault_not_found(args.root, json_mode=args.format == "json")
     graph = build_graph(root, canonical_only=args.canonical_only)
     if args.format == "dot":
         rendered = as_dot(graph)
@@ -281,12 +282,15 @@ def main(argv: list[str] | None = None) -> int:
                 relative = target
             target = safe_vault_target(root, relative)
         except (OSError, RuntimeError, ValueError) as exc:
-            print(f"--output must be a safe path inside the vault: {exc}", file=sys.stderr)
-            return 2
+            return emit_error(
+                "unsafe_path",
+                f"--output must be a safe path inside the vault: {exc}",
+                json_mode=args.format == "json",
+            )
         atomic_write_text(target, rendered + ("\n" if text_mode else ""))
         print(f"wrote {rel(root, target)}")
     else:
-        print(rendered)
+        emit_machine(rendered)
     return 0
 
 

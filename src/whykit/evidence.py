@@ -4,14 +4,14 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import sys
 from pathlib import Path
 
-from .messages import print_no_vault
+from .contract import TargetNotFound, describe_os_error, emit_error, vault_not_found
 from .io import atomic_write_text, safe_vault_target, vault_mutation_lock
 from .impact import analyze_impact
-from .lint import EVIDENCE_ID_RE, _split_table_row, evidence_register, find_vault_root, is_vault_root
+from .lint import HISTORICAL_STATUSES, EVIDENCE_ID_RE, _split_table_row, evidence_register, find_vault_root, is_vault_root
 from .scaffold import _frontmatter_replace, _table_cell
+from .console import emit_machine
 
 
 def list_evidence(root: Path, *, state: str = "all") -> dict:
@@ -58,7 +58,7 @@ def retire_evidence(
             raise ValueError(f"{evidence_id} is already retired")
         row = active.get(evidence_id)
         if row is None:
-            raise ValueError(f"unknown active evidence: {evidence_id}")
+            raise TargetNotFound(f"unknown active evidence: {evidence_id}")
         if replaced_by:
             if not EVIDENCE_ID_RE.fullmatch(replaced_by):
                 raise ValueError("--replaced-by must be an E-NNN identifier")
@@ -111,6 +111,12 @@ def retire_evidence(
             "why": reason,
             "replaced_by": replaced_by,
             "references": impact.get("reference_count", 0),
+            # Superseded and archived records cite what was believed at the
+            # time; only the remainder can still need a new citation.
+            "current_references": sum(
+                1 for item in impact.get("references", [])
+                if str(item.get("status") or "") not in HISTORICAL_STATUSES
+            ),
         }
 
 
@@ -133,13 +139,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print_no_vault(args.root)
-        return 2
+        return vault_not_found(args.root, json_mode=args.json)
 
     if args.evidence_command == "list":
         payload = list_evidence(root, state=args.state)
         if args.json:
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             for item in payload["evidence"]:
                 replacement = f" -> {item.get('replaced_by')}" if item.get("replaced_by") else ""
@@ -152,18 +157,26 @@ def main(argv: list[str] | None = None) -> int:
         try:
             today = dt.date.fromisoformat(args.today)
         except ValueError:
-            print(f"--today is not a real ISO date: {args.today}", file=sys.stderr)
-            return 2
+            return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=args.json)
     try:
         payload = retire_evidence(root, args.id, reason=args.reason, replaced_by=args.replaced_by, today=today)
-    except (ValueError, OSError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+    except TargetNotFound as exc:
+        return emit_error("not_found", str(exc), json_mode=args.json)
+    except ValueError as exc:
+        return emit_error("operation_rejected", str(exc), json_mode=args.json)
+    except OSError as exc:
+        return emit_error("io_error", describe_os_error(exc), json_mode=args.json)
     if args.json:
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         replacement = f"; replacement {payload['replaced_by']}" if payload.get("replaced_by") else ""
-        print(f"retired {payload['id']}; {payload['references']} current reference(s){replacement}")
+        historical = payload["references"] - payload["current_references"]
+        print(
+            f"retired {payload['id']}{replacement}; "
+            f"{payload['current_references']} current and {historical} historical reference(s)"
+        )
+        if payload["current_references"]:
+            print(f"next: `whykit impact {payload['id']}` lists what still cites it")
     return 0
 
 

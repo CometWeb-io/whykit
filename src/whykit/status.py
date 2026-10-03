@@ -4,35 +4,37 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from .messages import print_no_vault
+from .contract import emit_error, vault_not_found
 from .config import ConfigError, load_config
-from .lint import evidence_register, find_vault_root, is_vault_root, lint
+from .lint import DECISION_ID_RE, evidence_register, find_vault_root, is_vault_root, lint, path_cache
 from .vault_index import VaultIndex
+from .console import emit_machine
 
 
-def build_status(
-    root: Path,
-    *,
-    today: dt.date | None = None,
-    due_days: int = 30,
-    vault: VaultIndex | None = None,
-) -> dict:
-    today = today or dt.date.today()
-    root = root.resolve()
-    vault = vault or VaultIndex.load(root)
-    notes = vault.notes
-    _, findings = lint(root, today=today, vault=vault)
-    active_evidence, retired_evidence, _ = evidence_register(root)
+def is_decision_record(front: dict) -> bool:
+    """True for a decision record with a real D-NNN.
 
-    canonical = [n for n in notes if n.front.get("source_of_truth") is True and n.front.get("status") == "approved"]
-    decisions = [n for n in notes if n.front.get("type") == "decision" and n.front.get("decision_id")]
+    The decision log and the decision template share `type: decision` but are
+    not decisions; counting them made `status` disagree with `trace` and the log.
+    """
+    return (
+        front.get("type") == "decision"
+        and front.get("status") != "template"
+        and DECISION_ID_RE.fullmatch(str(front.get("decision_id") or "").strip()) is not None
+    )
+
+
+def build_review_queue(vault: VaultIndex, *, today: dt.date, due_days: int = 30) -> list[dict]:
+    """Approved records whose `review_by` falls on or before today + due_days.
+
+    Independent of lint findings, so `review list` does not pay for a full lint.
+    """
     review_queue: list[dict] = []
     horizon = today + dt.timedelta(days=max(0, due_days))
-    for note in notes:
+    for note in vault.notes:
         if note.front.get("status") != "approved":
             continue
         raw = str(note.front.get("review_by", "")).strip()
@@ -50,6 +52,27 @@ def build_status(
                 "state": "overdue" if date < today else "due",
             })
     review_queue.sort(key=lambda item: (item["review_by"], item["path"]))
+    return review_queue
+
+
+@path_cache()
+def build_status(
+    root: Path,
+    *,
+    today: dt.date | None = None,
+    due_days: int = 30,
+    vault: VaultIndex | None = None,
+) -> dict:
+    today = today or dt.date.today()
+    root = root.resolve()
+    vault = vault or VaultIndex.load(root)
+    notes = vault.notes
+    _, findings = lint(root, today=today, vault=vault)
+    active_evidence, retired_evidence, _ = evidence_register(root)
+
+    canonical = [n for n in notes if n.front.get("source_of_truth") is True and n.front.get("status") == "approved"]
+    decisions = [n for n in notes if is_decision_record(n.front)]
+    review_queue = build_review_queue(vault, today=today, due_days=due_days)
     errors = [f for f in findings if f.level == "error"]
     warnings = [f for f in findings if f.level == "warning"]
     decision_states: dict[str, int] = {}
@@ -63,7 +86,7 @@ def build_status(
         sensitivity = str(note.front.get("sensitivity") or "")
         if sensitivity:
             sensitivity_counts[sensitivity] = sensitivity_counts.get(sensitivity, 0) + 1
-        if note.front.get("type") == "decision":
+        if is_decision_record(note.front):
             decision_states[status_value or "unknown"] = decision_states.get(status_value or "unknown", 0) + 1
         if status_value == "approved" and str(note.front.get("owner") or "").strip() in {"", "TODO"}:
             ownership_gaps += 1
@@ -106,26 +129,22 @@ def main(argv: list[str] | None = None) -> int:
         try:
             today = dt.date.fromisoformat(args.today)
         except ValueError:
-            print(f"--today is not a real ISO date: {args.today}", file=sys.stderr)
-            return 2
+            return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=args.json)
     else:
         today = dt.date.today()
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print_no_vault(args.root)
-        return 2
+        return vault_not_found(args.root, json_mode=args.json)
     try:
         config, _ = load_config(root)
     except ConfigError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+        return emit_error("invalid_config", str(exc), json_mode=args.json)
     due_days = args.due_days if args.due_days is not None else int(config["defaults"]["status_due_days"])
     if due_days < 0:
-        print("--due-days must be >= 0", file=sys.stderr)
-        return 2
+        return emit_error("invalid_argument", "--due-days must be >= 0", json_mode=args.json)
     report = build_status(root, today=today, due_days=due_days)
     if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         print(f"WhyKit status — {report['as_of']}")
         print(f"  documents       {report['documents']}")

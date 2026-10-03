@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/explorer-index.schema.json",
+  "title": "WhyKit Explorer index",
+  "description": "Output of `whykit explorer-index`, consumed by apps/explorer. Keys other than `contract_version` use the Explorer's camelCase.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "generatedAt",
+    "vaultName",
+    "docs",
+    "evidence",
+    "decisions",
+    "reviews",
+    "lint"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "generatedAt": {
+      "type": "string"
+    },
+    "vaultName": {
+      "type": "string"
+    },
+    "docs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "state"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "reviews": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "lint": {
+      "type": "object",
+      "required": [
+        "files",
+        "errors",
+        "warnings",
+        "findings"
+      ],
+      "properties": {
+        "files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "errors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warnings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

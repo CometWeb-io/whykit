@@ -13,6 +13,7 @@ CLI = ROOT / "scripts" / "whykit.py"
 
 try:
     from mcp import Client, StdioServerParameters
+    from mcp.shared.exceptions import MCPError
 except ModuleNotFoundError as exc:  # The core matrix intentionally omits the extra.
     if exc.name != "mcp":
         raise
@@ -37,10 +38,15 @@ class McpRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 parameters, raise_exceptions=True, read_timeout_seconds=5
             ) as client:
                 response = await client.list_tools()
+                server_info = client.server_info
 
+        from whykit import __version__
+
+        self.assertIsNotNone(server_info)
+        self.assertEqual((server_info.name, server_info.version), ("whykit", __version__))
         self.assertEqual(
             {tool.name for tool in response.tools},
-            {"query", "context", "impact", "status", "pack"},
+            {"query", "context", "impact", "status", "pack", "trace", "backlinks"},
         )
         for tool in response.tools:
             with self.subTest(tool=tool.name):
@@ -203,6 +209,270 @@ class McpRuntimeTests(unittest.IsolatedAsyncioTestCase):
                                 hidden_payload["target"] = missing_payload["target"]
                                 self.assertEqual(hidden_payload, missing_payload)
                                 self.assertNotIn(sentinel, result.content[0].text)
+
+
+def _write_note(vault: Path, relative: str, *, title: str, sensitivity: str, body: str, extra: str = "") -> None:
+    path = vault / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"---\ntitle: {title}\naliases: []\ntype: note\nstatus: approved\n"
+        f"owner: Test owner\ncreated: 2026-09-24\nlast_updated: 2026-09-24\n"
+        f"source_of_truth: false\nsensitivity: {sensitivity}\nsource_ids: []\ntags: []\n{extra}---\n\n"
+        f"# {title}\n\n{body}\n",
+        encoding="utf-8",
+    )
+
+
+# Values a hostile or confused client may send in place of a target.
+MALICIOUS_TARGETS = (
+    "../../etc/passwd",
+    "/etc/passwd",
+    "C:\\Windows\\win.ini",
+    "file:///etc/passwd",
+    "https://example.com/x",
+    "~/.ssh/id_ed25519",
+    "notes/./x",
+    "notes/../../x",
+    "a\x00b",
+    "line\nbreak",
+    "",
+    "   ",
+)
+
+
+@unittest.skipIf(Client is None, "install the optional whykit[mcp] extra")
+class McpStdioConformanceTests(unittest.IsolatedAsyncioTestCase):
+    """Every tool, resource and prompt through the official SDK client over stdio."""
+
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.vault = Path(self._tmp.name) / "vault"
+        init = await asyncio.create_subprocess_exec(
+            sys.executable, str(CLI), "init", "--minimal", str(self.vault),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await init.communicate()
+        self.assertEqual(init.returncode, 0, stderr.decode("utf-8"))
+        _write_note(self.vault, "notes/shared.md", title="Shared visible", sensitivity="internal",
+                    body="visible-body [[notes/hub]]")
+        _write_note(self.vault, "notes/hub.md", title="Hub", sensitivity="internal",
+                    body="[[shared]] [[notes/shared]]")
+        # A hidden twin of the visible stem, a hidden note and a hidden decision.
+        _write_note(self.vault, "archive/shared.md", title="Shared hidden", sensitivity="restricted",
+                    body="hidden-sentinel [[notes/hub]]")
+        _write_note(self.vault, "archive/classified.md", title="Classified", sensitivity="restricted",
+                    body="hidden-sentinel [[notes/hub]]")
+        (self.vault / "06-decisions" / "d-001-hidden.md").write_text(
+            "---\ntitle: Hidden decision\naliases: []\ntype: decision\ndecision_id: D-001\n"
+            "status: approved\nowner: Test owner\ncreated: 2026-09-24\nlast_updated: 2026-09-24\n"
+            "source_of_truth: false\nsensitivity: restricted\nsource_ids: []\ntags: []\n---\n\n"
+            "# Hidden decision\n\nhidden-sentinel\n",
+            encoding="utf-8",
+        )
+        (self.vault / "06-decisions" / "d-002-visible.md").write_text(
+            "---\ntitle: Visible decision\naliases: []\ntype: decision\ndecision_id: D-002\n"
+            "status: approved\nowner: Test owner\ncreated: 2026-09-24\nlast_updated: 2026-09-24\n"
+            "source_of_truth: false\nsensitivity: internal\nsource_ids: []\ntags: []\n---\n\n"
+            "# Visible decision\n\nvisible-decision-body [[notes/shared]]\n",
+            encoding="utf-8",
+        )
+        self.before = {
+            str(path.relative_to(self.vault)): path.read_bytes()
+            for path in sorted(self.vault.rglob("*")) if path.is_file()
+        }
+
+    async def connected(self, check) -> None:
+        # The SDK client's task group must be entered and left in one task, so
+        # each test opens its own stdio session instead of sharing one from
+        # asyncSetUp.
+        parameters = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "whykit.mcp_server", "--root", str(self.vault)],
+        )
+        async with asyncio.timeout(60):
+            async with Client(parameters, read_timeout_seconds=10) as client:
+                self.client = client
+                await check()
+
+    async def asyncTearDown(self) -> None:
+        after = {
+            str(path.relative_to(self.vault)): path.read_bytes()
+            for path in sorted(self.vault.rglob("*")) if path.is_file()
+        }
+        self._tmp.cleanup()
+        self.assertEqual(after, self.before, "an MCP call modified the vault")
+
+    async def call(self, name: str, arguments: dict) -> tuple[dict, bool]:
+        result = await self.client.call_tool(name, arguments)
+        payload = json.loads(result.content[0].text)
+        self.assertEqual(payload, result.structured_content)
+        return payload, result.is_error
+
+    async def _check_every_tool_answers_a_valid_call(self) -> None:
+        for name, arguments in (
+            ("query", {"text": "visible"}),
+            ("context", {"target": "shared"}),
+            ("impact", {"target": "notes/shared"}),
+            ("status", {"today": "2026-09-24"}),
+            ("pack", {"targets": ["D-002"], "query": "visible"}),
+            ("trace", {"today": "2026-09-24"}),
+            ("backlinks", {"target": "notes/hub"}),
+        ):
+            with self.subTest(tool=name):
+                payload, is_error = await self.call(name, arguments)
+                self.assertFalse(is_error, payload)
+                self.assertNotIn("hidden-sentinel", json.dumps(payload))
+                self.assertNotIn(str(self.vault), json.dumps(payload))
+        context, _ = await self.call("context", {"target": "shared"})
+        self.assertEqual(context["record"]["path"], "notes/shared.md")
+        trace, _ = await self.call("trace", {"today": "2026-09-24"})
+        self.assertEqual([record["decision_id"] for record in trace["decisions"]], ["D-002"])
+
+    async def _check_malicious_targets_get_the_json_error_body_on_every_target_tool(self) -> None:
+        for name in ("context", "impact", "backlinks"):
+            for target in MALICIOUS_TARGETS:
+                with self.subTest(tool=name, target=target):
+                    payload, is_error = await self.call(name, {"target": target})
+                    self.assertTrue(is_error)
+                    self.assertEqual(payload["error"]["code"], "invalid_target")
+                    self.assertNotIn("passwd", payload["error"]["message"])
+        for target in MALICIOUS_TARGETS:
+            with self.subTest(tool="pack", target=target):
+                payload, is_error = await self.call("pack", {"targets": ["Home", target]})
+                self.assertTrue(is_error)
+                self.assertEqual(payload["error"]["code"], "invalid_target")
+
+    async def _check_schema_violations_get_the_same_json_error_body(self) -> None:
+        for name, arguments, code in (
+            ("query", {"limit": -1}, "invalid_argument"),
+            ("query", {"limit": "many"}, "invalid_argument"),
+            ("query", {"text": "x" * 5000}, "invalid_argument"),
+            ("query", {"canonical_only": "maybe"}, "invalid_argument"),
+            ("context", {}, "invalid_target"),
+            ("context", {"target": None}, "invalid_target"),
+            ("context", {"target": ["Home"]}, "invalid_target"),
+            ("context", {"target": "x" * 600}, "invalid_target"),
+            ("context", {"target": "Home", "max_chars": -5}, "invalid_argument"),
+            ("impact", {"target": 42}, "invalid_target"),
+            ("status", {"due_days": -1}, "invalid_argument"),
+            ("status", {"today": "x" * 100}, "invalid_argument"),
+            ("pack", {"targets": ["Home"] * 21}, "invalid_argument"),
+            ("pack", {"targets": "Home"}, "invalid_argument"),
+            ("pack", {"targets": ["Home", 7]}, "invalid_target"),
+            ("pack", {"targets": ["x" * 600]}, "invalid_target"),
+            ("pack", {"max_docs": 0, "query": "x"}, "invalid_argument"),
+            ("trace", {"limit": -1}, "invalid_argument"),
+            ("trace", {"gaps_only": "sometimes"}, "invalid_argument"),
+            ("trace", {"decision": "x" * 500}, "invalid_argument"),
+            ("backlinks", {}, "invalid_target"),
+            ("backlinks", {"target": "Home", "limit": -1}, "invalid_argument"),
+        ):
+            with self.subTest(tool=name, arguments=sorted(arguments)):
+                payload, is_error = await self.call(name, arguments)
+                self.assertTrue(is_error)
+                self.assertEqual(payload["error"]["code"], code)
+                self.assertEqual(set(payload), {"error"})
+                self.assertNotIn("xxxx", payload["error"]["message"])
+        # Handler-level validation has the same shape.
+        for name, arguments in (
+            ("query", {"source_id": "not-an-id"}),
+            ("trace", {"decision": "E-001"}),
+            ("trace", {"today": "2026-02-30"}),
+        ):
+            with self.subTest(tool=name, arguments=sorted(arguments)):
+                payload, is_error = await self.call(name, arguments)
+                self.assertTrue(is_error)
+                self.assertEqual(payload["error"]["code"], "invalid_argument")
+        payload, is_error = await self.call("delete_everything", {"target": "Home"})
+        self.assertTrue(is_error)
+        self.assertEqual(payload["error"]["code"], "unknown_tool")
+
+    async def _check_hidden_records_match_missing_ones_on_every_target_tool(self) -> None:
+        for name in ("context", "impact", "backlinks"):
+            for hidden, missing in (("archive/classified", "archive/never"), ("D-001", "D-999")):
+                with self.subTest(tool=name, target=hidden):
+                    hidden_payload, _ = await self.call(name, {"target": hidden})
+                    missing_payload, _ = await self.call(name, {"target": missing})
+                    for payload in (hidden_payload, missing_payload):
+                        payload.pop("target")
+                        payload.pop("id", None)
+                    self.assertEqual(hidden_payload, missing_payload)
+        hidden_trace, _ = await self.call("trace", {"decision": "D-001", "today": "2026-09-24"})
+        missing_trace, _ = await self.call("trace", {"decision": "D-999", "today": "2026-09-24"})
+        hidden_trace.pop("decision")
+        missing_trace.pop("decision")
+        self.assertEqual(hidden_trace, missing_trace)
+
+    async def _check_resources_are_read_only_and_ceiling_filtered(self) -> None:
+        listed = await self.client.list_resources()
+        self.assertEqual({str(item.uri) for item in listed.resources}, {"whykit://decisions"})
+        templates = await self.client.list_resource_templates()
+        self.assertEqual([item.uri_template for item in templates.resource_templates], ["whykit://record/{+target}"])
+
+        index = await self.client.read_resource("whykit://decisions")
+        rows = json.loads(index.contents[0].text)["decisions"]
+        self.assertEqual([row["decision_id"] for row in rows], ["D-002"])
+
+        record = await self.client.read_resource("whykit://record/D-002")
+        self.assertIn("visible-decision-body", json.loads(record.contents[0].text)["content"])
+        nested = await self.client.read_resource("whykit://record/notes/shared")
+        self.assertEqual(json.loads(nested.contents[0].text)["record"]["path"], "notes/shared.md")
+
+        messages = {}
+        for uri in ("whykit://record/D-001", "whykit://record/D-999", "whykit://record/archive/classified",
+                    "whykit://record/archive/never"):
+            with self.subTest(uri=uri):
+                with self.assertRaises(MCPError) as caught:
+                    await self.client.read_resource(uri)
+                messages[uri] = caught.exception.error
+                self.assertNotIn("hidden-sentinel", str(caught.exception))
+        self.assertEqual(messages["whykit://record/D-001"].message, messages["whykit://record/D-999"].message)
+        self.assertEqual(
+            messages["whykit://record/archive/classified"].message, messages["whykit://record/archive/never"].message
+        )
+        for uri in ("whykit://record/..%2F..%2Fetc%2Fpasswd", "whykit://record/%2Fetc%2Fpasswd",
+                    "whykit://record/~%2F.ssh"):
+            with self.subTest(uri=uri):
+                with self.assertRaises(MCPError) as caught:
+                    await self.client.read_resource(uri)
+                self.assertNotIn("root:", str(caught.exception))
+
+    async def _check_prompts_embed_only_visible_data(self) -> None:
+        listed = await self.client.list_prompts()
+        self.assertEqual({prompt.name for prompt in listed.prompts}, {"summarize_decision", "review_evidence_gaps"})
+        summary = await self.client.get_prompt("summarize_decision", {"decision_id": "D-002"})
+        text = summary.messages[0].content.text
+        self.assertIn("visible-decision-body", text)
+        self.assertIn("untrusted_data", text)
+        gaps = await self.client.get_prompt("review_evidence_gaps", {"today": "2026-09-24"})
+        self.assertIn("D-002", gaps.messages[0].content.text)
+        self.assertNotIn("hidden-sentinel", gaps.messages[0].content.text)
+        errors = {}
+        for decision_id in ("D-001", "D-999"):
+            with self.assertRaises(MCPError) as caught:
+                await self.client.get_prompt("summarize_decision", {"decision_id": decision_id})
+            errors[decision_id] = str(caught.exception.error.message)
+        self.assertEqual(errors["D-001"], errors["D-999"])
+        with self.assertRaises(MCPError):
+            await self.client.get_prompt("summarize_decision", {"decision_id": "../../etc/passwd"})
+
+    async def test_every_tool_answers_a_valid_call(self) -> None:
+        await self.connected(self._check_every_tool_answers_a_valid_call)
+
+    async def test_malicious_targets_get_the_json_error_body_on_every_target_tool(self) -> None:
+        await self.connected(self._check_malicious_targets_get_the_json_error_body_on_every_target_tool)
+
+    async def test_schema_violations_get_the_same_json_error_body(self) -> None:
+        await self.connected(self._check_schema_violations_get_the_same_json_error_body)
+
+    async def test_hidden_records_match_missing_ones_on_every_target_tool(self) -> None:
+        await self.connected(self._check_hidden_records_match_missing_ones_on_every_target_tool)
+
+    async def test_resources_are_read_only_and_ceiling_filtered(self) -> None:
+        await self.connected(self._check_resources_are_read_only_and_ceiling_filtered)
+
+    async def test_prompts_embed_only_visible_data(self) -> None:
+        await self.connected(self._check_prompts_embed_only_visible_data)
 
 
 if __name__ == "__main__":

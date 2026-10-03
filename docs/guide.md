@@ -52,9 +52,8 @@ vault directory. From a source checkout, either:
 - run `uv run --project /path/to/whykit whykit ...` from inside the vault, or
 - install a binary once with `uv tool install --from /path/to/whykit whykit`.
 
-`new`, `review` and `evidence` take `--root` **before** their subcommand
-(`whykit new --root ../my-ledger decision ...`); every other command accepts it
-anywhere. After a future PyPI release, `uv tool install whykit` will put
+Every command accepts `--root` anywhere, including after the action of
+`new`, `review` and `evidence` (`whykit new decision ... --root ../my-ledger`). After a future PyPI release, `uv tool install whykit` will put
 `whykit` on your `PATH` directly.
 
 A fresh vault has zero lint errors and uses the vendor-neutral default layout.
@@ -85,10 +84,14 @@ report. The readiness percentage checks front matter against WhyKit's linter,
 **not** links, evidence, decision integrity or approval, and the time estimate
 is heuristic. Only UTF-8 `*.md` files are scanned; review other assets
 separately. Known evidence-register and decision-log table layouts are flagged
-for manual mapping.
+for manual mapping, and so is a `decision_id` claimed by two imported files or
+already used in the vault. Short files are left behind as stubs only when they
+have neither front matter nor an ADR shape.
 
 It never writes into a workstream. Raw exports are staged in a separate dated
 batch under `.import-staging/` for each import, with a SHA-256 for each source.
+A batch appears only once it is complete: if a source changes mid-import or a
+write fails, nothing from that run is left behind.
 The command reports the exact migration-report path, and a person decides what
 becomes canonical. The ingestion record lands in `notes/`; link it from a map or
 lint reports it as `note.orphan`. The inventory is the boring half, and the half

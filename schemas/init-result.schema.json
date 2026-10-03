@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/init-result.schema.json",
+  "title": "WhyKit init result",
+  "description": "Output of `whykit init --json`.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "root",
+    "layout",
+    "preserved"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "layout": {
+      "enum": [
+        "minimal",
+        "full"
+      ]
+    },
+    "preserved": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": true
+}

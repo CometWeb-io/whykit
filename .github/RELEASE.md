@@ -54,6 +54,10 @@ Do not claim real-vault use before that trial has happened.
 
 ## Verify a release candidate
 
+The step-by-step package release, including reproducible builds, the SBOM and
+attestation checks, is the numbered checklist in
+[docs/releasing.md](../docs/releasing.md). The notes below summarize the gates.
+
 Run the checks in `CONTRIBUTING.md` from a clean checkout. The CI workflow also
 tests Python 3.11–3.14, Windows portability, the optional MCP client, wheel and
 source-distribution installs, example-vault policies, and secret scanning. The
