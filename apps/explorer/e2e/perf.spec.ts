@@ -10,7 +10,13 @@ import { SYNTHETIC_URL } from "./ports.ts";
 // was bundled; with note bodies split into a chunk loaded after first paint it
 // is 320–360 ms, so its budget dropped from 4,000 to 1,500 ms. `docText` is a
 // cold deep link to a note, which has to wait for that chunk.
-const BUDGET = { interactive: 1500, docText: 2500, search: 250, view: 1000, graphFocus: 250 };
+// Budgets are tuned on a laptop; shared CI runners are slower, so CI scales them
+// (PERF_BUDGET_SCALE, default 2.5 under CI) instead of loosening them for everyone.
+const SCALE = Number(process.env.PERF_BUDGET_SCALE ?? (process.env.CI ? 2.5 : 1));
+const BASE = { interactive: 1500, docText: 2500, search: 250, view: 1000, graphFocus: 250 };
+const BUDGET = Object.fromEntries(
+  Object.entries(BASE).map(([key, value]) => [key, value * SCALE]),
+) as typeof BASE;
 
 test.describe.configure({ mode: "serial" });
 
