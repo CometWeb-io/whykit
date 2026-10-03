@@ -62,7 +62,12 @@ For Explorer changes:
 npm ci --prefix apps/explorer
 npm --prefix apps/explorer run check
 npm --prefix apps/explorer run build
+npm --prefix apps/explorer exec -- playwright install chromium
+npm --prefix apps/explorer run e2e
 ```
+
+See [`apps/explorer/README.md`](apps/explorer/README.md) for what the
+end-to-end suite covers.
 
 ## Changing documentation
 

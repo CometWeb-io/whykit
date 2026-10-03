@@ -60,6 +60,7 @@
 | `review_log.row` | error | A review-log row is malformed. | Restore all seven review-log columns. |
 | `review_log.table` | error | The review-log table is missing or malformed. | Restore the standard review-log table header. |
 | `review_log.target` | error | A review-log target is missing or ambiguous. | Use an unambiguous vault wikilink. |
+| `path.case_collision` | warning | Two notes have paths that differ only by letter case or Unicode normalization. | Rename or merge one of the notes so every path is unique ignoring case. |
 | `report.undated` | error | A point-in-time report filename has no YYYY-MM-DD suffix. | Rename it to end in -YYYY-MM-DD.md. |
 | `review_by.invalid` | error | review_by is not a real ISO date. | Use YYYY-MM-DD. |
 | `review_by.overdue` | warning | An approved document is past review_by. | Re-review it, update the evidence, and set the next review date. |

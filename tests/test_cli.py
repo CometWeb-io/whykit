@@ -303,11 +303,9 @@ class ContractTests(unittest.TestCase):
         package_job = workflow.split("  package:", 1)[1].split(
             "  windows-portability:", 1
         )[0]
-        self.assertIn('tar -tzf dist/*.tar.gz > "$RUNNER_TEMP/sdist-files.txt"', package_job)
-        self.assertIn(
-            'grep -Eq \'^whykit-[^/]+/tests/\' "$RUNNER_TEMP/sdist-files.txt"',
-            package_job,
-        )
+        # scripts/check_dist.py rejects tests/ and anything outside the sdist
+        # allowlist; tests/test_packaging.py covers those rules.
+        self.assertIn("python3 scripts/check_dist.py dist", package_job)
 
     def test_readme_uses_the_canonical_product_positioning(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -505,7 +503,7 @@ class ContractTests(unittest.TestCase):
         # Example review dates are fixed, so the Action run pins its as-of day.
         self.assertIn('today: "2026-09-17"', workflow)
 
-    def test_release_reuses_ci_before_publishing_without_artifact_transfer(self) -> None:
+    def test_release_reuses_ci_and_publishes_only_its_own_checked_build(self) -> None:
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
@@ -520,8 +518,17 @@ class ContractTests(unittest.TestCase):
         self.assertIn("id-token: write", release)
         self.assertIn("uv build", release)
         self.assertIn("pypa/gh-action-pypi-publish@", release)
-        self.assertNotIn("upload-artifact", release)
-        self.assertNotIn("download-artifact", release)
+        # The build runs without the OIDC token; the publish job holds it and
+        # only downloads the archives that job checked, from this same run.
+        build, publish = release.split("\n  build:\n", 1)[1].split("\n  publish:\n", 1)
+        self.assertIn("uv build", build)
+        self.assertNotIn("id-token", build)
+        self.assertNotIn("uv build", publish)
+        self.assertIn("needs: build", publish)
+        self.assertIn("name: release-distributions", publish)
+        for cross_run_input in ("run-id:", "github-token:", "repository:", "pattern:"):
+            self.assertNotIn(cross_run_input, publish)
+        self.assertNotIn("download-artifact", build)
 
     @unittest.skipIf(os.name == "nt", "release Bash helper runs only in Linux CI")
     def test_release_baseline_uses_previous_release_or_fails_closed(self) -> None:

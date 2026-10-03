@@ -5,6 +5,9 @@ import argparse
 import json
 import sys
 from dataclasses import asdict, dataclass
+from .console import emit_machine
+
+from .contract import CONTRACT_VERSION, emit_error
 
 
 @dataclass(frozen=True)
@@ -59,7 +62,7 @@ RULES = (
     Rule("evidence.missing", "error", "A cited E-NNN has no populated active or retired row.", "A citation without a source location is not auditable evidence.", "Populate the register row or correct the citation."),
     Rule("evidence.replaced_by_format", "error", "A retired source has a malformed replacement ID.", "Replacement chains must use stable evidence identifiers.", "Use a valid E-NNN or leave the field empty."),
     Rule("evidence.replaced_by_missing", "error", "A retired source points to an unknown replacement.", "The provenance chain ends at a dangling identifier.", "Register the replacement source or correct the ID."),
-    Rule("evidence.retired", "warning", "A document cites retired evidence.", "Historical citations may be valid, but current claims may need re-checking.", "Review the claim and cite the replacement where appropriate."),
+    Rule("evidence.retired", "warning", "A document cites retired evidence.", "Historical citations may be valid, but current claims may need re-checking. Superseded and archived records are history and are not flagged.", "Review the claim and cite the replacement where appropriate."),
     Rule("evidence.retired_date", "error", "A retired evidence row has an invalid retirement date.", "Retirement history must be chronologically auditable.", "Use a real YYYY-MM-DD date."),
     Rule("fact.inline_evidence", "warning", "A fact callout has no inline E-NNN citation.", "Fact callouts visually claim verification, so the supporting source should be one click away.", "Add an E-NNN in the callout."),
     Rule("fact.evidence_missing", "warning", "A fact callout cites an E-NNN with no populated register row.", "A citation that resolves nowhere looks verified while pointing at nothing.", "Register the source or correct the cited ID."),
@@ -77,6 +80,7 @@ RULES = (
     Rule("review_log.row", "error", "A review-log row is malformed.", "Malformed review history cannot be parsed reliably.", "Restore all seven review-log columns."),
     Rule("review_log.table", "error", "The review-log table is missing or malformed.", "Review events need one deterministic append-only structure.", "Restore the standard review-log table header."),
     Rule("review_log.target", "error", "A review-log target is missing or ambiguous.", "A review event must point to one governed record.", "Use an unambiguous vault wikilink."),
+    Rule("path.case_collision", "warning", "Two notes have paths that differ only by letter case or Unicode normalization.", "macOS and Windows checkouts keep only one of them, so the vault silently differs between machines.", "Rename or merge one of the notes so every path is unique ignoring case."),
     Rule("report.undated", "error", "A point-in-time report filename has no YYYY-MM-DD suffix.", "Reports need an immutable temporal identity.", "Rename it to end in -YYYY-MM-DD.md."),
     Rule("review_by.invalid", "error", "review_by is not a real ISO date.", "Review automation cannot act on an invalid date.", "Use YYYY-MM-DD."),
     Rule("review_by.overdue", "warning", "An approved document is past review_by.", "The document may still be correct, but its freshness promise expired.", "Re-review it, update the evidence, and set the next review date."),
@@ -119,17 +123,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--markdown", action="store_true", help="emit the complete Markdown rule table")
     args = parser.parse_args(argv)
     if args.json and args.markdown:
-        parser.error("--json and --markdown are mutually exclusive")
+        parser.print_usage(sys.stderr)
+        return emit_error("usage", f"{parser.prog}: error: --json and --markdown are mutually exclusive", json_mode=args.json)
     if args.code and args.markdown:
-        parser.error("--markdown renders the full catalog and does not accept a single code")
+        parser.print_usage(sys.stderr)
+        return emit_error("usage", f"{parser.prog}: error: --markdown renders the full catalog and does not accept a single code", json_mode=args.json)
 
     if args.code:
         rule = RULE_BY_CODE.get(args.code)
         if rule is None:
-            print(f"unknown rule code: {args.code}", file=sys.stderr)
-            return 2
+            return emit_error("invalid_argument", f"unknown rule code: {args.code}", json_mode=args.json)
         if args.json:
-            print(json.dumps(asdict(rule), ensure_ascii=False, indent=2))
+            emit_machine(json.dumps({"contract_version": CONTRACT_VERSION, **asdict(rule)}, ensure_ascii=False, indent=2))
         else:
             print(f"{rule.code} [{rule.default_level}]")
             print(rule.summary)
@@ -138,7 +143,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.json:
-        print(json.dumps([asdict(rule) for rule in RULES], ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(
+            {"contract_version": CONTRACT_VERSION, "count": len(RULES), "rules": [asdict(rule) for rule in RULES]},
+            ensure_ascii=False,
+            indent=2,
+        ))
     elif args.markdown:
         print(markdown_table())
     else:

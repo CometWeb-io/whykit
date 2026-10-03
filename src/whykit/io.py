@@ -1,14 +1,50 @@
 """Small durability helpers for governed WhyKit writes."""
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
 import secrets
+import stat
 import time
 from contextlib import contextmanager
 from collections.abc import Iterator, Mapping
 from pathlib import Path
+
+
+def ensure_writable(path: Path) -> None:
+    """Refuse to replace a file someone marked read-only.
+
+    ``os.replace`` would silently override the mark on POSIX, while Windows
+    refuses the rename and then cannot delete the read-only temporary file
+    either. Checking first gives one answer on every platform, before any
+    byte of a multi-file change is written.
+    """
+    try:
+        mode = os.stat(path).st_mode
+    except FileNotFoundError:
+        return
+    if stat.S_ISREG(mode) and (not mode & stat.S_IWUSR or not os.access(path, os.W_OK)):
+        raise PermissionError(errno.EACCES, "file is read-only; make it writable before WhyKit updates it", str(path))
+
+
+def match_line_endings(path: Path, text: str) -> str:
+    """Keep an existing CRLF file CRLF when WhyKit rewrites it.
+
+    Edits read text with universal newlines, so writing it back as-is would
+    turn every line of a Windows-authored file into a change. A new file, or
+    one whose first line ends in LF, is written with LF.
+    """
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(65536)
+    except OSError:
+        return text
+    first = head.find(b"\n")
+    if first <= 0 or head[first - 1:first] != b"\r":
+        return text
+    return text.replace("\r\n", "\n").replace("\n", "\r\n")
 
 
 def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
@@ -20,6 +56,8 @@ def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None
     writing or fsyncing the replacement fails.
     """
     path = Path(path)
+    ensure_writable(path)
+    text = match_line_endings(path, text)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.whykit-tmp-{secrets.token_hex(6)}")
     previous_mode = None
@@ -62,6 +100,7 @@ def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None
 def atomic_write_bytes(path: Path, data: bytes) -> None:
     """Binary counterpart of :func:`atomic_write_text`."""
     path = Path(path)
+    ensure_writable(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.whykit-tmp-{secrets.token_hex(6)}")
     previous_mode = None
@@ -236,6 +275,8 @@ def stage_transaction(root: Path, updates: Mapping[Path, str]) -> Path:
     root = Path(root).resolve(strict=True)
     if not updates:
         raise ValueError("transaction requires at least one update")
+    for target in updates:
+        ensure_writable(Path(target))
     txid = secrets.token_hex(12)
     tx = safe_vault_dir(root, Path(".whykit") / "transactions" / txid)
     manifest: list[dict[str, str]] = []
@@ -247,6 +288,7 @@ def stage_transaction(root: Path, updates: Mapping[Path, str]) -> Path:
             raise RuntimeError(f"transaction target escapes vault: {target}") from exc
         staged_name = f"{index}.new"
         staged = tx / staged_name
+        content = match_line_endings(resolved_target, content)
         atomic_write_text(staged, content)
         manifest.append({
             "target": relative,

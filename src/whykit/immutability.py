@@ -18,7 +18,10 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path
+
+from .console import emit_machine
+
+from .contract import emit_error
 
 RECORD_RE = re.compile(r"(?:^|/)06-decisions/d-\d{3,}-.+\.md$")
 RECORD_SUFFIX = "06-decisions/"
@@ -31,60 +34,74 @@ STATUS_KEY_RE = re.compile(r"(?m)^status\s*:")
 
 def git(*args: str, root: str | None = None) -> str:
     prefix = ["-C", root] if root else []
-    return subprocess.run(["git", *prefix, *args], check=True, capture_output=True, text=True).stdout
+    # Decode as UTF-8 regardless of the locale: record names and contents are
+    # UTF-8, and a C/ASCII locale on a CI runner must not crash the gate.
+    # surrogateescape keeps invalid bytes distinct, so two different blobs
+    # never compare equal after decoding, and paths round-trip back to Git.
+    return subprocess.run(
+        ["git", *prefix, *args], check=True, capture_output=True,
+        text=True, encoding="utf-8", errors="surrogateescape",
+    ).stdout
 
 
 def _git_prefix(root: str | None) -> str:
     """Return the path from the Git work tree to *root*, with a trailing slash.
 
-    When the vault lives in a subdirectory (``examples/northline``), ``git diff``
-    and ``git show`` speak in work-tree-relative paths. History checks must use
-    the same coordinate system or they silently skip every decision record.
+    When the vault lives in a subdirectory (``examples/northline``), ``git diff
+    --relative`` speaks in vault-relative paths but ``git show REV:path`` needs
+    work-tree-relative ones. History checks must convert between the two or
+    they silently skip every decision record. Without *root* the vault is the
+    working directory, which may itself be a subdirectory.
     """
-    if not root:
-        return ""
     try:
         prefix = git("rev-parse", "--show-prefix", root=root).strip().replace("\\", "/")
     except subprocess.CalledProcessError:
         return ""
-    if not prefix:
-        # Fallback for unusual layouts: compute relative to the work-tree root.
-        try:
-            work_tree = git("rev-parse", "--show-toplevel", root=root).strip()
-            rel = Path(root).resolve().relative_to(Path(work_tree).resolve()).as_posix()
-            prefix = "" if rel in {"", "."} else f"{rel}/"
-        except (OSError, ValueError, subprocess.CalledProcessError):
-            return ""
-    return prefix if prefix.endswith("/") or prefix == "" else f"{prefix}/"
-
-
-def _vault_rel(path: str, prefix: str) -> str:
-    normalized = path.replace("\\", "/")
-    if prefix and normalized.startswith(prefix):
-        return normalized[len(prefix) :]
-    return normalized
+    return prefix if not prefix or prefix.endswith("/") else f"{prefix}/"
 
 
 def _git_object_path(vault_rel: str, prefix: str) -> str:
     return f"{prefix}{vault_rel}" if prefix else vault_rel
 
 
-def _status(text: str) -> str | None:
-    matches = list(STATUS_VALUE_RE.finditer(text))
-    if len(matches) != 1 or len(STATUS_KEY_RE.findall(text)) != 1:
-        return None
-    match = matches[0]
-    return next((group for group in match.groups() if group), None)
+def _front_matter_lines(text: str) -> tuple[list[str], int] | None:
+    """Split *text* into lines and return them with the closing-fence index.
 
-
-def _without_frontmatter_keys(text: str, keys: set[str]) -> str | None:
-    """Remove selected *top-level* front-matter lines for semantic comparison."""
-    lines = text.splitlines(keepends=True)
+    Mirrors the linter: a UTF-8 byte-order mark is not content, and the front
+    matter is the block between a leading ``---`` line and the next one.
+    """
+    lines = text.removeprefix("\ufeff").splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":
         return None
     end = next((i for i, line in enumerate(lines[1:], 1) if line.strip() == "---"), None)
     if end is None:
         return None
+    return lines, end
+
+
+def _status(text: str) -> str | None:
+    """Return the lifecycle status declared in the front matter, if unambiguous.
+
+    Only the front matter counts. A ``status:`` line in the body (a YAML
+    example in a code fence, say) must neither hide nor fake a status.
+    """
+    parsed = _front_matter_lines(text)
+    if parsed is None:
+        return None
+    lines, end = parsed
+    front = "".join(lines[1:end])
+    matches = list(STATUS_VALUE_RE.finditer(front))
+    if len(matches) != 1 or len(STATUS_KEY_RE.findall(front)) != 1:
+        return None
+    return next(group for group in matches[0].groups() if group).lower()
+
+
+def _without_frontmatter_keys(text: str, keys: set[str]) -> str | None:
+    """Remove selected *top-level* front-matter lines for semantic comparison."""
+    parsed = _front_matter_lines(text)
+    if parsed is None:
+        return None
+    lines, end = parsed
     key_re = re.compile(r"^(" + "|".join(re.escape(key) for key in sorted(keys)) + r")\s*:")
     kept = [lines[0]]
     for line in lines[1:end]:
@@ -106,12 +123,11 @@ def allowed_lifecycle_change(base_text: str, head_text: str) -> bool:
         # Re-reviewing an unchanged decision may move only the operational review
         # date (and last_updated). Its rationale/evidence/ownership remain frozen.
         allowed = {"review_by", "last_updated"}
-    elif head_status in {"superseded", "archived"}:
+    else:
+        # superseded/archived (the only other values _status returns).
         # Lifecycle transition only. `superseded_by` is an optional convenience;
         # the authoritative reverse edge remains the newer record's `supersedes`.
         allowed = {"status", "last_updated", "superseded_by"}
-    else:
-        return False
 
     base_normalized = _without_frontmatter_keys(base_text, allowed)
     head_normalized = _without_frontmatter_keys(head_text, allowed)
@@ -193,81 +209,90 @@ def _require_revisions(root: str | None, *refs: str) -> None:
             ) from None
 
 
+def _diff_entries(out: str) -> list[tuple[str, str, str]]:
+    """Parse ``git diff --name-status -z`` output into ``(status, old, new)``.
+
+    NUL-separated output is the only form in which Git never C-quotes a path:
+    without ``-z`` a name like ``d-001-café.md`` arrives as
+    ``"06-decisions/d-001-caf\\303\\251.md"`` and no longer looks like a record.
+    """
+    tokens = out.split("\0")
+    if tokens and tokens[-1] == "":
+        tokens.pop()
+    entries: list[tuple[str, str, str]] = []
+    index = 0
+    while index < len(tokens):
+        status = tokens[index]
+        width = 2 if status[:1] in {"R", "C"} else 1
+        paths = tokens[index + 1 : index + 1 + width]
+        if not status or len(paths) != width:
+            # Refuse to guess: a half-parsed diff must not pass the gate.
+            raise subprocess.CalledProcessError(
+                128, ["git", "diff", "--name-status", "-z"], output=out,
+                stderr="could not parse `git diff --name-status -z` output",
+            )
+        entries.append((status, paths[0], paths[-1]))
+        index += 1 + width
+    return entries
+
+
+def _diff_failure(exc: subprocess.CalledProcessError, base: str, head: str, root: str | None) -> subprocess.CalledProcessError:
+    """Add the actionable hint a shallow CI checkout needs to Git's own error."""
+    detail = (exc.stderr or "").rstrip()
+    try:
+        shallow = git("rev-parse", "--is-shallow-repository", root=root).strip() == "true"
+    except subprocess.CalledProcessError:
+        shallow = False
+    if shallow or "no merge base" in detail:
+        detail += (
+            f"\nhint: cannot find the merge base of {base} and {head}"
+            + (" in this shallow clone" if shallow else "")
+            + "; fetch full history (actions/checkout `fetch-depth: 0`, or `git fetch --unshallow`)"
+        )
+    return subprocess.CalledProcessError(exc.returncode, exc.cmd, output="", stderr=detail.lstrip("\n"))
+
+
 def changed_records(base: str, head: str, root: str | None = None) -> list[tuple[str, str]]:
     _require_revisions(root, base, head)
     prefix = _git_prefix(root)
-    # Prefer --relative so paths are vault-rooted when `root` is a subdirectory.
-    # Fall back to stripping the prefix manually if an older Git rejects the flag
-    # combination (should not happen on CI runners).
+    # --relative makes paths (and pathspecs) vault-rooted when the vault is a
+    # subdirectory of the work tree; -z keeps every path byte-exact.
     try:
         out = git(
             "diff",
             "--relative",
             "--name-status",
+            "-z",
+            "--no-ext-diff",
             f"{base}...{head}",
             "--",
             RECORD_SUFFIX.rstrip("/"),
             REVIEW_LOG_SUFFIX,
             root=root,
         )
-        relative_paths = True
-    except subprocess.CalledProcessError:
-        out = git(
-            "diff",
-            "--name-status",
-            f"{base}...{head}",
-            "--",
-            _git_object_path(RECORD_SUFFIX.rstrip("/"), prefix),
-            _git_object_path(REVIEW_LOG_SUFFIX, prefix),
-            root=root,
-        )
-        relative_paths = False
+    except subprocess.CalledProcessError as exc:
+        raise _diff_failure(exc, base, head, root) from None
+
+    def show(rev: str, path: str) -> str:
+        return git("show", f"{rev}:{_git_object_path(path, prefix)}", root=root)
 
     blocked: list[tuple[str, str]] = []
-    for line in out.splitlines():
-        if not line.strip():
-            continue
-        parts = line.split("\t")
-        status = parts[0]
+    for status, old_path, new_path in _diff_entries(out):
         kind = status[0]
-        if kind in {"R", "C"} and len(parts) >= 3:
-            old_raw, new_raw = parts[1], parts[2]
-            display_path = f"{old_raw} -> {new_raw}"
-        else:
-            old_raw = parts[1] if len(parts) > 1 else ""
-            new_raw = old_raw
-            display_path = old_raw
-
-        old_path = old_raw if relative_paths else _vault_rel(old_raw, prefix)
-        new_path = new_raw if relative_paths else _vault_rel(new_raw, prefix)
-
+        display_path = f"{old_path} -> {new_path}" if kind in {"R", "C"} else old_path
         if kind == "A":
             continue
-        if old_path == REVIEW_LOG_SUFFIX or old_path.endswith("/" + REVIEW_LOG_SUFFIX):
-            old_path = REVIEW_LOG_SUFFIX
-            new_path = REVIEW_LOG_SUFFIX if new_path.endswith(REVIEW_LOG_SUFFIX.split("/")[-1]) else new_path
+        if old_path == REVIEW_LOG_SUFFIX:
             if kind == "M":
                 try:
-                    base_text = git("show", f"{base}:{_git_object_path(old_path, prefix)}", root=root)
-                    head_text = git("show", f"{head}:{_git_object_path(new_path, prefix)}", root=root)
+                    if allowed_review_log_append(show(base, old_path), show(head, new_path)):
+                        continue
                 except subprocess.CalledProcessError:
-                    blocked.append((status, display_path))
-                    continue
-                if allowed_review_log_append(base_text, head_text):
-                    continue
+                    pass
             blocked.append((status, display_path))
             continue
-        if not RECORD_RE.search(old_path.replace("\\", "/")):
+        if not RECORD_RE.search(old_path):
             continue
-        # Normalize to vault-relative decision path for git show.
-        if not old_path.startswith("06-decisions/"):
-            idx = old_path.find("06-decisions/")
-            if idx >= 0:
-                old_path = old_path[idx:]
-        if not new_path.startswith("06-decisions/"):
-            idx = new_path.find("06-decisions/")
-            if idx >= 0:
-                new_path = new_path[idx:]
         # A copy does not rewrite the old record. The regular linter is
         # responsible for rejecting the duplicated decision_id on the new file.
         if kind == "C":
@@ -277,17 +302,25 @@ def changed_records(base: str, head: str, root: str | None = None) -> list[tuple
 
         if kind == "M":
             try:
-                base_text = git("show", f"{base}:{_git_object_path(old_path, prefix)}", root=root)
-                head_text = git("show", f"{head}:{_git_object_path(new_path, prefix)}", root=root)
+                if allowed_lifecycle_change(show(base, old_path), show(head, new_path)):
+                    continue
             except subprocess.CalledProcessError:
-                blocked.append((status, display_path))
-                continue
-            if allowed_lifecycle_change(base_text, head_text):
-                continue
+                pass
 
         # Rename/delete/type-change or any semantic edit of an immutable record.
         blocked.append((status, display_path))
     return blocked
+
+
+def _tracks_vault_paths(base: str, head: str, root: str | None) -> bool:
+    """True when either revision has decision records or a review log under *root*."""
+    for rev in (base, head):
+        try:
+            if git("ls-tree", "--name-only", rev, "--", RECORD_SUFFIX.rstrip("/"), REVIEW_LOG_SUFFIX, root=root).strip():
+                return True
+        except subprocess.CalledProcessError:
+            return True  # Unknown: do not add a misleading warning.
+    return False
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -302,15 +335,24 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         blocked = changed_records(args.base, args.head, args.root)
+        if not blocked and not _tracks_vault_paths(args.base, args.head, args.root):
+            print(
+                f"warning: no decision records or review log under {args.root or os.getcwd()} "
+                "in either revision; nothing was checked\n"
+                "hint: pass --root <vault> when the vault is a subdirectory of the repository",
+                file=sys.stderr,
+            )
     except subprocess.CalledProcessError as exc:
-        print((exc.stderr or str(exc)).rstrip(), file=sys.stderr)
-        return 2
+        return emit_error("git_error", (exc.stderr or str(exc)).rstrip(), json_mode=args.json)
     except FileNotFoundError:
-        print("git is not installed or not on PATH\nhint: `whykit history` needs Git to compare revisions", file=sys.stderr)
-        return 2
+        return emit_error(
+            "missing_dependency",
+            "git is not installed or not on PATH\nhint: `whykit history` needs Git to compare revisions",
+            json_mode=args.json,
+        )
     if args.json:
         import json
-        print(json.dumps({
+        emit_machine(json.dumps({
             "contract_version": 1,
             "base": args.base,
             "head": args.head,

@@ -18,8 +18,9 @@ Pick one:
 
 ### `error: unrecognized arguments: --root …` with `new`, `review` or `evidence`
 
-These three commands have subcommands, and `--root` belongs to the parent
-command. Put it **before** the subcommand:
+Older checkouts only accepted `--root` on the parent of these
+three commands. Current versions accept it in either position, so update your
+checkout, or put it **before** the subcommand, which works in every version:
 
 ```bash
 whykit new --root ../my-ledger decision "Ship SSO before audit logs"
@@ -27,11 +28,9 @@ whykit review --root ../my-ledger list --due-days 30
 whykit evidence --root ../my-ledger list --state active
 ```
 
-Every other command takes `--root` anywhere, for example
-`whykit lint --root ../my-ledger`. Inside the vault directory you can leave
-`--root` out entirely.
+Inside the vault directory you can leave `--root` out entirely.
 
-### `not an WhyKit vault` or `no WhyKit vault found` (exit code 2)
+### `not a WhyKit vault` or `no WhyKit vault found` (exit code 2)
 
 WhyKit recognizes a vault by `Home.md` plus a `00-context/` directory. Without
 `--root` it walks up from the current directory looking for them. Either `cd`
@@ -114,16 +113,26 @@ decision log, which is the only change the history check accepts on an accepted
 record. A typo fix counts as a rewrite too; if it really matters, record it in a
 superseding decision.
 
-### `History check requires actions/checkout with fetch-depth: 0`
+### `History check requires actions/checkout with fetch-depth: 0`, `unknown Git revision` or `cannot find the merge base`
 
-The history check needs the pull request's base commit. Set `fetch-depth: 0` on
-`actions/checkout`. See [Running WhyKit in CI](ci.md).
+The history check needs the pull request's base commit and the history between
+it and `HEAD`. Set `fetch-depth: 0` on `actions/checkout`, or run
+`git fetch --unshallow` (or `git fetch origin main`) in a shallow clone. These
+exit 2 with the error code `git_error`. See [Running WhyKit in CI](ci.md).
+
+### `warning: no decision records or review log under … in either revision`
+
+`history` compared the two commits but found nothing to check under `--root`.
+When the vault is a subdirectory of the repository, pass it:
+`whykit history --base origin/main --root path/to/vault`.
 
 ### `whykit history` passed, but I had edited an accepted record
 
 `history` compares two commits (`--base` and `--head`, default `HEAD`).
 Uncommitted edits in the working tree are not part of either. Commit, then run
 it, or let the pre-commit hook and CI do it.
+With the default `--head HEAD` it says so on stderr (`note: … uncommitted
+Markdown change(s) were not checked`).
 
 ## Files and Git
 
@@ -138,6 +147,25 @@ lines to its `.gitignore`:
 .whykit/transactions/
 ```
 
+### `file is read-only; make it writable before WhyKit updates it`
+
+A command that edits the vault (`new`, `review record`, `evidence retire`)
+found a file it must rewrite marked read-only. It stops before writing
+anything, so nothing is half-applied. Make the file writable and rerun.
+
+### `path.case_collision` warning
+
+Two notes differ only by letter case or Unicode normalization
+(`Plan.md` and `plan.md`, or two spellings of `café.md`). Linux keeps both;
+a checkout on macOS or Windows keeps one of them. Rename or merge one.
+
+### Odd characters such as `\u0142` or `->` in the terminal on Windows
+
+A console on a legacy code page (`cp1252`) cannot show every character. Human
+output falls back to ASCII spellings and escapes instead of crashing. JSON,
+DOT and Mermaid output stay UTF-8, so redirect them to a file and read that as
+UTF-8. Setting `PYTHONUTF8=1` gives a UTF-8 console.
+
 ### Where did my snapshot go?
 
 `whykit snapshot --output` and `whykit graph --output` resolve the path relative
@@ -151,6 +179,12 @@ vault. `whykit snapshot --root vault --output .whykit/snapshot.json` writes
 only available through `uv run`, the hook prints a notice and lets the commit
 through. Install a binary (see the first entry on this page). The hook runs the
 `local` profile, which blocks errors but not warnings.
+
+### `whykit-mcp needs the optional MCP extra`
+
+The MCP server ships as an optional extra. From a checkout run
+`uv sync --extra mcp`, then `uv run whykit-mcp --root /path/to/vault`. See the
+[MCP server guide](mcp.md).
 
 ## Questions
 

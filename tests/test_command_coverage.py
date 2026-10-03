@@ -205,8 +205,9 @@ class ReviewTests(LedgerFixture):
         self.assertEqual(call(review.main, "--root", root, "list", "--today", "soon")[0], 2)
         self.assertEqual(call(review.main, "--root", root, "list", "--due-days", "-1")[0], 2)
         self.assertEqual(call(review.main, "--root", root, "record", "D-002", "--reviewer", "R", "--today", "x")[0], 2)
+        # A missing target exits 1 on every command (docs/automation.md).
         code, _, err = call(review.main, "--root", root, "record", "D-999", "--reviewer", "R")
-        self.assertEqual(code, 2)
+        self.assertEqual(code, 1)
         self.assertIn("missing", err)
         code, out, _ = call(review.main, "--root", root, "record", "D-002", "--reviewer", "R", "--today", self.day.isoformat())
         self.assertEqual(code, 0)

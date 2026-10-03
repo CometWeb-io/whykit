@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/adopt-report.schema.json",
+  "title": "WhyKit adoption inventory",
+  "description": "Output of `whykit adopt --json`.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "profile",
+    "source",
+    "vault",
+    "write",
+    "score",
+    "candidates"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "profile": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "vault": {
+      "type": "string"
+    },
+    "write": {
+      "type": "boolean"
+    },
+    "score": {
+      "type": "object",
+      "required": [
+        "files"
+      ],
+      "properties": {
+        "files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "readiness_pct": {
+          "type": "number"
+        },
+        "id_conflicts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Decision IDs claimed more than once, within the import or by the vault already."
+        }
+      },
+      "additionalProperties": true
+    },
+    "scope_note": {
+      "type": "string"
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "assessment",
+          "destination"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "assessment": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "has_front_matter": {
+            "type": "boolean"
+          },
+          "whykit_ready": {
+            "type": "boolean"
+          },
+          "looks_like_decision": {
+            "type": "boolean"
+          },
+          "duplicate_of": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "words": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "ingestion_record": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "migration": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": true
+}

@@ -142,6 +142,9 @@ One asymmetry to know about: `whykit check` reports an unreadable `--base` ref a
 a failed `history` check and exits `1`, not `2`. Either way the build fails; read
 the `history` line of the output to tell a rewritten record from a missing ref.
 
+[Automation](automation.md) lists every error code and its exit code, and
+what `--json` prints in each case.
+
 Treat `2` as an infrastructure failure, not as "the vault has problems". A
 pipeline that confuses the two will eventually report a check that never ran as
 a check that failed, and people will stop reading it.

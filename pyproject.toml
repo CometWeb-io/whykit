@@ -1,28 +1,41 @@
 [build-system]
-requires = ["hatchling"]
+# Exact pins: the same commit must build the same bytes (see docs/releasing.md).
+# hatchling >= 1.27 is required for PEP 639 License-Expression metadata.
+# hatch-fancy-pypi-readme rewrites the README's relative links for PyPI; it is a
+# build-time plugin only and never reaches the installed package.
+requires = ["hatchling==1.32.4", "hatch-fancy-pypi-readme==25.1.0"]
 build-backend = "hatchling.build"
 
 [project]
 name = "whykit"
-dynamic = ["version"]
+dynamic = ["version", "readme"]
 description = "Git-native evidence and decision ledger for teams and AI agents"
-readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 authors = [{ name = "Maciej Zmitrukiewicz", email = "hello@cometweb.io" }]
 maintainers = [{ name = "Maciej Zmitrukiewicz", email = "hello@cometweb.io" }]
-keywords = ["decision-records", "adr", "evidence", "provenance", "knowledge-base", "obsidian", "agents"]
+keywords = [
+  "decision-records", "adr", "decision-log", "evidence", "provenance",
+  "audit-trail", "knowledge-base", "markdown", "git", "obsidian", "agents", "mcp",
+]
+# No "License ::" classifier: PEP 639 supersedes it with the `license`
+# expression above, and PyPI rejects uploads that carry both.
 classifiers = [
   "Development Status :: 3 - Alpha",
+  "Environment :: Console",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
   "Topic :: Documentation",
   "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Software Development :: Version Control :: Git",
+  "Typing :: Typed",
 ]
 dependencies = []
 
@@ -38,9 +51,13 @@ dev = [
   "ruff==0.16.10",
   "zizmor==1.30.1",
 ]
-# Distribution metadata check (`twine check`). Kept out of `dev` so a normal
-# contributor sync stays small; CI's package job opts in with --group dist.
-dist = ["twine==7.0.0"]
+# Release-artifact tooling: distribution metadata check (`twine check`) and the
+# CycloneDX SBOM generator (`cyclonedx-py`). Kept out of `dev` so a normal
+# contributor sync stays small; CI's package job opts in with --only-group dist.
+dist = [
+  "cyclonedx-bom==7.5.0",
+  "twine==7.0.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/CometWeb-io/whykit"
@@ -48,6 +65,7 @@ Documentation = "https://github.com/CometWeb-io/whykit#readme"
 Source = "https://github.com/CometWeb-io/whykit"
 Changelog = "https://github.com/CometWeb-io/whykit/blob/main/CHANGELOG.md"
 Issues = "https://github.com/CometWeb-io/whykit/issues"
+Security = "https://github.com/CometWeb-io/whykit/blob/main/SECURITY.md"
 
 [project.scripts]
 whykit = "whykit.cli:main"
@@ -65,7 +83,35 @@ packages = ["src/whykit"]
 [tool.hatch.build.targets.sdist]
 # The project test suite exercises checkout-only tooling and repository policy
 # files. Keep it in GitHub source checkouts, not in the installable sdist.
-include = ["src/whykit", "schemas", "examples", "README.md", "CHANGELOG.md", "LICENSE", "NOTICE"]
+# Patterns are gitignore-style: an unanchored "README.md" also matches
+# scripts/README.md and docs/media/README.md, so every entry is anchored.
+include = [
+  "/src/whykit",
+  "/schemas",
+  "/examples",
+  "/README.md",
+  "/CHANGELOG.md",
+  "/LICENSE",
+  "/NOTICE",
+]
+
+[tool.hatch.metadata.hooks.fancy-pypi-readme]
+content-type = "text/markdown"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
+path = "README.md"
+
+# PyPI renders the README outside the repository, where relative links and the
+# overview image would 404. Rewrite them to absolute GitHub URLs; anchors (#...)
+# and absolute URLs are left alone. Images go to raw content, links to the
+# rendered GitHub view. scripts/check_dist.py fails the build if one slips by.
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '!\[([^\]]*)\]\((?![a-zA-Z][a-zA-Z0-9+.-]*:|#)([^)\s]+)\)'
+replacement = '![\1](https://raw.githubusercontent.com/CometWeb-io/whykit/main/\2)'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '(?<!!)\[([^\]]*)\]\((?![a-zA-Z][a-zA-Z0-9+.-]*:|#)([^)\s]+)\)'
+replacement = '[\1](https://github.com/CometWeb-io/whykit/blob/main/\2)'
 
 # Dev/CI use Astral uv. Runtime stays dependency-free; the lockfile pins the
 # empty graph so `uv sync --locked` fails closed if someone adds a dependency

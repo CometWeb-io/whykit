@@ -20,9 +20,11 @@ import sys
 from pathlib import Path
 
 from .config import ConfigError, load_config
+from .contract import emit_error
 from .graph import build_graph
-from .lint import DECISION_ID_RE, EVIDENCE_ID_RE, _parse_date, evidence_register, find_vault_root, is_vault_root
+from .lint import DECISION_ID_RE, EVIDENCE_ID_RE, _parse_date, evidence_register, find_vault_root, is_vault_root, path_cache
 from .vault_index import VaultIndex
+from .console import emit_machine
 
 GAP_KINDS = ("no_evidence", "missing_evidence", "retired_evidence", "stale_evidence")
 
@@ -78,6 +80,7 @@ def _evidence_state(
     }
 
 
+@path_cache()
 def build_trace(
     root: Path,
     *,
@@ -215,27 +218,22 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.decision and not DECISION_ID_RE.fullmatch(args.decision):
-        print("--decision must be a D-NNN identifier", file=sys.stderr)
-        return 2
+        return emit_error("invalid_argument", "--decision must be a D-NNN identifier", json_mode=args.json)
     if args.max_age_days is not None and args.max_age_days < 0:
-        print("--max-age-days must be >= 0", file=sys.stderr)
-        return 2
+        return emit_error("invalid_argument", "--max-age-days must be >= 0", json_mode=args.json)
     today = None
     if args.today:
         try:
             today = dt.date.fromisoformat(args.today)
         except ValueError:
-            print(f"--today is not a real ISO date: {args.today}", file=sys.stderr)
-            return 2
+            return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=args.json)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print("no WhyKit vault found", file=sys.stderr)
-        return 2
+        return emit_error("vault_not_found", "no WhyKit vault found", json_mode=args.json)
     try:
         config, _ = load_config(root)
     except ConfigError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+        return emit_error("invalid_config", str(exc), json_mode=args.json)
     report = build_trace(
         root,
         today=today,
@@ -247,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.gaps_only:
         report["decisions"] = [record for record in report["decisions"] if record["live"] and record["gaps"]]
     if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         print(f"Decision traceability — {report['as_of']}")
         for record in report["decisions"]:

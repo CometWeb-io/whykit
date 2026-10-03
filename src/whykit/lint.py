@@ -15,19 +15,22 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import contextvars
 import datetime as dt
 import functools
 import json
+import os
 import re
-import sys
 import unicodedata
 from urllib.parse import unquote
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath
 from collections.abc import Callable
 from typing import Iterable
 
 from .config import CONFIG_FILE, ConfigError, load_config
+from .console import emit_machine
 
 VAULT_MARKERS = ("Home.md", "00-context")
 
@@ -36,12 +39,89 @@ class VaultPathError(ValueError):
     """Raised when a requested lint path escapes the selected vault root."""
 
 
-def _within(root: Path, path: Path) -> bool:
+# ``Path.resolve()`` walks every path component with ``lstat``.  One command
+# resolves the same few thousand paths hundreds of thousands of times (link
+# targets, containment checks, relative paths), which dominated run time on
+# large vaults.  Inside a ``path_cache()`` scope each distinct path is resolved
+# once.  The scope is request-sized on purpose: a long-lived process such as the
+# MCP server must not see a stale answer after the vault changes on disk.
+class _RequestCache:
+    __slots__ = ("realpaths", "relative", "within", "registers")
+
+    def __init__(self) -> None:
+        # Keyed by the path string, not the Path: Windows paths compare
+        # case-insensitively, and a cache must never merge two spellings.
+        self.realpaths: dict[str, Path] = {}
+        self.relative: dict[tuple[str, str], str] = {}
+        self.within: dict[tuple[str, str], bool] = {}
+        # Parsed evidence registers keyed by (path, mtime_ns, size), so a write
+        # inside the scope is still seen.
+        self.registers: dict[tuple[Path, int, int], tuple] = {}
+
+
+_REQUEST: contextvars.ContextVar[_RequestCache | None] = contextvars.ContextVar(
+    "whykit_request_cache", default=None,
+)
+
+
+@contextlib.contextmanager
+def path_cache():
+    """Memoise ``Path.resolve()`` (and register parsing) for one read-only request.
+
+    Re-entrant: a nested scope reuses the outer cache.  Usable as a decorator.
+    """
+    if _REQUEST.get() is not None:
+        yield
+        return
+    token = _REQUEST.set(_RequestCache())
     try:
-        path.resolve().relative_to(root.resolve())
-        return True
+        yield
+    finally:
+        _REQUEST.reset(token)
+
+
+_POSIX = os.name == "posix"
+
+
+def _real(path: Path) -> Path:
+    cache = _REQUEST.get()
+    if cache is None:
+        return path.resolve()
+    key = os.fspath(path)
+    hit = cache.realpaths.get(key)
+    if hit is None:
+        hit = cache.realpaths[key] = _real_uncached(path)
+    return hit
+
+
+def _real_uncached(path: Path) -> Path:
+    # On POSIX, realpath(dir/name) is realpath(dir)/name whenever `name` is a
+    # plain component that is not itself a symlink.  Reusing the cached parent
+    # turns one lstat per path component into one lstat per path.  Anything
+    # else (Windows, relative paths, `.`/`..`, symlinks) takes the full route.
+    if _POSIX and path.is_absolute():
+        name = path.name
+        parent = path.parent
+        if name not in ("", ".", "..") and parent != path and not os.path.islink(path):
+            return _real(parent) / name
+    return path.resolve()
+
+
+def _within(root: Path, path: Path) -> bool:
+    cache = _REQUEST.get()
+    key = (os.fspath(root), os.fspath(path))
+    if cache is not None:
+        hit = cache.within.get(key)
+        if hit is not None:
+            return hit
+    try:
+        _real(path).relative_to(_real(root))
+        inside = True
     except (OSError, ValueError):
-        return False
+        inside = False
+    if cache is not None:
+        cache.within[key] = inside
+    return inside
 
 
 def is_vault_root(path: Path) -> bool:
@@ -82,6 +162,8 @@ OPTIONAL_KEYS = (
     "workstream",
 )
 ALLOWED_STATUS = {"template", "draft", "in_review", "approved", "superseded", "archived"}
+# Records whose reasoning is closed: kept as written, never brought up to date.
+HISTORICAL_STATUSES = frozenset({"superseded", "archived"})
 ALLOWED_TYPE = {
     "strategy",
     "research",
@@ -149,6 +231,11 @@ class Note:
     has_front: bool = False
     front_error: str | None = None
     body_offset: int = 0  # line count, not a character index
+
+    @functools.cached_property
+    def masked(self) -> str:
+        """The text with code spans and fences blanked; offsets match ``text``."""
+        return _mask_code(self.text)
 
     @property
     def body(self) -> str:
@@ -386,10 +473,20 @@ def load_note(path: Path, *, text: str | None = None) -> Note:
 def rel(root: Path, path: Path) -> str:
     # Resolve both sides so macOS /var vs /private/var (and similar aliasing)
     # does not break relative paths or silently fall back to absolutes.
+    cache = _REQUEST.get()
+    key = (os.fspath(root), os.fspath(path))
+    if cache is not None:
+        hit = cache.relative.get(key)
+        if hit is not None:
+            return hit
+    resolved = _real(path)
     try:
-        return path.resolve().relative_to(root.resolve()).as_posix()
+        out = resolved.relative_to(_real(root)).as_posix()
     except ValueError:
-        return path.resolve().as_posix()
+        out = resolved.as_posix()
+    if cache is not None:
+        cache.relative[key] = out
+    return out
 
 
 def add(findings: list[Finding], root: Path, path: Path, line: int | None, level: str, code: str, message: str) -> None:
@@ -508,6 +605,31 @@ def check_front_matter(root: Path, note: Note, findings: list[Finding], today: d
             add(findings, root, note.path, 1, "warning", "date.filename_mismatch", f"filename says {filename_date} but created says {parsed_dates['created']}")
 
 
+class _LineNumbers:
+    """1-based line of a character offset, counted incrementally.
+
+    Same answer as ``text[:offset].count("\\n") + 1``, without rescanning the
+    text from the start for every match of a left-to-right ``finditer``.
+    """
+
+    __slots__ = ("text", "offset", "line")
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.offset = 0
+        self.line = 1
+
+    def at(self, offset: int) -> int:
+        if offset < self.offset:
+            self.offset, self.line = 0, 1
+        self.line += self.text.count("\n", self.offset, offset)
+        self.offset = offset
+        return self.line
+
+
+URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+FACT_CALLOUT_RE = re.compile(r"^> \[!fact\]", re.I)
+DECISION_ID_SECTION_RE = re.compile(r"^## Decision ID\s*$\n+\s*(D-\d{3,})\s*$", re.MULTILINE)
 FENCE_RE = re.compile(r"^(```|~~~).*?^\1", re.MULTILINE | re.DOTALL)
 INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 
@@ -524,6 +646,20 @@ def _link_key(value: str) -> str:
     return unicodedata.normalize("NFC", value).casefold()
 
 
+def _relative_key(root: Path, path: Path) -> str | None:
+    return _relative_key_of(os.fspath(root), os.fspath(path))
+
+
+@functools.lru_cache(maxsize=65536)
+def _relative_key_of(root: str, path: str) -> str | None:
+    # A pure string function (no filesystem access), so a process-wide cache
+    # cannot go stale; link resolution asks for the same few paths repeatedly.
+    try:
+        return _link_key(PurePath(path).relative_to(root).as_posix())
+    except ValueError:
+        return None
+
+
 def _build_index(notes: list[Note]) -> dict[str, set[Path]]:
     index: dict[str, set[Path]] = {}
     for note in notes:
@@ -535,15 +671,30 @@ def _build_index(notes: list[Note]) -> dict[str, set[Path]]:
 Resolver = Callable[[str], "tuple[Path | None, bool]"]
 
 
+@functools.lru_cache(maxsize=65536)
+def _leaves_vault(normalized: str) -> bool:
+    """True when a link target has a `..` component (pure string function)."""
+    return ".." in Path(normalized).parts
+
+
 def _resolve(root: Path, target: str, index: dict[str, set[Path]]) -> tuple[Path | None, bool]:
     normalized = target.strip().replace("\\", "/").lstrip("/")
-    if ".." in Path(normalized).parts:
+    if _leaves_vault(normalized):
         return None, False
-    candidate = root / (normalized if normalized.endswith(".md") else normalized + ".md")
-    if candidate.exists() and _within(root, candidate):
-        return candidate, False
+    relative_target = normalized if normalized.endswith(".md") else normalized + ".md"
     stem = _link_key(normalized.rstrip("/").split("/")[-1].removesuffix(".md"))
     hits = {path for path in index.get(stem, set()) if _within(root, path)}
+    # Match the typed path against real note paths case- and NFC-insensitively,
+    # as Obsidian does. `exists()` alone answers differently per filesystem:
+    # on macOS and Windows it accepts `[[NOTES/readme]]` but hands back the
+    # typed spelling, which is not a node ID; on Linux it misses entirely.
+    wanted = _link_key(relative_target)
+    spelled = [path for path in hits if _relative_key(root, path) == wanted]
+    if len(spelled) == 1:
+        return spelled[0], False
+    candidate = root / relative_target
+    if candidate.exists() and _within(root, candidate):
+        return candidate, False
     if len(hits) == 1:
         return next(iter(hits)), False
     if len(hits) > 1:
@@ -565,10 +716,13 @@ class AttachmentIndex:
     def _names(self) -> dict[str, list[Path]]:
         if self._by_name is None:
             self._by_name = {}
+            # rglob yields root-prefixed paths, so slicing the parts is the
+            # same as relative_to() without re-parsing every path.
+            depth = len(self.root.parts)
             for path in self.root.rglob("*"):
                 if path.suffix.lower() == ".md" or not path.is_file() or not _within(self.root, path):
                     continue
-                if any(part in ATTACHMENT_SKIP_DIRS for part in path.relative_to(self.root).parts[:-1]):
+                if any(part in ATTACHMENT_SKIP_DIRS for part in path.parts[depth:-1]):
                     continue
                 self._by_name.setdefault(_link_key(path.name), []).append(path)
         return self._by_name
@@ -594,15 +748,15 @@ def check_wikilinks(
     attachments: AttachmentIndex | None = None,
     resolve: Resolver | None = None,
 ) -> None:
-    masked = _mask_code(note.text)
+    masked = note.masked
+    lines = _LineNumbers(note.text)
     for match in WIKILINK_RE.finditer(masked):
         target = match.group(1).strip()
         if not target or target.startswith(("http://", "https://")):
             continue
-        line = note.text[: match.start()].count("\n") + 1
+        line = lines.at(match.start())
         is_embed = match.start() > 0 and note.text[match.start() - 1] == "!"
-        normalized_target = target.replace("\\", "/")
-        if ".." in Path(normalized_target).parts:
+        if _leaves_vault(target.replace("\\", "/")):
             add(findings, root, note.path, line, "warning", "wikilink.outside", f"wikilink tries to leave the vault: [[{target}]]")
             continue
         resolved, ambiguous = resolve(target) if resolve else _resolve(root, target, index)
@@ -623,8 +777,19 @@ def check_wikilinks(
                 add(findings, root, note.path, line, "error", "wikilink.missing", f"wikilink does not resolve: [[{target}]]")
 
 
-def check_markdown_links(root: Path, note: Note, findings: list[Finding]) -> None:
-    masked = _mask_code(note.text)
+def check_markdown_links(
+    root: Path,
+    note: Note,
+    findings: list[Finding],
+    exists: Callable[[Path], bool] | None = None,
+) -> None:
+    """Flag local Markdown links that leave the vault or point nowhere.
+
+    *exists* overrides the on-disk check, so a confined view of the vault can
+    treat notes it does not contain exactly like files that do not exist.
+    """
+    masked = note.masked
+    lines = _LineNumbers(note.text)
     for match in MARKDOWN_LINK_RE.finditer(masked):
         kind = "image" if match.group(1) else "link"
         raw = match.group(2).strip()
@@ -634,16 +799,16 @@ def check_markdown_links(root: Path, note: Note, findings: list[Finding]) -> Non
             target = raw[1:raw.index(">")].strip()
         else:
             target = raw.split(None, 1)[0].strip() if raw else ""
-        if not target or target.startswith("#") or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target):
+        if not target or target.startswith("#") or URL_SCHEME_RE.match(target):
             continue
         target = unquote(target.split("#", 1)[0].split("?", 1)[0])
         if not target:
             continue
         candidate = (root / target.lstrip("/")) if target.startswith("/") else (note.path.parent / target)
-        line = note.text[: match.start()].count("\n") + 1
+        line = lines.at(match.start())
         if not _within(root, candidate):
             add(findings, root, note.path, line, "warning", "markdown_link.outside", f"Markdown {kind} leaves the vault: ({target})")
-        elif not candidate.exists():
+        elif not (exists(candidate) if exists else candidate.exists()):
             add(findings, root, note.path, line, "warning", "markdown_link.missing", f"local Markdown {kind} does not exist: ({target})")
 
 
@@ -690,6 +855,27 @@ def evidence_register(root: Path) -> tuple[dict[str, dict[str, str]], dict[str, 
     path = root / "00-context" / "evidence-register.md"
     if not path.exists():
         return {}, {}, []
+    cache = _REQUEST.get()
+    if cache is None:
+        return _parse_evidence_register(path)
+    try:
+        stat = path.stat()
+    except OSError:
+        return _parse_evidence_register(path)
+    key = (_real(path), stat.st_mtime_ns, stat.st_size)
+    parsed = cache.registers.get(key)
+    if parsed is None:
+        parsed = cache.registers[key] = _parse_evidence_register(path)
+    active, retired, occurrences = parsed
+    # Callers own what they get back; never hand out the cached containers.
+    return (
+        {key: dict(row) for key, row in active.items()},
+        {key: dict(row) for key, row in retired.items()},
+        list(occurrences),
+    )
+
+
+def _parse_evidence_register(path: Path) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]], list[tuple[str, int]]]:
     active: dict[str, dict[str, str]] = {}
     retired: dict[str, dict[str, str]] = {}
     occurrences: list[tuple[str, int]] = []
@@ -765,6 +951,9 @@ def check_evidence_register(root: Path, findings: list[Finding], today: dt.date)
         if value and _parse_date(value) is None:
             add(findings, root, path, int(row["line"]), "error", "evidence.retired_date", f"{eid} has invalid retired-on date `{value}`")
         replaced = row.get("replaced_by", "").strip()
+        # `whykit evidence retire` writes an em dash when nothing replaced the source.
+        if replaced in {"\u2014", "-"}:
+            replaced = ""
         if replaced:
             if not EVIDENCE_ID_RE.fullmatch(replaced):
                 add(findings, root, path, int(row["line"]), "error", "evidence.replaced_by_format", f"{eid} has invalid replacement ID `{replaced}`")
@@ -778,12 +967,19 @@ def check_evidence_ids(root: Path, notes: list[Note], findings: list[Finding]) -
     for note in notes:
         if note.path == register:
             continue
+        # A superseded or archived record is history: it may not be edited, and
+        # citing what was believed at the time is exactly what it should do.
+        # Warning on it would leave a strict gate red after the normal
+        # supersede-then-retire workflow, with no allowed edit that clears it.
+        historical = str(note.front.get("status") or "").strip() in HISTORICAL_STATUSES
         for sid in _as_list(note.front.get("source_ids")):
             if not EVIDENCE_ID_RE.fullmatch(sid):
                 add(findings, root, note.path, 1, "error", "evidence.id_format", f"source_ids contains invalid evidence ID `{sid}`")
             elif sid in active:
                 continue
             elif sid in retired:
+                if historical:
+                    continue
                 add(findings, root, note.path, 1, "warning", "evidence.retired", f"source_ids cites retired evidence {sid}; preserve historical records but review current claims")
             else:
                 add(findings, root, note.path, 1, "error", "evidence.missing", f"source_ids cites {sid}, but the register has no populated active or retired row for it")
@@ -799,7 +995,7 @@ def _decision_own_id(note: Note) -> str | None:
     m = DECISION_ID_RE.search(title)
     if m:
         return m.group(0)
-    m = re.search(r"^## Decision ID\s*$\n+\s*(D-\d{3,})\s*$", note.text, re.MULTILINE)
+    m = DECISION_ID_SECTION_RE.search(note.text)
     return m.group(1) if m else None
 
 
@@ -847,7 +1043,7 @@ def decision_log_rows(root: Path) -> list[dict[str, str | int]]:
     return rows
 
 
-def check_decision_log(root: Path, notes: list[Note], findings: list[Finding]) -> None:
+def check_decision_log(root: Path, notes: list[Note], findings: list[Finding], resolve: Resolver | None = None) -> None:
     path = root / "06-decisions" / "decision-log.md"
     if not path.exists():
         return
@@ -864,7 +1060,11 @@ def check_decision_log(root: Path, notes: list[Note], findings: list[Finding]) -
     log_seen: dict[str, int] = {}
     row_ids: set[str] = set()
     status_map = {"draft": "proposed", "in_review": "proposed", "approved": "accepted", "superseded": "superseded", "archived": "archived"}
-    index = _build_index(notes)
+    index = _build_index(notes) if resolve is None else {}
+    # First note wins for a resolved path, exactly like the linear scan it replaces.
+    notes_by_real: dict[Path, Note] = {}
+    for note in notes:
+        notes_by_real.setdefault(_real(note.path), note)
     for row in rows:
         did = str(row["id"])
         line = int(row["line"])
@@ -876,14 +1076,14 @@ def check_decision_log(root: Path, notes: list[Note], findings: list[Finding]) -
         if not target:
             add(findings, root, path, line, "error", "decision_log.record", f"{did} has no wikilinked decision record")
             continue
-        resolved, ambiguous = _resolve(root, target, index)
+        resolved, ambiguous = _resolve(root, target, index) if resolve is None else resolve(target)
         if ambiguous:
             add(findings, root, path, line, "error", "decision_log.ambiguous", f"{did} record link [[{target}]] is ambiguous")
             continue
         if resolved is None:
             add(findings, root, path, line, "error", "decision_log.missing_record", f"{did} points to missing decision record [[{target}]]")
             continue
-        target_note = next((n for n in notes if n.path.resolve() == resolved.resolve()), None)
+        target_note = notes_by_real.get(_real(resolved))
         target_id = _decision_own_id(target_note) if target_note else None
         if target_id != did:
             add(findings, root, path, line, "error", "decision_log.id_mismatch", f"log row {did} points to a record whose decision_id is {target_id or 'missing'}")
@@ -970,10 +1170,10 @@ def check_fact_evidence(
     `known_evidence` is every active or retired register ID; None skips the
     existence check (callers without a register view).
     """
-    lines = _mask_code(note.text).splitlines()
+    lines = note.masked.splitlines()
     i = 0
     while i < len(lines):
-        if re.match(r"^> \[!fact\]", lines[i], re.I):
+        if FACT_CALLOUT_RE.match(lines[i]):
             start = i
             block = [lines[i]]
             i += 1
@@ -997,6 +1197,27 @@ def check_fact_evidence(
 AGENTS_TODO_RE = re.compile(r"(?m)^\s*(?:[-*]\s*|\d+[.)]\s*|#{1,6}\s*)?TODO\b[ :\u2014-]")
 
 
+def check_path_collisions(root: Path, notes: list[Note], findings: list[Finding]) -> None:
+    """Paths that only a case-sensitive, normalization-sensitive filesystem keeps apart.
+
+    A Linux checkout can hold `notes/Plan.md` and `notes/plan.md` (or an NFC and
+    an NFD spelling of `café.md`); Git on macOS and Windows checks out only one.
+    """
+    groups: dict[str, list[Path]] = {}
+    for note in notes:
+        key = _relative_key(root, note.path)
+        if key is not None:
+            groups.setdefault(key, []).append(note.path)
+    for paths in groups.values():
+        if len(paths) < 2:
+            continue
+        ordered = sorted(paths, key=lambda path: path.relative_to(root).as_posix())
+        first = ordered[0].relative_to(root).as_posix()
+        for path in ordered[1:]:
+            add(findings, root, path, None, "warning", "path.case_collision",
+                f"path differs from {first} only by case or Unicode normalization; macOS and Windows checkouts keep one of them")
+
+
 def check_agents_configured(root: Path, findings: list[Finding]) -> None:
     """The agent contract ships with blanks on purpose. Unfilled, it is worse than absent.
 
@@ -1009,8 +1230,9 @@ def check_agents_configured(root: Path, findings: list[Finding]) -> None:
             "no AGENTS.md — agents working here have no written contract")
         return
     text = path.read_text(encoding="utf-8")
+    numbers = _LineNumbers(text)
     for match in AGENTS_TODO_RE.finditer(_mask_code(text)):
-        line = text[: match.start()].count("\n") + 1
+        line = numbers.at(match.start())
         add(findings, root, path, line, "warning", "agents.unconfigured",
             "AGENTS.md still has an unanswered TODO — adopters must fill these before trusting the contract")
 
@@ -1047,11 +1269,12 @@ def check_config(root: Path, findings: list[Finding]) -> None:
         add(findings, root, path, 1, "error", "config.invalid", str(exc))
 
 
-def check_review_log(root: Path, notes: list[Note], findings: list[Finding]) -> None:
+def check_review_log(root: Path, notes: list[Note], findings: list[Finding], resolve: Resolver | None = None) -> None:
     path = root / "00-context" / "review-log.md"
     if not path.exists():
         return
-    note = next((item for item in notes if item.path.resolve() == path.resolve()), load_note(path))
+    real = _real(path)
+    note = next((item for item in notes if _real(item.path) == real), None) or load_note(path)
     lines = note.text.splitlines()
     header = ["date", "target", "reviewer", "outcome", "previous review", "next review", "note"]
     # Compare cells, not the raw line: Markdown formatters pad table columns.
@@ -1065,7 +1288,8 @@ def check_review_log(root: Path, notes: list[Note], findings: list[Finding]) -> 
     if header_idx is None or header_idx + 1 >= len(lines):
         add(findings, root, path, None, "error", "review_log.table", "review log table is missing or malformed")
         return
-    index = _build_index(notes)
+    if resolve is None:
+        resolve = functools.partial(_resolve, root, index=_build_index(notes))
     i = header_idx + 2
     while i < len(lines) and lines[i].lstrip().startswith("|"):
         cells = _split_table_row(lines[i])
@@ -1087,7 +1311,7 @@ def check_review_log(root: Path, notes: list[Note], findings: list[Finding]) -> 
         if not match:
             add(findings, root, path, line_no, "error", "review_log.target", "review event target must be a wikilink")
         else:
-            resolved, ambiguous = _resolve(root, match.group(1).strip(), index)
+            resolved, ambiguous = resolve(match.group(1).strip())
             if resolved is None or ambiguous:
                 add(findings, root, path, line_no, "error", "review_log.target", "review event target is missing or ambiguous")
         i += 1
@@ -1098,15 +1322,15 @@ def check_orphans(root: Path, notes: list[Note], findings: list[Finding], resolv
     if resolve is None:
         resolve = functools.partial(_resolve, root, index=_build_index(notes))
     for note in notes:
-        for match in WIKILINK_RE.finditer(_mask_code(note.text)):
+        for match in WIKILINK_RE.finditer(note.masked):
             resolved, ambiguous = resolve(match.group(1).strip())
             if resolved and not ambiguous:
-                linked.add(resolved.resolve())
+                linked.add(_real(resolved))
     for note in notes:
         r = Path(rel(root, note.path))
         if r.name in exempt_names or "templates" in r.parts:
             continue
-        if note.path.resolve() not in linked:
+        if _real(note.path) not in linked:
             add(findings, root, note.path, None, "warning", "note.orphan", "nothing links to this note — add it to Home.md or a workstream map")
 
 
@@ -1148,10 +1372,11 @@ def check_hub_links(root: Path, notes: list[Note], findings: list[Finding]) -> N
 
 
 def _text_files_for_secret_scan(root: Path) -> Iterable[Path]:
+    depth = len(root.parts)
     for p in root.rglob("*"):
         if not p.is_file() or not _within(root, p):
             continue
-        if any(part in SECRET_SKIP_DIRS for part in p.relative_to(root).parts):
+        if any(part in SECRET_SKIP_DIRS for part in p.parts[depth:]):
             continue
         if p.name.startswith(".env") or p.suffix.lower() in TEXT_SECRET_EXTENSIONS:
             yield p
@@ -1200,8 +1425,9 @@ def check_secrets(root: Path, findings: list[Finding]) -> None:
             )
             continue
         for label, pattern in SECRET_PATTERNS:
+            numbers = _LineNumbers(text)
             for match in pattern.finditer(text):
-                line = text[: match.start()].count("\n") + 1
+                line = numbers.at(match.start())
                 add(findings, root, path, line, "error", "secret.detected", f"looks like a {label} — keep locations, never secret values")
 
 
@@ -1229,14 +1455,16 @@ def collect_markdown(root: Path, paths: list[str]) -> list[Path]:
             else:
                 raise VaultPathError(f"not a Markdown file or directory: {raw}")
         return out
+    depth = len(root.parts)
     return sorted(
         p for p in root.rglob("*.md")
         if p.is_file()
         and _within(root, p)
-        and not any(part in CONTENT_SKIP_DIRS for part in p.relative_to(root).parts)
+        and not any(part in CONTENT_SKIP_DIRS for part in p.parts[depth:])
     )
 
 
+@path_cache()
 def lint(
     root: Path,
     paths: list[str] | None = None,
@@ -1255,8 +1483,8 @@ def lint(
     all_files = [note.path for note in all_notes]
     if paths:
         files = collect_markdown(root, paths)
-        selected = {path.resolve() for path in files}
-        notes = [note for note in all_notes if note.path.resolve() in selected]
+        selected = {_real(path) for path in files}
+        notes = [note for note in all_notes if _real(note.path) in selected]
     else:
         files = all_files
         notes = all_notes
@@ -1266,22 +1494,33 @@ def lint(
     attachments = AttachmentIndex(root)
     active_evidence, retired_evidence, _ = evidence_register(root)
     known_evidence = set(active_evidence) | set(retired_evidence)
+    link_exists: Callable[[Path], bool] | None = None
+    if getattr(index_model, "confined", False):
+        def _confined_exists(candidate: Path) -> bool:
+            # A confined index hides some notes; a link to one must look the
+            # same as a link to a file that does not exist.
+            if candidate.suffix.lower() == ".md":
+                return index_model.note_for(candidate) is not None
+            return candidate.exists()
+
+        link_exists = _confined_exists
 
     for note in notes:
         check_front_matter(root, note, findings, today)
         # The index memoises link resolution: a vault repeats the same targets
         # many times, and each uncached lookup costs several filesystem calls.
         check_wikilinks(root, note, index, findings, attachments, index_model.resolve_link)
-        check_markdown_links(root, note, findings)
+        check_markdown_links(root, note, findings, link_exists)
         check_fact_evidence(root, note, findings, known_evidence)
     check_evidence_register(root, findings, today)
     check_evidence_ids(root, notes, findings)
     check_decision_ids(root, notes, findings)
-    check_decision_log(root, all_notes, findings)
+    check_decision_log(root, all_notes, findings, index_model.resolve_link)
     check_decision_review(root, notes, findings)
     if not paths:
         check_config(root, findings)
-        check_review_log(root, all_notes, findings)
+        check_path_collisions(root, all_notes, findings)
+        check_review_log(root, all_notes, findings, index_model.resolve_link)
         check_agents_configured(root, findings)
     if orphans and not paths:
         check_orphans(root, notes, findings, index_model.resolve_link)
@@ -1336,31 +1575,32 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-secrets", action="store_true", help="skip secret scan")
     parser.add_argument("--today", help="evaluate review dates as of this ISO date instead of today")
     args = parser.parse_args(argv)
+    from .contract import emit_error, vault_not_found
 
     as_of = None
     if args.today:
         as_of = _parse_date(args.today)
         if as_of is None:
-            print(f"--today is not a real ISO date: {args.today}", file=sys.stderr)
-            return 2
+            return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=args.json)
 
     root, paths, note = resolve_root(args.root, list(args.paths))
     if not is_vault_root(root):
-        from .messages import no_vault
-        print(no_vault(args.root), file=sys.stderr)
-        return 2
+        return vault_not_found(args.root, json_mode=args.json)
 
     try:
         files, findings = lint(root, paths, orphans=not args.no_orphans, secrets=not args.no_secrets, today=as_of)
     except VaultPathError as exc:
-        print(str(exc), file=sys.stderr)
-        print(f"hint: paths are relative to the vault root ({root}); lint checks .md files and directories", file=sys.stderr)
-        return 2
+        return emit_error(
+            "invalid_argument",
+            str(exc),
+            hint=f"hint: paths are relative to the vault root ({root}); lint checks .md files and directories",
+            json_mode=args.json,
+        )
     errors = [f for f in findings if f.level == "error"]
     warnings = [f for f in findings if f.level == "warning"]
 
     if args.json:
-        print(json.dumps({
+        emit_machine(json.dumps({
             "contract_version": 1,
             "root": str(root),
             "files": len(files),

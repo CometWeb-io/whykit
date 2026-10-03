@@ -3,15 +3,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
-from .messages import print_no_vault
+from .contract import emit_error, vault_not_found
 from .context import build_context
-from .lint import find_vault_root, is_vault_root
+from .lint import find_vault_root, is_vault_root, path_cache
 from .query import query_vault
 from .vault_index import VaultIndex
+from .console import emit_machine
 
 PACK_FORMAT = "whykit.context-bundle/v1"
 
@@ -63,6 +63,19 @@ def _allowed(context: dict[str, Any], allowed: set[str] | None) -> bool:
     return level in allowed
 
 
+def _record_key(context: dict[str, Any]) -> str:
+    """Identify the record a resolved context describes, however it was named."""
+    if context.get("kind") == "evidence":
+        evidence = context.get("evidence")
+        if isinstance(evidence, dict) and evidence.get("id"):
+            return f"evidence:{evidence['id']}"
+    record = context.get("record")
+    if isinstance(record, dict) and record.get("path"):
+        return f"document:{record['path']}"
+    return f"target:{context.get('target')}"
+
+
+@path_cache()
 def build_pack(
     root: Path,
     *,
@@ -73,6 +86,7 @@ def build_pack(
     canonical_only: bool = False,
     agent: str | None = None,
     allowed_sensitivities: set[str] | None = None,
+    vault: VaultIndex | None = None,
 ) -> dict[str, Any]:
     """Assemble a bounded bundle of contexts for *targets* and/or *query*.
 
@@ -83,7 +97,7 @@ def build_pack(
     """
     explicit = [value.strip() for value in (targets or []) if value.strip()]
     selected: list[tuple[str, str]] = [(target, "explicit") for target in explicit]
-    vault = VaultIndex.load(root)
+    vault = vault or VaultIndex.load(root)
 
     if query:
         result = query_vault(
@@ -97,25 +111,26 @@ def build_pack(
         selected.extend((item["path"], "query") for item in result["results"])
 
     # Preserve explicit ordering, then query ranking, while preventing the same
-    # record from silently consuming the context budget twice.
+    # record from silently consuming the context budget twice. A record can be
+    # named more than one way (D-002, its path, its stem, a query hit), so
+    # duplicates are detected on the resolved record, not on the spelling.
     unique: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for target, origin in selected:
-        key = target.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append((target, origin))
-        if len(unique) >= max_docs:
-            break
-
+    seen_targets: set[str] = set()
+    seen_records: set[str] = set()
     contexts: list[dict[str, Any]] = []
     missing: list[dict[str, str]] = []
     evidence_by_id: dict[str, dict[str, Any]] = {}
     remaining = max_chars
     used = 0
 
-    for target, origin in unique:
+    for target, origin in selected:
+        if len(unique) >= max_docs:
+            break
+        key = target.casefold()
+        if key in seen_targets:
+            continue
+        seen_targets.add(key)
+
         allowance = max(0, remaining)
         context = build_context(
             root,
@@ -127,12 +142,19 @@ def build_pack(
         if context.get("exists") and not _allowed(context, allowed_sensitivities):
             context = {"exists": False, "ambiguous": False}
         if not context.get("exists"):
+            unique.append((target, origin))
             missing.append({
                 "target": target,
                 "origin": origin,
                 "reason": "ambiguous" if context.get("ambiguous") else "missing",
             })
             continue
+
+        record_key = _record_key(context)
+        if record_key in seen_records:
+            continue
+        seen_records.add(record_key)
+        unique.append((target, origin))
 
         content = str(context.get("content") or "")
         used += len(content)
@@ -242,21 +264,18 @@ def main(argv: list[str] | None = None) -> int:
         help="stable agent preamble (does not change the vault format)",
     )
     args = parser.parse_args(argv)
+    json_mode = args.format == "json"
 
     if not args.targets and not args.query:
-        print("provide at least one target or --query", file=sys.stderr)
-        return 2
+        return emit_error("usage", "provide at least one target or --query", json_mode=json_mode)
     if args.max_docs < 1:
-        print("--max-docs must be >= 1", file=sys.stderr)
-        return 2
+        return emit_error("invalid_argument", "--max-docs must be >= 1", json_mode=json_mode)
     if args.max_chars < 0:
-        print("--max-chars must be >= 0", file=sys.stderr)
-        return 2
+        return emit_error("invalid_argument", "--max-chars must be >= 0", json_mode=json_mode)
 
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print_no_vault(args.root)
-        return 2
+        return vault_not_found(args.root, json_mode=json_mode)
 
     report = build_pack(
         root,
@@ -270,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.format == "markdown":
         print(_markdown(report), end="")
     else:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
     return 1 if report["missing"] else 0
 
 

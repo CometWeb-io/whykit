@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/snapshot-verify.schema.json",
+  "title": "WhyKit snapshot comparison",
+  "description": "Output of `whykit verify-snapshot --json`.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "baseline_snapshot_id",
+    "current_snapshot_id",
+    "matches",
+    "content_matches",
+    "health_changed",
+    "health_delta",
+    "added",
+    "removed",
+    "changed",
+    "metadata_changed"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "baseline_snapshot_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "current_snapshot_id": {
+      "type": "string"
+    },
+    "matches": {
+      "type": "boolean"
+    },
+    "content_matches": {
+      "type": "boolean"
+    },
+    "health_changed": {
+      "type": "boolean"
+    },
+    "health_delta": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "before",
+          "after"
+        ],
+        "properties": {},
+        "additionalProperties": true
+      }
+    },
+    "added": {
+      "type": "array",
+      "items": {}
+    },
+    "removed": {
+      "type": "array",
+      "items": {}
+    },
+    "changed": {
+      "type": "array",
+      "items": {}
+    },
+    "metadata_changed": {
+      "type": "array",
+      "items": {}
+    },
+    "baseline_summary": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "current_summary": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

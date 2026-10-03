@@ -5,11 +5,11 @@ import argparse
 import datetime as dt
 import json
 import re
-import sys
 from pathlib import Path
 
-from .messages import print_no_vault
+from .contract import CONTRACT_VERSION, emit_error, vault_not_found
 from .lint import (
+    path_cache,
     _split_table_row,
     decision_log_rows,
     evidence_register,
@@ -19,6 +19,7 @@ from .lint import (
     rel,
 )
 from .vault_index import VaultIndex
+from .console import emit_machine
 
 
 def _summary(body: str) -> str:
@@ -57,6 +58,28 @@ def _as_list(value: object) -> list[str]:
     return [str(value)]
 
 
+_H1_RE = re.compile(r"^#[ \t]+(.+?)[ \t#]*$", re.MULTILINE)
+
+
+def _vault_name(root: Path, index: VaultIndex) -> str:
+    """Name the vault after its README, never after the file name itself.
+
+    A README without a front-matter title (the one `whykit init` writes) or
+    with the placeholder title "README" would otherwise label the Explorer
+    "README". Fall back to its first heading, then to the directory name.
+    """
+    note = index.note_for(root / "README.md")
+    if note is not None:
+        title = str(note.front.get("title") or "").strip()
+        if title and title.casefold() != "readme":
+            return title
+        heading = _H1_RE.search(note.body)
+        if heading and heading.group(1).strip().casefold() != "readme":
+            return heading.group(1).strip()
+    return root.name or "WhyKit vault"
+
+
+@path_cache()
 def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
     """Build the Explorer vault.json payload from the canonical Python parser."""
     root = root.resolve()
@@ -135,8 +158,14 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
             row["supersedes"] = doc.get("supersedes")
             if not row.get("recordId"):
                 row["recordId"] = doc["id"]
+    # The first row that supersedes an ID wins, as the old per-row scan did.
+    first_successor: dict[str, dict] = {}
+    for other in decisions:
+        predecessor = other.get("supersedes")
+        if predecessor is not None:
+            first_successor.setdefault(predecessor, other)
     for row in decisions:
-        newer = next((other for other in decisions if other.get("supersedes") == row["id"]), None)
+        newer = first_successor.get(row["id"])
         if newer:
             row["supersededBy"] = newer["id"]
 
@@ -185,8 +214,9 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
         ],
     }
 
-    vault_name = next((doc["title"] for doc in docs if doc["id"] == "README"), "WhyKit vault")
+    vault_name = _vault_name(root, index)
     return {
+        "contract_version": CONTRACT_VERSION,
         "generatedAt": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "vaultName": vault_name,
         "docs": docs,
@@ -208,21 +238,29 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print_no_vault(args.root)
-        return 2
-    today = dt.date.fromisoformat(args.today) if args.today else None
+        return vault_not_found(args.root, json_mode=True)
+    today = None
+    if args.today:
+        try:
+            today = dt.date.fromisoformat(args.today)
+        except ValueError:
+            return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=True)
     payload = build_explorer_index(root, today=today)
     if payload["lint"]["errors"] > 0:
-        print(
-            f"Vault has {payload['lint']['errors']} lint error(s); Explorer index not generated.",
-            file=sys.stderr,
+        details = "\n".join(
+            f"- {item['path']}: {item['message']}"
+            for item in payload["lint"]["findings"]
+            if item["level"] == "error"
         )
-        for item in payload["lint"]["findings"]:
-            if item["level"] == "error":
-                print(f"- {item['path']}: {item['message']}", file=sys.stderr)
-        return 1
+        summary = f"Vault has {payload['lint']['errors']} lint error(s); Explorer index not generated."
+        return emit_error(
+            "vault_invalid",
+            summary + ("\n" + details if details else ""),
+            json_hint="run `whykit lint` to see every finding",
+            json_mode=True,
+        )
     # JSON escapes preserve Unicode content without requiring a UTF-8 console.
-    print(json.dumps(payload, ensure_ascii=True, indent=2))
+    emit_machine(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0
 
 

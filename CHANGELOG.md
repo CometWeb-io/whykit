@@ -9,6 +9,38 @@ CLI and the lint rule codes.
 
 ### Added
 
+- A machine contract for every command that writes JSON: stdout holds exactly
+  one document, success and failure alike carry `contract_version`, and a
+  failure is an error object with a stable `code`, a `message` and a `hint`.
+  Error codes are listed in `whykit.contract.ERROR_CODES`, and every command's
+  output has a JSON Schema in `schemas/` (19 new schemas, checked by the test
+  suite). See [Automation](docs/automation.md) for exit codes and the stability
+  policy.
+- New lint warning `path.case_collision`: two notes whose paths differ only by
+  letter case or Unicode normalization, which a macOS or Windows checkout
+  cannot keep apart.
+- MCP server: `trace` and `backlinks` tools, read-only record resources, two
+  prompts (summarize a decision, list decisions with evidence gaps), and the
+  server version in its handshake. Every failure, including an argument the
+  SDK rejects against the input schema, returns the same JSON error body.
+- `adopt` reports decision IDs claimed twice, within the import or by the
+  vault already (`score.id_conflicts` and the migration report).
+- `--root` is accepted after a nested action as well as before it
+  (`whykit new decision "Title" --root vault`).
+- Packaging: PEP 639 licence metadata, an exactly pinned build backend,
+  reproducible archives under `SOURCE_DATE_EPOCH`, `scripts/check_dist.py`
+  (archive contents, metadata, byte-identical rebuilds, SBOM contents), and a
+  CycloneDX SBOM of a clean install. See [Releasing](docs/releasing.md).
+- `scripts/bench.py`, a deterministic synthetic vault generator and
+  [Performance](docs/performance.md), with timing budgets and output digests
+  in the test suite.
+- Explorer: a README, ESLint, a Playwright end-to-end suite (desktop and
+  mobile, with axe accessibility checks) run against static builds, and a
+  supersession chain on decision pages that walks back to the first decision
+  and forward to the current one.
+- CI runs the suite and the example vaults on Windows, including a legacy
+  `cp1252` console, and runs the Explorer end-to-end suite as an optional job.
+
 - `whykit trace` follows every decision to the evidence it cites, including
   evidence inherited through supersession, and flags missing, retired and stale
   sources. `--gaps-only --strict` turns it into a CI gate; the staleness window
@@ -42,6 +74,42 @@ CLI and the lint rule codes.
 
 ### Changed
 
+- **BREAKING:** `whykit rules --json` prints an object,
+  `{"contract_version": 1, "count": N, "rules": [...]}`, instead of a bare
+  array. `rules <code> --json` adds `contract_version`.
+- **BREAKING:** `evidence retire` and `review record` exit 1 instead of 2 when
+  the evidence ID or record they name does not exist (error code `not_found`),
+  matching the read commands, which report a missing target with exit 1.
+- **BREAKING:** `new` exits 1 instead of 2 when the vault has no evidence
+  register or decision log to append to (error code `vault_invalid`, with a
+  hint to restore the file). `explorer-index` on a vault with lint errors still
+  exits 1 and now prints the `vault_invalid` error object.
+- JSON, DOT and Mermaid output is always UTF-8, whatever the console encoding.
+  Human output on an ASCII or legacy code-page console falls back to ASCII
+  spellings and escapes instead of failing with `UnicodeEncodeError`.
+- Large vaults are much faster: on a 5,000-note vault `lint`, `status`,
+  `check` and `explorer-index` take about 1.5 s, `context` and `pack` about 1 s
+  (from 108 s, 65 s, 125 s, 78 s, 163 s and 675 s). Output is unchanged.
+- `query --type decision` (or any `--type`) no longer lists the template for
+  that type; ask for `--status template` to find templates.
+- `status` counts only real decision records; the decision log and the
+  decision template are no longer counted as decisions.
+- `evidence retire` says how many references are on live records and how many
+  are on superseded or archived ones.
+- `check` lists the findings that fail the gate.
+- `history` warns on stderr when it found no decision records under `--root`,
+  and when `--head HEAD` leaves uncommitted Markdown edits unchecked.
+- `pack` packs a record once even when it is named several ways (an ID, a
+  path, a stem, a query hit).
+- The Explorer names a vault after its README title or first heading, never
+  "README"; vaults created by `init --minimal` get the title "Company knowledge
+  vault".
+- `init` prints the bare `whykit lint` command as its next step when WhyKit is
+  installed as a tool, and `uv run whykit` only from a source checkout.
+- `whykit-mcp` without the MCP extra prints how to install it and exits 2.
+- The release workflow builds and checks in one job and publishes, still only
+  from a version tag, exactly the artifacts that job checked.
+
 - `whykit lint <path>` exits 2 for a path that does not exist, escapes the
   vault, or is not Markdown, instead of linting zero files and reporting
   "clean".
@@ -60,6 +128,29 @@ CLI and the lint rule codes.
   Results are unchanged; large vaults are noticeably faster.
 
 ### Fixed
+
+- `whykit history` checked the wrong thing in several cases: a record with a
+  non-ASCII file name escaped the check (Git C-quoted the name; paths are now
+  read NUL-separated), a `status:` line in the body could stand in for the
+  front matter, `Approved` in another case was not recognised, a vault in a
+  subdirectory was missed when run from inside it, and a non-UTF-8 locale
+  could crash it. A shallow clone with no merge base now gets a hint to fetch
+  full history.
+- `evidence.retired` is no longer reported on superseded or archived records,
+  which must not be rewritten; and the `—` that `evidence retire` writes when
+  nothing replaced a source no longer fails lint.
+- A wikilink spelled with a different case or Unicode normalization than the
+  note's path resolves to the real note on every operating system, instead of
+  resolving on macOS and Windows and failing on Linux.
+- Rewriting a CRLF file keeps it CRLF.
+- `adopt` stages short but structured ADRs instead of discarding them as
+  stubs, skips binary files named `.md`, tolerates a byte-order mark, and
+  stages each batch atomically, so an interrupted run never leaves a half
+  batch that a later run picks up.
+- MCP tools answer from a view of the vault in which records above the
+  sensitivity ceiling do not exist, so a hidden record can no longer show up
+  as an ambiguous link, a backlink, a duplicate decision ID or a lint finding.
+- Explorer accessibility violations reported by axe.
 
 - `review record --today` with a past date can no longer move `last_updated`
   backwards (which produced a lint error), and a review dated before the record
@@ -82,6 +173,13 @@ CLI and the lint rule codes.
   `whykit trace --strict` passes on the example.
 
 ### Security
+
+- A change that would rewrite a file marked read-only is refused before any
+  file is written (error code `io_error`), instead of silently replacing it
+  on POSIX or failing halfway on Windows.
+- The release workflow's publish job downloads only the distributions the
+  build job checked; the build backend and its plugins are pinned exactly, and
+  the SBOM tool is pinned in the release tooling group.
 
 - MCP targets are validated before touching the filesystem: absolute paths,
   URLs, `~`, `.`/`..` segments and control characters are rejected, and

@@ -46,6 +46,8 @@ export interface ReviewRow {
 }
 export interface Finding { path: string; line?: number | null; level: "error" | "warning"; code: string; message: string; }
 export interface VaultIndex {
+  /** Machine contract version (see docs/automation.md); absent in indexes built by older releases. */
+  contract_version?: number;
   generatedAt: string;
   vaultName: string;
   docs: VaultDoc[];

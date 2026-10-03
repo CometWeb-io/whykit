@@ -7,20 +7,22 @@ in sync.
 from __future__ import annotations
 
 import argparse
+import errno
 import datetime as dt
 import json
 import re
-import sys
 import unicodedata
 from pathlib import Path
 
-from .messages import parse_iso_date, print_no_vault
-from .io import apply_transaction, atomic_write_text, safe_vault_target, vault_mutation_lock
+from .contract import describe_os_error, emit_error, vault_not_found
+from .messages import parse_iso_date
+from .io import apply_transaction, atomic_write_text, ensure_writable, safe_vault_target, vault_mutation_lock
 from .config import ConfigError, load_config
 from .lint import (
     DECISION_ID_RE, EVIDENCE_ID_RE, _split_table_row, decision_log_rows, evidence_register,
     find_vault_root, is_vault_root, load_note,
 )
+from .console import emit_machine
 
 DECISION_STATUS_TO_LOG = {
     "draft": "proposed",
@@ -284,7 +286,7 @@ Why this option, given the evidence and constraints?
 '''
         log = safe_vault_target(vault, "06-decisions/decision-log.md", create_parents=False)
         if not log.exists():
-            raise FileNotFoundError(log)
+            raise FileNotFoundError(errno.ENOENT, "the decision log is missing", str(log))
         log_before = log.read_text(encoding="utf-8")
         row = (
             f"| {decision_id} | {_table_cell(title)} | {today.isoformat()} | {_table_cell(owner)} | "
@@ -335,7 +337,7 @@ def create_evidence(
         evidence_id = _next_id(_existing_evidence_ids(vault), "E")
         register = safe_vault_target(vault, "00-context/evidence-register.md", create_parents=False)
         if not register.exists():
-            raise FileNotFoundError(register)
+            raise FileNotFoundError(errno.ENOENT, "the evidence register is missing", str(register))
         row = "| " + " | ".join(
             _table_cell(value)
             for value in (evidence_id, source, kind, source_date, accessed_date, location, claims)
@@ -425,6 +427,9 @@ def create_note(
         if path.exists():
             raise FileExistsError(path)
         map_path = _resolve_link_from(vault, link_from) if link_from else None
+        if map_path:
+            # Fail before the note exists rather than half-way through.
+            ensure_writable(map_path)
         map_before = map_path.read_text(encoding="utf-8") if map_path else None
         body = f'''---
 title: {_yaml_string(title)}
@@ -514,13 +519,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     vault = _vault(args.root)
     if vault is None:
-        print_no_vault(args.root)
-        return 2
+        return vault_not_found(args.root, json_mode=args.json)
     try:
         config, _ = load_config(vault)
     except ConfigError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+        return emit_error("invalid_config", str(exc), json_mode=args.json)
     default_owner = str(config["defaults"]["owner"])
     default_sensitivity = str(config["defaults"]["sensitivity"])
     owner = getattr(args, "owner", None) or default_owner
@@ -536,7 +539,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             payload = {"contract_version": 1, "kind": "decision", "id": decision_id, "path": path.relative_to(vault).as_posix()}
             if args.json:
-                print(json.dumps(payload, ensure_ascii=False, indent=2))
+                emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
             else:
                 print(f"created {decision_id}: {path.relative_to(vault).as_posix()}")
         elif args.kind == "evidence":
@@ -546,7 +549,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             payload = {"contract_version": 1, "kind": "evidence", "id": evidence_id, "path": "00-context/evidence-register.md"}
             if args.json:
-                print(json.dumps(payload, ensure_ascii=False, indent=2))
+                emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
             else:
                 print(f"created {evidence_id}: 00-context/evidence-register.md")
         else:
@@ -559,16 +562,24 @@ def main(argv: list[str] | None = None) -> int:
                 "linked_from": args.link_from, "strict_linked": bool(args.link_from),
             }
             if args.json:
-                print(json.dumps(payload, ensure_ascii=False, indent=2))
+                emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
             else:
                 print(f"created note: {path.relative_to(vault).as_posix()}")
                 if args.link_from:
                     print(f"linked from: {args.link_from}")
                 else:
                     print("note is not linked from a map; strict profiles may report note.orphan")
-    except (ValueError, FileNotFoundError, FileExistsError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+    except FileExistsError as exc:
+        return emit_error("target_exists", str(exc), json_mode=args.json)
+    except FileNotFoundError as exc:
+        return emit_error(
+            "vault_invalid",
+            describe_os_error(exc),
+            hint="hint: restore the file from Git, or copy it from a fresh `whykit init` vault",
+            json_mode=args.json,
+        )
+    except ValueError as exc:
+        return emit_error("operation_rejected", str(exc), json_mode=args.json)
     return 0
 
 

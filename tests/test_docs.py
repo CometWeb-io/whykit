@@ -27,6 +27,7 @@ from whykit.cli import build_parser  # noqa: E402
 DOC_FILES = (
     ROOT / "README.md",
     ROOT / "CONTRIBUTING.md",
+    ROOT / "apps" / "explorer" / "README.md",
     *sorted((ROOT / "docs").glob("*.md")),
     *sorted((ROOT / "examples").glob("*/README.md")),
 )
@@ -78,11 +79,11 @@ class DocumentedCommandTests(unittest.TestCase):
                     except SystemExit as exc:
                         self.assertEqual(exc.code, 0, stderr.getvalue())
 
-    def test_the_extractor_catches_a_misplaced_root(self) -> None:
-        # `--root` belongs before the subcommand of `new`; this is the mistake
-        # the docs warn about, so the test must be able to see it.
+    def test_the_extractor_catches_a_misplaced_option(self) -> None:
+        # A leaf option on the parent of a nested command is a real parse
+        # error, so a documented command that does it must fail this check.
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            build_parser().parse_args(["new", "decision", "Title", "--root", "vault"])
+            build_parser().parse_args(["new", "--owner", "Ops", "decision", "Title"])
 
 
 class QuickstartTests(unittest.TestCase):

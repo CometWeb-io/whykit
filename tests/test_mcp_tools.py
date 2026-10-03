@@ -281,7 +281,10 @@ class StatusToolTests(VaultToolsTestCase):
         self.assertIsNone(report["evidence_active"])
         self.assertIsNone(report["evidence_retired"])
         self.assertEqual(set(report["sensitivity"]), {"public"})
-        self.assertTrue(all(item["path"] == "notes/public-note.md" for item in report["findings"]))
+        # Findings come from the confined view: only public files, and a link
+        # to an internal note reads as unresolved, exactly like a missing one.
+        self.assertLessEqual({item["path"] for item in report["findings"]}, {"Home.md", "notes/public-note.md"})
+        self.assertNotIn("sentinel", json.dumps(report))
 
     def test_status_validates_arguments(self) -> None:
         for bad in ("2026-13-01", "yesterday", "2026-09-24T00:00:00\x00"):
@@ -333,6 +336,302 @@ class PackToolTests(VaultToolsTestCase):
         self.assertEqual(self.tools.pack(["Home"], max_docs=500)["budget"]["max_docs"], MAX_MCP_PACK_DOCS)
 
 
+def write_decision(vault: Path, relative: str, *, decision_id: str, sensitivity: str, body: str = "",
+                   status: str = "approved", aliases: str = "[]") -> None:
+    path = vault / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"---\ntitle: Decision {decision_id}\naliases: {aliases}\ntype: decision\n"
+        f"decision_id: {decision_id}\nstatus: {status}\nowner: Tester\n"
+        f"created: 2026-09-24\nlast_updated: 2026-09-24\nreview_by: 2027-09-24\n"
+        f"source_of_truth: false\nsensitivity: {sensitivity}\nsource_ids: []\ntags: []\n---\n\n"
+        f"# Decision {decision_id}\n\n{body}\n",
+        encoding="utf-8",
+    )
+
+
+class HiddenTwinTests(VaultToolsTestCase):
+    """A hidden record that shares a stem, alias or decision ID with a visible
+    one must not turn resolution into `ambiguous`: every response has to be
+    byte-for-byte what it would be if the hidden record did not exist."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Visible originals.
+        write_doc(self.vault, "notes/shared.md", title="Shared visible", sensitivity="internal",
+                  body="shared-visible E-001", extra="")
+        write_doc(self.vault, "notes/aliased.md", title="Aliased visible", sensitivity="internal",
+                  body="aliased-visible")
+        (self.vault / "notes" / "aliased.md").write_text(
+            (self.vault / "notes" / "aliased.md").read_text(encoding="utf-8").replace("aliases: []", "aliases: [Roadmap]"),
+            encoding="utf-8",
+        )
+        write_doc(self.vault, "notes/toplevel.md", title="Top visible", sensitivity="internal", body="top-visible")
+        write_decision(self.vault, "06-decisions/d-002-visible.md", decision_id="D-002", sensitivity="internal",
+                       body="Rests on [[notes/shared]] and E-001.")
+        write_doc(self.vault, "notes/twin-hub.md", title="Twin hub", sensitivity="internal",
+                  body="See [[shared]], [[Roadmap]], [[toplevel]], [[archive/shared]], "
+                  "[md](../archive/shared.md) and [[D-002]].")
+        # Hidden twins: same stem, same alias, same decision ID, and a root-level
+        # file whose path is exactly the bare stem a caller might type.
+        self.hidden = [
+            "archive/shared.md",
+            "archive/roadmap-secret.md",
+            "archive/d-002-hidden.md",
+            "toplevel.md",
+        ]
+        write_doc(self.vault, "archive/shared.md", title="Shared hidden", sensitivity="restricted",
+                  body="twin-sentinel [[notes/shared]] E-001")
+        write_doc(self.vault, "archive/roadmap-secret.md", title="Roadmap hidden", sensitivity="restricted",
+                  body="twin-sentinel [[notes/aliased]]")
+        (self.vault / "archive" / "roadmap-secret.md").write_text(
+            (self.vault / "archive" / "roadmap-secret.md").read_text(encoding="utf-8").replace("aliases: []", "aliases: [Roadmap]"),
+            encoding="utf-8",
+        )
+        write_decision(self.vault, "archive/d-002-hidden.md", decision_id="D-002", sensitivity="restricted",
+                       body="twin-sentinel supersedes nothing [[06-decisions/d-002-visible]] E-001")
+        write_doc(self.vault, "toplevel.md", title="Top hidden", sensitivity="confidential",
+                  body="twin-sentinel [[notes/toplevel]]")
+
+    def snapshot(self, tools: VaultTools) -> dict:
+        out: dict = {}
+        for target in ("shared", "Roadmap", "toplevel", "D-002", "notes/twin-hub", "notes/shared",
+                       "archive/shared", "E-001"):
+            out[f"context:{target}"] = tools.call("context", {"target": target})
+            out[f"impact:{target}"] = tools.call("impact", {"target": target})
+            out[f"backlinks:{target}"] = tools.call("backlinks", {"target": target})
+        out["pack"] = tools.call("pack", {"targets": ["shared", "Roadmap", "toplevel", "D-002"], "query": "visible"})
+        out["query"] = tools.call("query", {"text": "visible", "limit": 100})
+        out["trace"] = tools.call("trace", {"today": "2026-09-24"})
+        out["trace:D-002"] = tools.call("trace", {"decision": "D-002", "today": "2026-09-24"})
+        out["status"] = tools.call("status", {"today": "2026-09-24"})
+        out["decisions"] = tools.decision_index()
+        try:
+            out["prompt"] = tools.summarize_decision_prompt("D-002")
+        except ToolFailure as exc:
+            out["prompt"] = exc.payload()
+        return out
+
+    def test_hidden_twins_do_not_change_any_response(self) -> None:
+        for policy in ("internal", "public"):
+            with self.subTest(policy=policy):
+                tools = VaultTools(self.vault, max_sensitivity=policy)
+                with_twins = self.snapshot(tools)
+                self.assertNotIn("twin-sentinel", json.dumps(with_twins))
+                if policy == "internal":
+                    for target in ("shared", "Roadmap", "toplevel", "D-002"):
+                        payload, is_error = with_twins[f"context:{target}"]
+                        self.assertFalse(is_error)
+                        self.assertTrue(payload["exists"], target)
+                        self.assertFalse(payload.get("ambiguous"), target)
+                saved = {relative: (self.vault / relative).read_bytes() for relative in self.hidden}
+                for relative in self.hidden:
+                    (self.vault / relative).unlink()
+                try:
+                    self.assertEqual(with_twins, self.snapshot(tools))
+                finally:
+                    for relative, data in saved.items():
+                        (self.vault / relative).write_bytes(data)
+
+    def test_visible_duplicates_are_still_reported_as_ambiguous(self) -> None:
+        write_doc(self.vault, "other/shared.md", title="Shared second", sensitivity="internal")
+        report = self.tools.context("shared")
+        self.assertFalse(report["exists"])
+        self.assertTrue(report["ambiguous"])
+
+
+class ConfinedIndexTests(VaultToolsTestCase):
+    def test_full_lint_is_unchanged_and_confined_lint_treats_dropped_notes_as_missing(self) -> None:
+        from whykit.lint import lint
+        from whykit.vault_index import VaultIndex
+
+        write_doc(self.vault, "notes/linker.md", title="Linker", sensitivity="internal",
+                  body="[[notes/restricted-secret]] and [md](restricted-secret.md)")
+        full = VaultIndex.load(self.vault)
+        confined = full.subset(lambda note: note.path.stem != "restricted-secret")
+
+        def codes(index: VaultIndex) -> set[str]:
+            _, findings = lint(self.vault, ["notes/linker.md"], orphans=False, secrets=False, vault=index)
+            return {item.code for item in findings if item.path == "notes/linker.md"}
+
+        self.assertNotIn("wikilink.missing", codes(full))
+        self.assertNotIn("markdown_link.missing", codes(full))
+        self.assertIn("wikilink.missing", codes(confined))
+        self.assertIn("markdown_link.missing", codes(confined))
+        self.assertEqual(full.resolve_link("restricted-secret")[0], (self.vault / "notes" / "restricted-secret.md").resolve())
+        self.assertEqual(confined.resolve_link("restricted-secret"), (None, False))
+        self.assertEqual(confined.resolve_link("notes/restricted-secret"), (None, False))
+
+
+class TraceToolTests(VaultToolsTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        write_decision(self.vault, "06-decisions/d-002-cites.md", decision_id="D-002", sensitivity="internal",
+                       body="Based on E-001.")
+        write_decision(self.vault, "06-decisions/d-003-bare.md", decision_id="D-003", sensitivity="public",
+                       body="No sources yet.")
+        write_decision(self.vault, "06-decisions/d-004-via-hidden.md", decision_id="D-004", sensitivity="internal",
+                       body="See [[notes/restricted-secret]].")
+
+    def test_trace_reports_evidence_and_gaps_for_visible_decisions(self) -> None:
+        report = self.tools.trace(today="2026-09-24")
+        by_id = {record["decision_id"]: record for record in report["decisions"]}
+        self.assertEqual(set(by_id), {"D-002", "D-003", "D-004"})  # D-001 is restricted
+        self.assertEqual([item["id"] for item in by_id["D-002"]["evidence"]], ["E-001"])
+        self.assertEqual(by_id["D-002"]["evidence"][0]["state"], "active")
+        self.assertEqual(by_id["D-003"]["gaps"], ["no_evidence"])
+        # Evidence is never inherited through a hidden note.
+        self.assertEqual(by_id["D-004"]["gaps"], ["no_evidence"])
+        self.assertEqual(report["matched"], 3)
+        self.assertFalse(report["truncated"])
+        self.assertNotIn("sentinel", json.dumps(report).replace("evidence-sentinel", ""))
+
+    def test_trace_filters_and_limits(self) -> None:
+        gaps = self.tools.trace(today="2026-09-24", gaps_only=True)
+        self.assertEqual({record["decision_id"] for record in gaps["decisions"]}, {"D-003", "D-004"})
+        limited = self.tools.trace(today="2026-09-24", limit=1)
+        self.assertEqual(len(limited["decisions"]), 1)
+        self.assertTrue(limited["truncated"])
+        self.assertEqual(limited["summary"]["decisions"], 3)
+        self.assertEqual(self.tools.trace(today="2026-09-24", limit=10**9)["matched"], 3)
+
+    def test_hidden_decision_traces_like_a_missing_one(self) -> None:
+        hidden = self.tools.trace(decision="D-001", today="2026-09-24")
+        missing = self.tools.trace(decision="D-999", today="2026-09-24")
+        hidden["decision"] = missing["decision"]
+        self.assertEqual(hidden, missing)
+        self.assertEqual(hidden["decisions"], [])
+
+    def test_public_trace_withholds_register_details(self) -> None:
+        report = self.public.trace(today="2026-09-24")
+        self.assertEqual([record["decision_id"] for record in report["decisions"]], ["D-003"])
+        self.assertEqual(report["evidence_details"], "withheld")
+        text = json.dumps(report)
+        self.assertNotIn("Private interview", text)
+        self.assertNotIn("evidence-sentinel", text)
+
+    def test_trace_validates_arguments(self) -> None:
+        for kwargs in (
+            {"decision": "E-001"}, {"decision": "D-1"}, {"decision": "../D-001"}, {"decision": 5},
+            {"today": "2026-02-30"}, {"today": "x" * 40}, {"gaps_only": "yes"}, {"limit": -1},
+            {"limit": True}, {"decision": "D-001\n"},
+        ):
+            with self.subTest(**{key: repr(value) for key, value in kwargs.items()}):
+                self.assertFailure("invalid_argument", self.tools.trace, **kwargs)
+
+
+class BacklinksToolTests(VaultToolsTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        for index in range(3):
+            write_doc(self.vault, f"notes/linker-{index}.md", title=f"Linker {index}", sensitivity="internal",
+                      body="[[notes/internal-note]]")
+        write_doc(self.vault, "notes/secret-linker.md", title="Secret linker", sensitivity="restricted",
+                  body="[[notes/internal-note]] E-001")
+
+    def test_backlinks_list_only_visible_sources(self) -> None:
+        report = self.tools.backlinks("notes/internal-note")
+        self.assertTrue(report["exists"])
+        sources = [item["from"] for item in report["backlinks"]]
+        self.assertEqual(sources, ["notes/linker-0", "notes/linker-1", "notes/linker-2"])
+        self.assertEqual(report["count"], 3)
+        self.assertNotIn("secret-linker", json.dumps(report))
+        evidence = self.tools.backlinks("E-001")
+        self.assertEqual([item["from"] for item in evidence["backlinks"]], ["notes/public-note"])
+
+    def test_backlinks_limit_is_clamped_and_reported(self) -> None:
+        report = self.tools.backlinks("notes/internal-note", limit=2)
+        self.assertEqual(len(report["backlinks"]), 2)
+        self.assertEqual(report["count"], 3)
+        self.assertTrue(report["truncated"])
+        self.assertFalse(self.tools.backlinks("notes/internal-note", limit=10**9)["truncated"])
+
+    def test_hidden_targets_look_missing(self) -> None:
+        for tools in (self.tools, self.public):
+            for hidden, missing in (
+                ("notes/restricted-secret", "notes/never-written"),
+                ("restricted-secret", "never-written"),
+                ("D-001", "D-999"),
+            ):
+                with self.subTest(policy=tools.policy, target=hidden):
+                    hidden_report = tools.backlinks(hidden)
+                    missing_report = tools.backlinks(missing)
+                    for report in (hidden_report, missing_report):
+                        report.pop("target")
+                        report.pop("id")
+                    self.assertEqual(hidden_report, missing_report)
+        public_hidden = self.public.backlinks("E-001")
+        public_missing = self.public.backlinks("E-999")
+        for report in (public_hidden, public_missing):
+            report.pop("target")
+            report.pop("id")
+        self.assertEqual(public_hidden, public_missing)
+
+    def test_backlinks_validate_arguments(self) -> None:
+        for bad in ("../x", "/etc/passwd", "~/x", "file:///etc/passwd", "", "a\x00b", 7):
+            with self.subTest(target=repr(bad)):
+                self.assertFailure("invalid_target", self.tools.backlinks, bad)
+        for bad in (-1, True, "3"):
+            with self.subTest(limit=repr(bad)):
+                self.assertFailure("invalid_argument", self.tools.backlinks, "Home", bad)
+
+
+class ResourceAndPromptTests(VaultToolsTestCase):
+    def test_decision_index_lists_only_visible_decisions(self) -> None:
+        write_decision(self.vault, "06-decisions/d-002-visible.md", decision_id="D-002", sensitivity="internal")
+        index = self.tools.decision_index()
+        self.assertEqual([row["decision_id"] for row in index["decisions"]], ["D-002"])
+        self.assertEqual(index["decisions"][0]["uri"], "whykit://record/D-002")
+        self.assertEqual(self.public.decision_index()["decisions"], [])
+
+    def test_read_record_hides_hidden_missing_and_invalid_alike(self) -> None:
+        self.assertIn("internal-sentinel", self.tools.read_record("notes/internal-note")["content"])
+        self.assertIsNone(self.tools.read_record("notes/restricted-secret"))
+        self.assertIsNone(self.tools.read_record("notes/never-written"))
+        self.assertIsNone(self.tools.read_record("D-001"))
+        self.assertFailure("invalid_target", self.tools.read_record, "../x")
+
+    def test_summarize_prompt_embeds_ceiling_filtered_data(self) -> None:
+        write_decision(self.vault, "06-decisions/d-002-visible.md", decision_id="D-002", sensitivity="internal",
+                       body="prompt-body Based on E-001.")
+        text = self.tools.summarize_decision_prompt("D-002")
+        self.assertIn("prompt-body", text)
+        self.assertIn('content_trust="untrusted_data"', text)
+        self.assertIn("E-001", text)
+        hidden = self.assertFailure("not_found", self.tools.summarize_decision_prompt, "D-001")
+        missing = self.assertFailure("not_found", self.tools.summarize_decision_prompt, "D-999")
+        self.assertEqual(hidden.message, missing.message)
+        self.assertFailure("invalid_argument", self.tools.summarize_decision_prompt, "notes/internal-note")
+
+    def test_gap_prompt_lists_live_decisions_with_gaps(self) -> None:
+        write_decision(self.vault, "06-decisions/d-002-bare.md", decision_id="D-002", sensitivity="internal",
+                       body="gap-body")
+        text = self.tools.evidence_gaps_prompt("2026-09-24")
+        self.assertIn("D-002", text)
+        self.assertIn("no_evidence", text)
+        self.assertNotIn("restricted-decision-sentinel", text)
+        self.assertFailure("invalid_argument", self.tools.evidence_gaps_prompt, "not-a-date")
+
+
+class MissingExtraTests(VaultToolsTestCase):
+    def test_missing_extra_gives_a_working_install_hint_and_exits_2(self) -> None:
+        import contextlib
+        import io
+
+        from whykit import mcp_server
+
+        stderr = io.StringIO()
+        # A None entry makes `from mcp.server import ...` raise ImportError.
+        with patch.dict(sys.modules, {"mcp": None, "mcp.server": None}), contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as caught:
+                mcp_server.main(["--root", str(self.vault)])
+        self.assertEqual(caught.exception.code, 2)
+        message = stderr.getvalue()
+        self.assertIn("uv sync --extra mcp", message)
+        self.assertIn("git+https://github.com/CometWeb-io/whykit", message)
+        self.assertNotIn("pip install 'whykit[mcp]'", message)
+
+
 class ErrorBoundaryTests(VaultToolsTestCase):
     def test_every_tool_is_read_only(self) -> None:
         before = tree_digest(self.vault)
@@ -342,11 +641,13 @@ class ErrorBoundaryTests(VaultToolsTestCase):
             ("impact", {"target": "E-001"}),
             ("status", {"today": "2026-09-24"}),
             ("pack", {"targets": ["D-001", "notes/public-note"], "query": "needle"}),
+            ("trace", {"today": "2026-09-24"}),
+            ("backlinks", {"target": "E-001"}),
         ):
             payload, is_error = self.tools.call(name, arguments)
             self.assertFalse(is_error, (name, payload))
         self.assertEqual(tree_digest(self.vault), before)
-        self.assertEqual(set(TOOL_NAMES), {"query", "context", "impact", "status", "pack"})
+        self.assertEqual(set(TOOL_NAMES), {"query", "context", "impact", "status", "pack", "trace", "backlinks"})
 
     def test_call_returns_structured_errors(self) -> None:
         payload, is_error = self.tools.call("context", {"target": "../x"})

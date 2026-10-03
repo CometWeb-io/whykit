@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/review-record-result.schema.json",
+  "title": "WhyKit review record result",
+  "description": "Output of `whykit review record --json`: the event appended to the review log.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "date",
+    "target",
+    "reviewer",
+    "outcome",
+    "log"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^D-[0-9]{3,}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reviewer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "outcome": {
+      "enum": [
+        "confirmed",
+        "update-required",
+        "supersede-required",
+        "archived"
+      ]
+    },
+    "previous_review": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "next_review": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "log": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

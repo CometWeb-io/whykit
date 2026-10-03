@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/status-report.schema.json",
+  "title": "WhyKit status report",
+  "description": "Output of `whykit status --json`.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "root",
+    "as_of",
+    "documents",
+    "canonical",
+    "decisions",
+    "evidence_active",
+    "evidence_retired",
+    "errors",
+    "warnings",
+    "finding_codes",
+    "review_queue",
+    "review_overdue",
+    "findings"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "root": {
+      "type": "string"
+    },
+    "as_of": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "documents": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "canonical": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "decisions": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "evidence_active": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "evidence_retired": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "errors": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "warnings": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "finding_codes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "review_queue": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "title",
+          "owner",
+          "review_by",
+          "days",
+          "state"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "review_by": {
+            "type": "string"
+          },
+          "days": {
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "overdue",
+              "due"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "review_overdue": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "decision_states": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "document_states": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "sensitivity": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "approved_without_owner": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "line",
+          "level",
+          "code",
+          "message"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "level": {
+            "enum": [
+              "error",
+              "warning"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

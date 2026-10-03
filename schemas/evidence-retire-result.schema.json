@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/evidence-retire-result.schema.json",
+  "title": "WhyKit evidence retirement result",
+  "description": "Output of `whykit evidence retire --json`.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "id",
+    "state",
+    "retired_on",
+    "why",
+    "references"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^E-[0-9]{3,}$"
+    },
+    "state": {
+      "const": "retired"
+    },
+    "retired_on": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "why": {
+      "type": "string"
+    },
+    "replaced_by": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^E-[0-9]{3,}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "references": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "current_references": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "References from live records; the rest of `references` are historical (superseded or archived records)."
+    }
+  },
+  "additionalProperties": true
+}

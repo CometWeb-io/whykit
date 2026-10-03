@@ -1,4 +1,4 @@
-import type { EvidenceRow, VaultDoc, VaultIndex } from "../types.ts";
+import type { DecisionRow, EvidenceRow, VaultDoc, VaultIndex } from "../types.ts";
 import { extractWikilinks } from "./markdown.ts";
 
 export type VaultModel = ReturnType<typeof createVaultModel>;
@@ -68,6 +68,44 @@ export function createVaultModel(vault: VaultIndex) {
     }
   }
 
+  const decisionsById = new Map(vault.decisions.map(row => [row.id, row]));
+  const supersededBy = new Map<string, string>();
+  for (const row of vault.decisions) {
+    if (row.supersedes) supersededBy.set(row.supersedes, row.id);
+  }
+
+  /**
+   * The full supersession lineage a decision belongs to, oldest first.
+   * Walks `supersedes` back to the root and forward through successors, so
+   * D-010 yields D-009 → D-010 → D-011. A cycle or a dangling id ends the walk
+   * instead of looping; the linter reports those separately.
+   */
+  function decisionChain(id: string): DecisionRow[] {
+    const start = decisionsById.get(id);
+    if (!start) return [];
+    const seen = new Set([start.id]);
+    const back: DecisionRow[] = [];
+    let cursor = start;
+    while (cursor.supersedes) {
+      const prev = decisionsById.get(cursor.supersedes);
+      if (!prev || seen.has(prev.id)) break;
+      seen.add(prev.id);
+      back.unshift(prev);
+      cursor = prev;
+    }
+    const forward: DecisionRow[] = [];
+    cursor = start;
+    for (;;) {
+      const nextId = cursor.supersededBy ?? supersededBy.get(cursor.id);
+      const next = nextId ? decisionsById.get(nextId) : undefined;
+      if (!next || seen.has(next.id)) break;
+      seen.add(next.id);
+      forward.push(next);
+      cursor = next;
+    }
+    return [...back, start, ...forward];
+  }
+
   const canonical = docs.filter(d => d.sourceOfTruth && d.status === "approved");
 
   function searchDocs(q: string, limit = 30): VaultDoc[] {
@@ -104,5 +142,6 @@ export function createVaultModel(vault: VaultIndex) {
     canonicalDocs: (): VaultDoc[] => canonical,
     evidenceFor: (id: string): EvidenceRow | undefined => evidenceByKey.get(id),
     docsForEvidence: (id: string): VaultDoc[] => evidenceUsage.get(id) || [],
+    decisionChain,
   };
 }

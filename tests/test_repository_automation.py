@@ -244,5 +244,70 @@ class InstallHooksTests(unittest.TestCase):
             self.assertEqual(hook.resolve(), (linked / "scripts" / "pre-commit").resolve())
 
 
+class ExplorerAutomationTests(unittest.TestCase):
+    """The optional Explorer jobs: useful signal, never a blocker, least privilege."""
+
+    EXPLORER = ROOT / "apps" / "explorer"
+
+    def _job(self, name: str) -> str:
+        text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        jobs = _children(_block(text, "jobs"), 2)
+        self.assertIn(name, jobs)
+        return "\n".join(jobs[name])
+
+    def test_explorer_jobs_cannot_block_a_merge(self) -> None:
+        for name in ("explorer", "explorer-e2e"):
+            with self.subTest(job=name):
+                job = self._job(name)
+                self.assertIn("continue-on-error: true", job)
+                self.assertRegex(job, r"timeout-minutes: \d+")
+                self.assertNotIn("secrets.", job)
+
+    def test_e2e_job_is_read_only_and_uses_the_bundled_chromium(self) -> None:
+        job = self._job("explorer-e2e")
+        permissions = job.split("permissions:", 1)[1].split("steps:", 1)[0]
+        self.assertEqual(
+            [line.strip() for line in permissions.splitlines() if line.strip()],
+            ["contents: read"],
+        )
+        self.assertIn("npm ci --prefix apps/explorer", job)
+        self.assertIn("npx playwright install --with-deps chromium", job)
+        self.assertIn("npm run e2e", job)
+        config = (self.EXPLORER / "playwright.config.ts").read_text(encoding="utf-8")
+        # A `channel` would launch an installed branded browser instead.
+        self.assertNotIn("channel", config)
+        self.assertNotIn("executablePath", config)
+        self.assertIn('testDir: "e2e"', config)
+
+    def test_check_script_runs_eslint_and_e2e_builds_static_sites(self) -> None:
+        import json
+
+        package = json.loads((self.EXPLORER / "package.json").read_text(encoding="utf-8"))
+        scripts = package["scripts"]
+        self.assertEqual(scripts["lint"], "eslint .")
+        self.assertIn("npm run lint", scripts["check"])
+        self.assertIn("e2e:build", scripts["e2e"])
+        self.assertIn("playwright test", scripts["e2e"])
+        dev = package["devDependencies"]
+        for name in ("eslint", "typescript-eslint", "eslint-plugin-react-hooks",
+                     "eslint-plugin-jsx-a11y", "@playwright/test", "@axe-core/playwright"):
+            with self.subTest(dependency=name):
+                self.assertIn(name, dev)
+        # TypeScript stays on the 5.9 line until the toolchain is migrated on purpose.
+        self.assertRegex(dev["typescript"], r"^[~^]5\.9\.")
+        eslint = (self.EXPLORER / "eslint.config.js").read_text(encoding="utf-8")
+        for plugin in ("typescript-eslint", "eslint-plugin-react-hooks", "eslint-plugin-jsx-a11y"):
+            with self.subTest(plugin=plugin):
+                self.assertIn(f'from "{plugin}"', eslint)
+
+    def test_dependabot_does_not_propose_a_typescript_major(self) -> None:
+        text = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+        npm = text.split("- package-ecosystem: npm", 1)[1]
+        self.assertRegex(
+            npm,
+            r'- dependency-name: typescript\s+update-types: \["version-update:semver-major"\]',
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

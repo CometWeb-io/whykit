@@ -172,6 +172,8 @@ class McpSensitivityTests(unittest.TestCase):
 
     def test_server_build_uses_the_current_mcp_sdk_server_api(self) -> None:
         registered_tools: dict[str, tuple[object, dict]] = {}
+        registered_resources: dict[str, object] = {}
+        registered_prompts: dict[str, object] = {}
 
         class SDKServer:
             def __init__(self, name: str, **kwargs: object) -> None:
@@ -181,6 +183,20 @@ class McpSensitivityTests(unittest.TestCase):
             def tool(self, **kwargs: object):
                 def register(function):
                     registered_tools[function.__name__] = (function, kwargs)
+                    return function
+
+                return register
+
+            def resource(self, uri: str, **kwargs: object):
+                def register(function):
+                    registered_resources[uri] = function
+                    return function
+
+                return register
+
+            def prompt(self, **kwargs: object):
+                def register(function):
+                    registered_prompts[function.__name__] = function
                     return function
 
                 return register
@@ -197,12 +213,24 @@ class McpSensitivityTests(unittest.TestCase):
         mcp_types = types.ModuleType("mcp_types")
         for name in ("CallToolResult", "TextContent", "ToolAnnotations"):
             setattr(mcp_types, name, type(name, (Model,), {}))
+        mcp_types.INTERNAL_ERROR = -32603  # type: ignore[attr-defined]
+        mcp_types.INVALID_PARAMS = -32602  # type: ignore[attr-defined]
+        exceptions = types.ModuleType("mcp.server.mcpserver.exceptions")
+        for name in ("ResourceError", "ResourceNotFoundError", "ToolError"):
+            setattr(exceptions, name, type(name, (Exception,), {}))
+        shared = types.ModuleType("mcp.shared.exceptions")
+        shared.MCPError = type("MCPError", (Exception,), {})  # type: ignore[attr-defined]
         pydantic = types.ModuleType("pydantic")
         pydantic.Field = lambda **kwargs: kwargs  # type: ignore[attr-defined]
+        pydantic.ValidationError = type("ValidationError", (ValueError,), {})  # type: ignore[attr-defined]
 
         with patch.dict(sys.modules, {
             "mcp": package,
             "mcp.server": server_package,
+            "mcp.server.mcpserver": types.ModuleType("mcp.server.mcpserver"),
+            "mcp.server.mcpserver.exceptions": exceptions,
+            "mcp.shared": types.ModuleType("mcp.shared"),
+            "mcp.shared.exceptions": shared,
             "mcp_types": mcp_types,
             "pydantic": pydantic,
         }):
@@ -215,7 +243,9 @@ class McpSensitivityTests(unittest.TestCase):
 
         self.assertEqual(server.name, "whykit")
         self.assertIn("untrusted", server.instructions)
-        self.assertEqual(set(registered_tools), {"query", "context", "impact", "status", "pack"})
+        self.assertEqual(set(registered_tools), {"query", "context", "impact", "status", "pack", "trace", "backlinks"})
+        self.assertEqual(set(registered_resources), {"whykit://decisions", "whykit://record/{+target}"})
+        self.assertEqual(set(registered_prompts), {"summarize_decision", "review_evidence_gaps"})
         for name, (_, options) in registered_tools.items():
             with self.subTest(tool=name):
                 annotations = options["annotations"]

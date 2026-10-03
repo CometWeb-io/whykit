@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
-from .messages import print_no_vault
+from .contract import vault_not_found
 from .graph import build_graph
 from .lint import (
+    path_cache,
     DECISION_ID_RE,
     EVIDENCE_ID_RE,
     evidence_register,
@@ -16,6 +18,7 @@ from .lint import (
     rel,
 )
 from .vault_index import VaultIndex
+from .console import emit_machine
 
 
 def _note_summary(root: Path, note) -> dict:
@@ -39,6 +42,33 @@ def _decision_id(note) -> str | None:
     return value if DECISION_ID_RE.fullmatch(value) else None
 
 
+def _wikilink_view(root: Path, vault_index: VaultIndex) -> tuple[dict[str, dict], dict[str, set[str]], dict[str, set[str]]]:
+    """Graph nodes by id plus wikilink adjacency, built once per vault parse.
+
+    The graph also reads the evidence register, so the cache key carries its
+    stat signature: a register rewritten under a reused index is re-read.
+    """
+    register = root / "00-context" / "evidence-register.md"
+    try:
+        stat = register.stat()
+        stamp: tuple[int, int] | None = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        stamp = None
+    key = ("impact.wikilinks", os.fspath(root), stamp)
+    cached = vault_index.derived.get(key)
+    if cached is None:
+        graph = build_graph(root, vault=vault_index)
+        incoming: dict[str, set[str]] = {}
+        outgoing: dict[str, set[str]] = {}
+        for edge in graph["edges"]:
+            if edge.get("type", "wikilink") == "wikilink":
+                incoming.setdefault(edge["to"], set()).add(edge["from"])
+                outgoing.setdefault(edge["from"], set()).add(edge["to"])
+        cached = vault_index.derived[key] = ({item["id"]: item for item in graph["nodes"]}, incoming, outgoing)
+    return cached
+
+
+@path_cache()
 def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) -> dict:
     vault_index = vault or VaultIndex.load(root)
     notes = vault_index.notes
@@ -80,10 +110,9 @@ def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) 
                 "reference_count": 0,
             }
         node_id = vault_index.relative(note.path).removesuffix(".md")
-        graph = build_graph(root, vault=vault_index)
-        incoming_ids = sorted({edge["from"] for edge in graph["edges"] if edge["to"] == node_id and edge.get("type", "wikilink") == "wikilink"})
-        outgoing_ids = sorted({edge["to"] for edge in graph["edges"] if edge["from"] == node_id and edge.get("type", "wikilink") == "wikilink"})
-        by_node = {item["id"]: item for item in graph["nodes"]}
+        by_node, incoming_map, outgoing_map = _wikilink_view(root, vault_index)
+        incoming_ids = sorted(incoming_map.get(node_id, ()))
+        outgoing_ids = sorted(outgoing_map.get(node_id, ()))
         incoming = [by_node[value] for value in incoming_ids if value in by_node]
         outgoing = [by_node[value] for value in outgoing_ids if value in by_node]
         superseded_by = sorted(
@@ -119,10 +148,9 @@ def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) 
         }
     note = vault_index.note_for(resolved)
     node_id = vault_index.relative(resolved).removesuffix(".md")
-    graph = build_graph(root, vault=vault_index)
-    by_node = {item["id"]: item for item in graph["nodes"]}
-    incoming_ids = sorted({edge["from"] for edge in graph["edges"] if edge["to"] == node_id and edge.get("type", "wikilink") == "wikilink"})
-    outgoing_ids = sorted({edge["to"] for edge in graph["edges"] if edge["from"] == node_id and edge.get("type", "wikilink") == "wikilink"})
+    by_node, incoming_map, outgoing_map = _wikilink_view(root, vault_index)
+    incoming_ids = sorted(incoming_map.get(node_id, ()))
+    outgoing_ids = sorted(outgoing_map.get(node_id, ()))
     return {
         "contract_version": 1,
         "target": target,
@@ -184,11 +212,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
-        print_no_vault(args.root)
-        return 2
+        return vault_not_found(args.root, json_mode=args.json)
     report = analyze_impact(root, args.target)
     if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         _human(report)
     return 0 if report.get("exists") else 1

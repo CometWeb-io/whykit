@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/evidence-list.schema.json",
+  "title": "WhyKit evidence list",
+  "description": "Output of `whykit evidence list --json`.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "state",
+    "count",
+    "evidence"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "state": {
+      "enum": [
+        "all",
+        "active",
+        "retired"
+      ]
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "state"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^E-[0-9]{3,}$"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "retired"
+            ]
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

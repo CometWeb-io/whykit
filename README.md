@@ -62,8 +62,9 @@ answer (reply language, branching rule, tone-of-voice owner, safety rules).
 Answer them before you let an agent write in the vault, or before you turn on
 the strict `ci` gate.
 
-Note that `new`, `review` and `evidence` take `--root` **before** their
-subcommand. Inside the vault directory you can drop `--root` altogether.
+`--root` can go before or after the subcommand (`whykit new --root ../my-ledger
+decision ...` and `whykit new decision ... --root ../my-ledger` both work).
+Inside the vault directory you can drop `--root` altogether.
 
 Next:
 
@@ -177,7 +178,8 @@ the [security policy](SECURITY.md).
 | Enable shell tab completion | `whykit completion bash\|zsh\|fish` |
 
 Run `uv run whykit --help` for the full CLI. The optional [MCP server](docs/mcp.md)
-exposes read-only query, context, impact, status, and pack tools.
+exposes read-only query, context, impact, status, pack, trace, and backlinks
+tools, plus record resources and two prompts.
 
 ## Documentation
 
@@ -192,7 +194,10 @@ exposes read-only query, context, impact, status, and pack tools.
 | Understand lint findings | [Rule reference](docs/rules.md) |
 | Connect an MCP client | [MCP server guide](docs/mcp.md) |
 | Connect producers or machine consumers | [Integrations](docs/integrations.md) |
+| Check how commands scale on large vaults | [Performance](docs/performance.md) |
+| Script the CLI from CI or an agent (JSON, exit and error codes) | [Automation](docs/automation.md) |
 | Explore the optional local viewer | [Explorer](apps/explorer/) |
+| Build, verify or release the package | [Releasing](docs/releasing.md) |
 | Contribute a change | [Contributing](CONTRIBUTING.md) |
 | Read the community expectations | [Code of Conduct](CODE_OF_CONDUCT.md) |
 | Understand the project boundary | [Positioning](docs/project-positioning.md) |

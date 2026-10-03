@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/impact-report.schema.json",
+  "title": "WhyKit impact report",
+  "description": "Output of `whykit impact --json`. The fields after `exists` depend on `kind`; a missing target is a report with `exists: false`.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "target",
+    "kind",
+    "exists",
+    "reference_count"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "target": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "evidence",
+        "decision",
+        "document"
+      ]
+    },
+    "exists": {
+      "type": "boolean"
+    },
+    "state": {
+      "enum": [
+        "active",
+        "retired",
+        "missing"
+      ]
+    },
+    "ambiguous": {
+      "type": "boolean"
+    },
+    "record": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "replacement": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "sensitivity": {
+            "type": "string"
+          },
+          "source_of_truth": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "incoming": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "outgoing": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "supersedes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "superseded_by": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "reference_count": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": true
+}
