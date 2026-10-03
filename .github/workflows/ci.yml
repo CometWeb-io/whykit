@@ -240,6 +240,12 @@ jobs:
         run: |
           uv sync --locked --no-dev --extra mcp
           uv run python -m unittest discover -s tests -p 'test_mcp_runtime.py' -v
+      - name: Negotiate both protocol eras on the lowest and highest allowed MCP SDK
+        run: |
+          set -euo pipefail
+          for version in 2.2.0 2.3.0; do
+            uv run --no-sync --with "mcp==$version" python -m unittest discover -s tests -p 'test_mcp_handshake.py' -v
+          done
       - name: Build twice from the same commit
         # SOURCE_DATE_EPOCH pins archive timestamps to the commit, so two
         # builds of one commit must be byte-identical. The release workflow

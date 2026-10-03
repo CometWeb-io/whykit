@@ -40,7 +40,7 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-mcp = ["mcp>=2,<3"]
+mcp = ["mcp>=2.2,<2.4"]
 
 # Contributor tooling only; never installed with the package. Exact pins keep
 # the gates reproducible, and uv.lock adds hashes. CI installs the core package

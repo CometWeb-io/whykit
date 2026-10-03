@@ -86,7 +86,7 @@ Each entry says what an existing vault, script or pipeline has to change. The
   GTM-oriented workstream starter is opt-in with `whykit init --full`;
   `--minimal` remains accepted as an alias of the default, so existing setup
   scripts keep working.
-- The optional MCP extra targets the MCP SDK 2.x (`mcp>=2,<3`).
+- The optional MCP extra targets the MCP SDK 2.x (`mcp>=2.2,<2.4`).
   *Migration:* reinstall with the `mcp` extra to upgrade the SDK.
 - `whykit-mcp` defaults to `--max-sensitivity internal`. *Migration:* pass a
   higher ceiling explicitly if a host must see confidential records.
@@ -566,6 +566,10 @@ Each entry says what an existing vault, script or pipeline has to change. The
 
 #### MCP server
 
+- Hosts that connect with the classic `initialize` handshake are served again
+  when a `server/discover` probe came first on the same stdio pipe (a probe
+  that timed out while the server started, then a fallback); they got error
+  `-32022`. The `mcp` extra is now `mcp>=2.2,<2.4`, the SDK releases CI tests.
 - MCP tools answer from a view of the vault in which records above the
   sensitivity ceiling do not exist, so a hidden record can no longer show up
   as an ambiguous link, a backlink, a duplicate decision ID or a lint finding.
