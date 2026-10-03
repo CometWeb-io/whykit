@@ -25,6 +25,8 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -304,7 +306,7 @@ class SarifTests(unittest.TestCase):
         self.assertEqual(location["artifactLocation"], {"uri": "knowledge/Home.md", "uriBaseId": "%SRCROOT%"})
         self.assertEqual(location["region"], {"startLine": line})
         base = run_["originalUriBaseIds"]["%SRCROOT%"]["uri"]
-        self.assertEqual(Path(base.removeprefix("file://")).resolve(), repo.resolve())
+        self.assertEqual(Path(url2pathname(urlparse(base).path)).resolve(), repo.resolve())
         self.assertEqual(run_["properties"]["vault_prefix"], "knowledge/")
 
     def test_outside_git_paths_stay_vault_relative_and_are_uri_encoded(self) -> None:
@@ -418,7 +420,8 @@ class GithubAnnotationTests(unittest.TestCase):
         result = run("check", "--root", str(vault), "--profile", "ci", "--format", "github", "--today", TODAY)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertRegex(result.stdout, r"(?m)^::error file=Home\.md,line=\d+,title=WhyKit wikilink\.missing::")
-        self.assertIn("WhyKit ci gate — FAIL", result.stdout)
+        # The separator is an em dash on UTF-8 consoles, "-" or a code-page byte elsewhere.
+        self.assertRegex(result.stdout, r"WhyKit ci gate \S FAIL")
         conflict = run("check", "--root", str(vault), "--json", "--format", "github")
         self.assertEqual(conflict.returncode, 2)
         self.assertEqual(json.loads(conflict.stdout)["error"]["code"], "usage")

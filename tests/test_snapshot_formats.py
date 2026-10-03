@@ -79,6 +79,14 @@ class SnapshotFormatTests(unittest.TestCase):
         self.tmp = Path(self._tmp.name)
         self.lf = self.tmp / "lf"
         fresh_vault(self.lf)
+        # A Windows checkout with core.autocrlf ships the template with CRLF;
+        # pin the baseline vault to LF so "Linux" really means LF here.
+        for path in self.lf.rglob("*"):
+            if path.is_file() and path.suffix in {".md", ".toml", ".yml", ".yaml", ".json", ""}:
+                data = path.read_bytes()
+                fixed = data.replace(b"\r\n", b"\n")
+                if fixed != data:
+                    path.write_bytes(fixed)
 
     def copy(self, name: str) -> Path:
         target = self.tmp / name
