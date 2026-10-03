@@ -1244,6 +1244,116 @@ def _schema_failure(error: Exception) -> ToolFailure:
     return ToolFailure(code, "arguments do not match the input schema")
 
 
+PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion"
+DISCOVER_METHOD = "server/discover"
+# How long a handover to the handshake era waits for in-flight probe replies.
+PROBE_DRAIN_SECONDS = 5.0
+
+
+async def serve_negotiated_stream(lowlevel, read_stream, write_stream, *, lifespan_state, init_options) -> None:  # type: ignore[no-untyped-def]
+    """Serve one stdio connection in whichever protocol era the client settles on.
+
+    The SDK fixes a connection's era from its first request. A 2026-07-28
+    ``server/discover`` probe therefore locks the connection to the new
+    protocol, and a later ``initialize`` is refused with -32022. Hosts do send
+    exactly that sequence: they probe, and when the probe times out (a server
+    still starting) or its answer is not usable, they fall back to the classic
+    handshake on the same pipe.
+
+    Here a probe only answers the question it asks. Until the client sends a
+    request other than ``server/discover``, the era stays open: an
+    ``initialize`` hands the rest of the stream to a fresh SDK loop, which
+    serves the handshake era, while any other request keeps the 2026-07-28
+    connection the probe opened. Both loops are the SDK's own
+    ``serve_dual_era_loop`` and share the server's lifespan state.
+    """
+    import math
+
+    import anyio
+    from mcp.server.runner import serve_dual_era_loop
+    from mcp_types import JSONRPCError, JSONRPCRequest, JSONRPCResponse
+
+    class Outbound:
+        """Forwards to the real write stream, records replies, never closes it."""
+
+        def __init__(self) -> None:
+            self.answered: set[Any] = set()
+            self.progress = anyio.Event()
+
+        async def send(self, item):  # type: ignore[no-untyped-def]
+            await write_stream.send(item)
+            message = getattr(item, "message", None)
+            if isinstance(message, (JSONRPCResponse, JSONRPCError)):
+                self.answered.add(message.id)
+                self.progress.set()
+                self.progress = anyio.Event()
+
+        async def aclose(self) -> None:
+            return None
+
+        async def __aenter__(self):  # type: ignore[no-untyped-def]
+            return self
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+    outbound = Outbound()
+
+    def is_probe(message: object) -> bool:
+        if not isinstance(message, JSONRPCRequest) or message.method != DISCOVER_METHOD:
+            return False
+        meta = (message.params or {}).get("_meta")
+        return isinstance(meta, dict) and PROTOCOL_VERSION_META_KEY in meta
+
+    async def drain(ids: list[Any]) -> None:
+        with anyio.move_on_after(PROBE_DRAIN_SECONDS):
+            while not set(ids) <= outbound.answered:
+                await outbound.progress.wait()
+
+    async with anyio.create_task_group() as group:
+
+        async def start_loop():  # type: ignore[no-untyped-def]
+            send, receive = anyio.create_memory_object_stream(math.inf)
+            finished = anyio.Event()
+
+            async def run() -> None:
+                try:
+                    await serve_dual_era_loop(
+                        lowlevel, receive, outbound, lifespan_state=lifespan_state, init_options=init_options,
+                    )
+                finally:
+                    finished.set()
+
+            group.start_soon(run)
+            return send, finished
+
+        send, finished = await start_loop()
+        probes: list[Any] = []
+        open_era = True
+        try:
+            async with read_stream:
+                async for item in read_stream:
+                    message = getattr(item, "message", None)
+                    if open_era and isinstance(message, JSONRPCRequest):
+                        if is_probe(message):
+                            probes.append(message.id)
+                        elif message.method == "initialize" and probes:
+                            # The client gave up on its probe: finish answering
+                            # it, then serve the handshake on a fresh loop.
+                            await drain(probes)
+                            await send.aclose()
+                            await finished.wait()
+                            send, finished = await start_loop()
+                            open_era = False
+                        else:
+                            open_era = False
+                    await send.send(item)
+        finally:
+            await send.aclose()
+            await finished.wait()
+            await write_stream.aclose()
+
+
 def build_server(
     vault: Path,
     *,
@@ -1350,6 +1460,20 @@ def build_server(
                 resources=[Resource(mime_type="application/json", **row) for row in rows],
                 next_cursor=next_cursor,
             )
+
+        async def run_stdio_async(self) -> None:
+            # Same as the SDK's stdio runner, except that a `server/discover`
+            # probe does not lock the connection out of the classic handshake.
+            from mcp.server.stdio import stdio_server
+
+            lowlevel = self._lowlevel_server
+            async with stdio_server() as (read_stream, write_stream):
+                async with lowlevel.lifespan(lowlevel) as lifespan_state:
+                    await serve_negotiated_stream(
+                        lowlevel, read_stream, write_stream,
+                        lifespan_state=lifespan_state,
+                        init_options=lowlevel.create_initialization_options(),
+                    )
 
         async def call_tool(self, name, arguments, context=None):  # type: ignore[no-untyped-def]
             if name not in TOOL_NAMES:

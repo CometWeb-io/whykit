@@ -2076,7 +2076,7 @@ hooks = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mcp", marker = "extra == 'mcp'", specifier = ">=2,<3" }]
+requires-dist = [{ name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.2,<2.4" }]
 provides-extras = ["mcp"]
 
 [package.metadata.requires-dev]

@@ -184,7 +184,7 @@ that passes it keeps working. Existing vaults are not touched by any of this.
 
 ## MCP server
 
-- The `mcp` extra now requires the MCP SDK 2.x (`mcp>=2,<3`). Reinstall the
+- The `mcp` extra now requires the MCP SDK 2.2 or 2.3 (`mcp>=2.2,<2.4`). Reinstall the
   extra so the SDK is upgraded with WhyKit.
 - `whykit-mcp` defaults to `--max-sensitivity internal`. Records marked
   `confidential` or `restricted` are hidden from MCP hosts unless you raise

@@ -72,6 +72,31 @@ Evidence-register entries do not currently carry their own sensitivity field;
 their details are therefore treated as `internal` and omitted from context
 responses when the ceiling is `public`.
 
+## Protocol versions
+
+The server speaks both MCP protocol eras, and the client's opening picks one
+per connection:
+
+- **Classic handshake** (`initialize`): protocol versions `2024-11-05`,
+  `2025-03-26`, `2025-06-18` and `2025-11-25`. The server answers with the
+  version the client asked for when it supports it, otherwise with the newest
+  one it supports. Hosts that connect this way get every tool, resource,
+  prompt and completion; the capability set is static (no
+  `subscriptions/listen`, no change notifications).
+- **2026-07-28** (`server/discover` and per-request envelopes): everything
+  above plus [change notifications](#change-notifications).
+
+Over stdio, a `server/discover` probe does not commit the connection. A host
+that probes and then falls back to `initialize` on the same pipe, for example
+because its probe timed out while the server was still starting, is served
+the classic handshake. Once a client has sent any other 2026-07-28 request,
+a later `initialize` on that connection is refused with error `-32022`. Over
+[streamable HTTP](#streamable-http) the era is chosen per request.
+
+The MCP extra is pinned to the SDK releases this negotiation is tested with
+(`mcp>=2.2,<2.4`); CI runs the handshake tests against the lowest and the
+highest of them.
+
 ## Tools
 
 Every tool is annotated `readOnlyHint: true`, `destructiveHint: false`,
@@ -360,5 +385,5 @@ indistinguishable from one that does not exist:
 
 Ambiguity between two *visible* records is still reported as `ambiguous`.
 
-The SDK is an optional extra (`mcp>=2,<3`). See the [security policy](../SECURITY.md)
+The SDK is an optional extra (`mcp>=2.2,<2.4`). See the [security policy](../SECURITY.md)
 before connecting an MCP host to a real vault.
