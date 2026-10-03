@@ -333,14 +333,15 @@ jobs:
           vault="$RUNNER_TEMP/codepage-vault"
           cp -R examples/tiny "$vault"
           printf '\n- [[\xc5\x81\xc3\xb3d\xc5\xba \xe2\x86\x92 caf\xc3\xa9]]\n' >> "$vault/Home.md"
-          uv run whykit lint --root "$vault" > "$RUNNER_TEMP/human.txt" 2> "$RUNNER_TEMP/human.err"
-          status=$?
+          # Actions runs bash with -e; lint exits 1 on purpose here, so capture it.
+          status=0
+          uv run whykit lint --root "$vault" > "$RUNNER_TEMP/human.txt" 2> "$RUNNER_TEMP/human.err" || status=$?
           if [ "$status" -ne 1 ] || grep -q Traceback "$RUNNER_TEMP/human.err"; then
             cat "$RUNNER_TEMP/human.txt" "$RUNNER_TEMP/human.err"
             echo "human lint output must report the broken link (exit 1), not crash" >&2
             exit 1
           fi
-          uv run whykit lint --root "$vault" --json > "$RUNNER_TEMP/lint.json"
+          uv run whykit lint --root "$vault" --json > "$RUNNER_TEMP/lint.json" || [ $? -eq 1 ]
           uv run python - "$RUNNER_TEMP/lint.json" <<'PY'
           import json
           import sys
