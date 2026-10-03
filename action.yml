@@ -58,6 +58,21 @@ inputs:
       report is uploaded even when the gate then fails.
     required: false
     default: "false"
+  comment:
+    description: >
+      On a pull request, post the decision diff (`whykit diff --format markdown`)
+      as one pull request comment and update it on every push. Needs
+      `pull-requests: write` on the calling job and `fetch-depth: 0`. Never
+      posts for a pull request from a fork; the report then goes to the job
+      summary only.
+    required: false
+    default: "false"
+  github-token:
+    description: >
+      Token used only by `comment` to create or update the pull request
+      comment. Defaults to the job's GITHUB_TOKEN.
+    required: false
+    default: ${{ github.token }}
 
 outputs:
   sarif-file:
@@ -113,8 +128,69 @@ runs:
         echo "Installed WhyKit $version"
         {
           echo "whykit=$whykit"
+          echo "python=$venv_python"
           echo "version=$version"
         } >> "$GITHUB_OUTPUT"
+
+    - name: Decision diff comment
+      if: inputs.comment != 'false'
+      shell: bash
+      env:
+        WHYKIT_ROOT: ${{ inputs.root }}
+        WHYKIT_COMMENT: ${{ inputs.comment }}
+        WHYKIT_BASE: ${{ inputs.base }}
+        WHYKIT_TODAY: ${{ inputs.today }}
+        WHYKIT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        WHYKIT_PR_NUMBER: ${{ github.event.pull_request.number }}
+        WHYKIT_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        WHYKIT_REPOSITORY: ${{ github.repository }}
+        WHYKIT_EVENT: ${{ github.event_name }}
+        WHYKIT_ACTION_PATH: ${{ github.action_path }}
+        WHYKIT_PYTHON: ${{ steps.install.outputs.python }}
+        WHYKIT: ${{ steps.install.outputs.whykit }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        if [ "$WHYKIT_COMMENT" != "true" ]; then
+          echo "::error::comment must be 'true' or 'false'"
+          exit 2
+        fi
+        # pull_request only: never pull_request_target, where a fork's
+        # change would run with a write token.
+        if [ "$WHYKIT_EVENT" != "pull_request" ]; then
+          echo "WhyKit decision diff: not a pull_request event; no comment"
+          exit 0
+        fi
+        args=("$WHYKIT" diff --root "$WHYKIT_ROOT" --head HEAD --format markdown)
+        base="$WHYKIT_BASE"
+        if [ -z "$base" ]; then
+          base="$WHYKIT_BASE_SHA"
+        fi
+        args+=(--base "$base")
+        if [ -n "$WHYKIT_TODAY" ]; then
+          if ! [[ "$WHYKIT_TODAY" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "::error::today must be an ISO date (YYYY-MM-DD)"
+            exit 2
+          fi
+          args+=(--today "$WHYKIT_TODAY")
+        fi
+        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+          echo "::error::The decision diff requires actions/checkout with fetch-depth: 0"
+          exit 2
+        fi
+        report="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/whykit-diff.XXXXXX")"
+        "${args[@]}" > "$report"
+        if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        if [ "$WHYKIT_HEAD_REPO" != "$WHYKIT_REPOSITORY" ]; then
+          echo "WhyKit decision diff: pull request from a fork; written to the job summary, no comment"
+          exit 0
+        fi
+        "$WHYKIT_PYTHON" "$WHYKIT_ACTION_PATH/scripts/pr_comment.py" \
+          --body "$report" \
+          --repository "$WHYKIT_REPOSITORY" \
+          --pull "$WHYKIT_PR_NUMBER"
 
     - name: Export lint findings as SARIF
       id: sarif

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import errno
+import hashlib
 import datetime as dt
 import json
 import re
@@ -44,14 +45,31 @@ def _yaml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+# Latin letters that NFKD does not split into a base letter plus a mark, so
+# dropping non-ASCII would delete them outright ("Łódź" would become "odz").
+_LATIN_FOLD = str.maketrans({
+    "ł": "l", "Ł": "L", "đ": "d", "Đ": "D", "ø": "o", "Ø": "O", "ß": "ss",
+    "æ": "ae", "Æ": "AE", "œ": "oe", "Œ": "OE", "þ": "th", "Þ": "TH",
+    "ð": "d", "Ð": "D", "ı": "i", "ħ": "h", "Ħ": "H",
+})
+
+
 def _slugify(value: str) -> str:
     # A C-locale argv title carries surrogates for its UTF-8 bytes; recover the
     # text first so the file name does not depend on the locale.
     value = value.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
-    normalized = unicodedata.normalize("NFKD", value)
+    normalized = unicodedata.normalize("NFKD", value.translate(_LATIN_FOLD))
     ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
     slug = re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")
-    return slug or "record"
+    if slug:
+        return slug
+    # No Latin letters or digits at all (Chinese, Cyrillic, Greek…). File names
+    # stay ASCII, so derive a short stable suffix from the title instead of
+    # giving every such title the same name.
+    canonical = unicodedata.normalize("NFC", value).strip()
+    if not canonical:
+        return "record"
+    return "record-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:8]
 
 
 def _table_cell(value: str) -> str:
@@ -394,6 +412,14 @@ def _append_note_link(vault: Path, map_path: Path, note_path: Path, title: str, 
     atomic_write_text(map_path, updated)
 
 
+def _note_exists_message(vault: Path, path: Path) -> str:
+    relative = path.relative_to(vault.resolve()).as_posix() if path.is_absolute() else path.as_posix()
+    return (
+        f"{relative} already exists\n"
+        "hint: open and extend that note, or give the new one a more specific title"
+    )
+
+
 def create_note(
     vault: Path,
     title: str,
@@ -428,10 +454,10 @@ def create_note(
             raise ValueError("workstream must stay inside the vault") from exc
     path = safe_vault_target(vault, workstream_path / f"{_slugify(title)}.md", create_parents=False)
     if path.exists():
-        raise FileExistsError(path)
+        raise FileExistsError(_note_exists_message(vault, path))
     with vault_mutation_lock(vault):
         if path.exists():
-            raise FileExistsError(path)
+            raise FileExistsError(_note_exists_message(vault, path))
         map_path = _resolve_link_from(vault, link_from) if link_from else None
         if map_path:
             # Fail before the note exists rather than half-way through.

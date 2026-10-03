@@ -47,6 +47,67 @@
           },
           "fix": {
             "type": "string"
+          },
+          "security": {
+            "type": "boolean",
+            "description": "Lowering or disabling this rule in whykit.toml requires a reason."
+          },
+          "custom": {
+            "type": "boolean",
+            "description": "Defined by the vault's whykit.toml ([[rules.custom]])."
+          },
+          "applies_to": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "checks": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "rule",
+          "level",
+          "paths",
+          "reason",
+          "security"
+        ],
+        "properties": {
+          "rule": {
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "error",
+              "warning",
+              "off"
+            ]
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "security": {
+            "type": "boolean"
           }
         },
         "additionalProperties": true

@@ -149,6 +149,14 @@ def check_metadata(text: str, version: str, where: str) -> list[str]:
     return problems
 
 
+def contract_schema_files(root: Path = ROOT) -> set[str]:
+    """The JSON contract copies the MCP server reads its output schemas from."""
+    return {
+        f"{NAME}/contract_schemas/{path.name}"
+        for path in (root / "src" / NAME / "contract_schemas").glob("*.schema.json")
+    }
+
+
 def check_wheel(path: Path, version: str, root: Path = ROOT) -> list[str]:
     problems: list[str] = []
     with zipfile.ZipFile(path) as archive:
@@ -169,6 +177,8 @@ def check_wheel(path: Path, version: str, root: Path = ROOT) -> list[str]:
     missing_template = sorted(template_files(root) - present)
     for name in missing_template:
         problems.append(f"{path.name}: template file {name} is missing; `whykit init` would write an incomplete vault")
+    for name in sorted(contract_schema_files(root) - present):
+        problems.append(f"{path.name}: contract schema {name} is missing; whykit-mcp could not list its tools")
     for name in names:
         top = name.split("/", 1)[0]
         if top not in {NAME, dist_info}:

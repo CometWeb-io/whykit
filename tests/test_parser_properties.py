@@ -103,8 +103,9 @@ class IdentifierTests(unittest.TestCase):
             slug = _slugify(_random_text(rng, 20))
             with self.subTest(slug=slug):
                 self.assertRegex(slug, r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-        self.assertEqual(_slugify("Zażółć gęślą jaźń"), "zazoc-gesla-jazn")
-        self.assertEqual(_slugify("中文"), "record")
+        self.assertEqual(_slugify("Zażółć gęślą jaźń"), "zazolc-gesla-jazn")
+        self.assertRegex(_slugify("中文"), r"^record-[0-9a-f]{8}$")
+        self.assertEqual(_slugify("  "), "record")
 
     def test_next_id_follows_the_highest_matching_prefix(self) -> None:
         self.assertEqual(_next_id([], "D"), "D-001")

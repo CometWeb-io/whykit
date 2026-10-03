@@ -38,6 +38,7 @@ htmlcov/
 apps/explorer/node_modules/
 apps/explorer/dist/
 apps/explorer/src/generated/vault.json
+apps/explorer/src/generated/bodies.json
 apps/explorer/e2e/.build/
 apps/explorer/test-results/
 apps/explorer/playwright-report/

@@ -149,6 +149,13 @@ wikilinks and relative Markdown links that escape the governed boundary.
 named profile for repeatable CI behavior rather than baking many flags into a
 workflow.
 
+A run without the secret scan says so. `--no-secrets`, or a profile with
+`secrets = false`, prints `policy: secret scan skipped by …` (even with
+`--quiet`), adds an entry with rule `secret.*`, level `off` and a `skipped_by`
+key to the JSON `overrides` array of `lint` and `check`, a `::notice` to the
+`github` format and a configuration notification to SARIF, exactly as a
+security-relevant override does.
+
 ## Review defaults
 
 Two `[defaults]` keys drive the review cycle:
@@ -186,6 +193,119 @@ checked.
 This is a warning, not proof that a source is still correct. Recent access is
 also not permission to publish a claim; publication approval belongs to the
 owner's claims or review workflow.
+
+## Team rules
+
+A team can state its own conventions and retune built-in rules in the same
+file, under `[rules]`. Nothing here forks WhyKit: a vault without a `[rules]`
+table reports exactly what it did before.
+
+```toml
+[[rules.custom]]
+id = "custom.decision_evidence"
+level = "error"
+summary = "Approved decisions cite at least two sources."
+why = "One source is an anecdote; two can be compared."
+fix = "Cite a second E-NNN, or keep the decision in review."
+min_evidence = 2
+
+[rules.custom.applies_to]
+type = "decision"
+status = "approved"
+
+[[rules.custom]]
+id = "custom.research_shape"
+summary = "Research notes state their method and limits, and are refreshed."
+required_sections = ["## Method", "Limitations"]
+forbidden_patterns = ["\\bTBD\\b"]
+max_age_days = 180
+
+[rules.custom.applies_to]
+type = "research"
+paths = ["07-research/**"]
+
+[rules.overrides."note.orphan"]
+level = "off"
+paths = ["99-archive/**"]
+
+[rules.overrides."secret.detected"]
+level = "off"
+paths = ["fixtures/**"]
+reason = "Synthetic credentials used by the parser fixtures."
+```
+
+### Custom rules
+
+Each `[[rules.custom]]` table is one rule. Its findings use its `id` as the
+rule code, so tooling filters on them exactly like built-in codes.
+
+| Key | Meaning |
+|---|---|
+| `id` | Required. `custom.` followed by lowercase letters, digits and `_`. Unique. |
+| `level` | `warning` (default) or `error`. New rules should start as warnings. |
+| `summary` | Required. One line, shown in `whykit rules` and in every finding. |
+| `why`, `fix` | Optional explanation and remedy, shown by `whykit rules <code>` and in SARIF. |
+| `applies_to.type` | Document types the rule checks (one value or a list). |
+| `applies_to.status` | Lifecycle states it checks. Without it, `template` notes are skipped. |
+| `applies_to.paths` | Vault-relative globs: `*` and `?` stay in one folder, `**` crosses folders, `dir/` means everything below `dir`. |
+| `applies_to.workstream` | Values of the note's `workstream` front-matter key. |
+| `required_keys` | Front-matter keys that must be present and non-empty. |
+| `required_values` | A table of key = allowed value(s). A list-valued key such as `tags` passes when any item is allowed. |
+| `required_sections` | Headings the body must contain. `"Context"` matches at any level; `"## Context"` only at level 2. Case is ignored. |
+| `required_patterns` | Regular expressions at least one body line must match. |
+| `forbidden_patterns` | Regular expressions no body line may match; the first match is reported with its line. |
+| `min_evidence` | Fewest distinct E-NNN citations (front matter or prose) the note must carry. |
+| `max_age_days` | Most days allowed between `last_updated` and the lint date (`--today`). |
+
+A rule needs at least one check. It looks only at governed notes (notes with
+front matter that parses); every filter in `applies_to` must match. Body
+checks ignore inline code and fenced code blocks, so a style guide can quote
+the very phrase it forbids.
+
+Patterns run on Python's regular-expression engine, which has no timeout, so
+WhyKit bounds them instead. A pattern may be at most 256 characters, and it is
+rejected when it uses a backreference or a conditional group, nests a
+quantifier inside a repeated group (`(a+)+`), or repeats a group that contains
+an alternation (`(a|ab)*`): the shapes that can take exponential time. Patterns
+are matched one line at a time, and a line longer than 10,000 characters is
+checked on its first 10,000 only, with a finding that says so. Use `(?i)` for
+case-insensitive matching.
+
+### Overrides
+
+`[rules.overrides."<code>"]` changes how one rule, built-in or custom, is
+reported:
+
+| Key | Meaning |
+|---|---|
+| `level` | Required. `error`, `warning` or `off`. |
+| `paths` | Optional globs (same syntax as `applies_to.paths`); without them the override covers the whole vault. |
+| `reason` | Why the team made this choice. Required to lower or switch off a security-relevant rule. |
+
+To treat different folders differently, write the override as an array of
+tables (`[[rules.overrides."note.orphan"]]`). For each finding the entries are
+tried in order and the first one whose `paths` match decides. Overrides apply
+after every check has run, so a rule demoted to `warning` still fails `--strict`
+and strict profiles such as `ci`, and a rule promoted to `error` fails every
+profile.
+
+Security-relevant rules (listed in [Lint rules](rules.md#team-rules-and-overrides))
+cannot be quietly disabled. Lowering one or switching it off without a
+`reason` is a configuration error, and an accepted override is printed with
+every `lint` and `check` run, together with the number of findings it
+suppressed. `config.invalid` cannot be overridden.
+
+### When the policy is invalid
+
+The policy is validated before anything runs, and the error names the key:
+
+```text
+rules.custom[0].forbidden_patterns[0] has a nested quantifier (a quantifier inside a repeated group), which can take exponential time: /(a+)+/
+```
+
+`whykit check`, `whykit policy`, `whykit rules` and `whykit status` stop with
+the `invalid_config` error (exit 2). `whykit lint` reports the same message as
+a `config.invalid` finding, so the rest of the vault is still checked.
 
 ## Explorer network safety
 

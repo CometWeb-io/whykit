@@ -31,6 +31,7 @@ from collections.abc import Callable
 from typing import Iterable
 
 from .config import CONFIG_FILE, ConfigError, load_config
+from .rule_policy import EMPTY_POLICY, Override, check_custom_rules, policy_from_config, secret_scan_skipped
 from .console import emit_machine
 from .placeholders import (
     PROSE_SECTIONS as PLACEHOLDER_PROSE_SECTIONS,
@@ -1688,7 +1689,15 @@ def lint(
     hub_links: bool | None = None,
     today: dt.date | None = None,
     vault: object | None = None,
+    overrides: list[Override] | None = None,
 ) -> tuple[list[Path], list[Finding]]:
+    """Lint *root* (or the scoped *paths* inside it).
+
+    The vault's team policy from ``whykit.toml`` is part of the result: its
+    custom rules run with the built-in ones and its overrides are applied last.
+    Pass a list as *overrides* to receive the override entries in effect, each
+    counting what it changed and holding the findings it suppressed.
+    """
     root = root.resolve()
     from .vault_index import VaultIndex
 
@@ -1732,6 +1741,13 @@ def lint(
     check_decision_log(root, all_notes, findings, index_model.resolve_link)
     check_decision_review(root, notes, findings)
     check_decision_placeholders(root, notes, findings)
+    try:
+        config: dict | None = load_config(root)[0]
+    except Exception:  # noqa: BLE001 — reported as config.invalid by check_config
+        config = None
+    policy = policy_from_config(config) if config is not None else EMPTY_POLICY
+    if policy.custom:
+        check_custom_rules(policy, notes, findings, today, lambda path: rel(root, path))
     if not paths:
         check_config(root, findings)
         check_path_collisions(root, all_notes, findings)
@@ -1740,15 +1756,14 @@ def lint(
     if orphans and not paths:
         check_orphans(root, notes, findings, index_model.resolve_link)
     if hub_links is None and not paths:
-        try:
-            config, _ = load_config(root)
-            hub_links = bool(config.get("defaults", {}).get("require_hub_links"))
-        except Exception:  # noqa: BLE001 — config errors already emitted by check_config
-            hub_links = False
+        hub_links = bool(config.get("defaults", {}).get("require_hub_links")) if config is not None else False
     if hub_links and not paths:
         check_hub_links(root, all_notes, findings)
     if secrets and not paths:
         check_secrets(root, findings, {note.path: note.text for note in all_notes})
+    findings = policy.apply_overrides(findings)
+    if overrides is not None:
+        overrides.extend(policy.overrides)
     return files, findings
 
 
@@ -1818,7 +1833,12 @@ def main(argv: list[str] | None = None) -> int:
         return vault_not_found(args.root, json_mode=json_mode)
 
     try:
-        files, findings = lint(root, paths, orphans=not args.no_orphans, secrets=not args.no_secrets, today=as_of)
+        applied: list[Override] = []
+        files, findings = lint(
+            root, paths, orphans=not args.no_orphans, secrets=not args.no_secrets, today=as_of, overrides=applied,
+        )
+        if args.no_secrets:
+            applied.append(secret_scan_skipped("--no-secrets"))
     except VaultPathError as exc:
         return emit_error(
             "invalid_argument",
@@ -1830,26 +1850,34 @@ def main(argv: list[str] | None = None) -> int:
     warnings = [f for f in findings if f.level == "warning"]
     failed = bool(errors or (warnings and args.strict))
 
+    security_overrides = [entry for entry in applied if entry.security]
     if fmt == "sarif":
         from .ci_formats import to_sarif
-        emit_machine(json.dumps(to_sarif([asdict(f) for f in findings], root, files=len(files)), ensure_ascii=False, indent=2))
+        emit_machine(json.dumps(
+            to_sarif([asdict(f) for f in findings], root, files=len(files), overrides=applied),
+            ensure_ascii=False, indent=2,
+        ))
     elif fmt == "github":
-        from .ci_formats import github_annotations, workflow_command
+        from .ci_formats import github_annotations, override_notices, workflow_command
         lines = github_annotations([asdict(f) for f in findings], root)
+        lines.extend(override_notices(security_overrides))
         summary = f"{len(files)} files — {len(errors)} error(s), {len(warnings)} warning(s)"
         lines.append(f"whykit lint: {summary}")
         if failed and not errors:
             lines.append(workflow_command("error", f"whykit lint --strict: {len(warnings)} warning(s) fail this gate", title="WhyKit"))
         emit_machine("\n".join(lines))
     elif fmt == "json":
-        emit_machine(json.dumps({
+        payload: dict = {
             "contract_version": 1,
             "root": str(root),
             "files": len(files),
             "errors": len(errors),
             "warnings": len(warnings),
             "findings": [asdict(f) for f in findings],
-        }, ensure_ascii=False, indent=2))
+        }
+        if applied:
+            payload["overrides"] = [entry.report() for entry in applied]
+        emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         if note and not args.quiet:
             print(note)
@@ -1860,8 +1888,12 @@ def main(argv: list[str] | None = None) -> int:
             for path in sorted(by_path):
                 print(f"\n{path}")
                 for f in sorted(by_path[path], key=lambda x: (x.line or 0, x.code)):
-                    where = f":{f.line}" if f.line else ""
-                    print(f"  {f.level:<7}{where:<6} [{f.code}] {f.message}")
+                    where = f"line {f.line}" if f.line else ""
+                    print(f"  {f.level:<7}  {where:<10} [{f.code}] {f.message}")
         print(f"\n{len(files)} files — {len(errors)} error(s), {len(warnings)} warning(s)" if findings else f"\n{len(files)} files — clean")
+        # Printed even with --quiet: a security rule turned down by policy is
+        # part of what this result means, not detail.
+        for entry in security_overrides:
+            print(f"policy: {entry.describe()}")
 
     return 1 if failed else 0

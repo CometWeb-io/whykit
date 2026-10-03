@@ -406,6 +406,24 @@ class HiddenTwinTests(VaultToolsTestCase):
         out["trace:D-002"] = tools.call("trace", {"decision": "D-002", "today": "2026-09-24"})
         out["status"] = tools.call("status", {"today": "2026-09-24"})
         out["decisions"] = tools.decision_index()
+        # Every page and every cursor, too: a cursor must not count or encode
+        # a hidden record, so it is the same string with or without one.
+        for tool, arguments in (
+            ("query", {"text": "visible", "limit": 1}),
+            ("trace", {"today": "2026-09-24", "limit": 1}),
+            ("backlinks", {"target": "notes/shared", "limit": 1}),
+        ):
+            pages, cursor = [], None
+            for _ in range(50):
+                payload, is_error = tools.call(tool, {**arguments, **({"cursor": cursor} if cursor else {})})
+                pages.append(payload)
+                cursor = None if is_error else payload["next_cursor"]
+                if cursor is None:
+                    break
+            out[f"pages:{tool}"] = pages
+        out["resources"] = tools.resource_rows()
+        out["complete:target"] = tools.complete("ref/resource", "whykit://record/{+target}", "target", "")
+        out["complete:decision"] = tools.complete("ref/prompt", "summarize_decision", "decision_id", "")
         try:
             out["prompt"] = tools.summarize_decision_prompt("D-002")
         except ToolFailure as exc:

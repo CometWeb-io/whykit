@@ -73,6 +73,7 @@ def write_wheel(directory: Path, *, version: str = VERSION, meta: str | None = N
         f"{dist_info}/licenses/NOTICE": "WhyKit\n",
     }
     files.update(dict.fromkeys(check_dist.template_files(ROOT), ""))
+    files.update(dict.fromkeys(check_dist.contract_schema_files(ROOT), "{}"))
     files.update(extra or {})
     for name in drop:
         files.pop(name)
@@ -248,6 +249,42 @@ class PyprojectMetadataTests(unittest.TestCase):
         listed = {pattern.strip("/").split("/")[0] for pattern in include}
         self.assertLessEqual(listed, check_dist.SDIST_TOP_LEVEL)
 
+    def test_every_third_party_import_is_known_to_the_type_gate(self) -> None:
+        # The static CI job type-checks without the optional extras, so any
+        # module imported from outside the standard library must be listed in
+        # an ignore_missing_imports override or mypy fails there only.
+        import ast
+
+        ignored: set[str] = set()
+        for override in PYPROJECT["tool"]["mypy"].get("overrides", []):
+            if override.get("ignore_missing_imports"):
+                modules = override["module"]
+                ignored.update([modules] if isinstance(modules, str) else modules)
+
+        def covered(name: str) -> bool:
+            return any(
+                name == pattern or (pattern.endswith(".*") and (name + ".").startswith(pattern[:-1]))
+                for pattern in ignored
+            )
+
+        missing: set[str] = set()
+        for path in sorted((ROOT / "src" / "whykit").rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    names = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    names = [node.module]
+                else:
+                    continue
+                for name in names:
+                    top = name.split(".")[0]
+                    if top in sys.stdlib_module_names or top in {"whykit", "__future__"}:
+                        continue
+                    if not covered(name):
+                        missing.add(f"{path.name}: {name}")
+        self.assertEqual(sorted(missing), [])
+
     def test_sbom_tool_is_pinned_in_the_release_tooling_group(self) -> None:
         dist = PYPROJECT["dependency-groups"]["dist"]
         self.assertTrue(any(re.fullmatch(r"cyclonedx-bom==\d+(\.\d+)*", r) for r in dist), dist)
@@ -287,6 +324,15 @@ class CheckDistTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("py.typed is missing", errors)
         self.assertIn(f"template file {template_file} is missing", errors)
+
+    def test_missing_contract_schema_fails(self) -> None:
+        schemas = sorted(check_dist.contract_schema_files(ROOT))
+        self.assertIn("whykit/contract_schemas/trace-report.schema.json", schemas)
+        write_wheel(self.dist, drop=(schemas[0],))
+        write_sdist(self.dist)
+        code, errors = self.run_check()
+        self.assertEqual(code, 1)
+        self.assertIn(f"contract schema {schemas[0]} is missing", errors)
 
     def test_tests_caches_and_bytecode_in_the_wheel_fail(self) -> None:
         write_wheel(self.dist, extra={
@@ -387,11 +433,13 @@ class CheckDistTests(unittest.TestCase):
 class ReleaseWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        # The release's build job, shared with the pull-request dry run.
+        self.build = (ROOT / ".github" / "workflows" / "release-build.yml").read_text(encoding="utf-8")
         self.ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
     def test_publish_job_only_downloads_what_the_build_job_checked(self) -> None:
         publish = self.release.split("\n  publish:\n", 1)[1]
-        build = self.release.split("\n  build:\n", 1)[1].split("\n  publish:\n", 1)[0]
+        build = self.build
         self.assertNotIn("uv build", publish)
         self.assertIn("actions/download-artifact@", publish)
         self.assertIn("id-token: write", publish)
@@ -414,7 +462,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         ):
             with self.subTest(needle=needle):
                 self.assertIn(needle, self.ci)
-        self.assertIn(f'--python "{lowest}"', self.release, "the release SBOM must come from the lowest supported Python")
+        self.assertIn(f'--python "{lowest}"', self.build, "the release SBOM must come from the lowest supported Python")
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ whatever the console's encoding: on a Windows `cp1252` console or under
 included. Human text on stderr degrades to ASCII spellings instead of crashing.
 
 A command is in JSON mode when you pass `--json`. `graph` and `pack` are also in
-JSON mode when `--format` is `json` (their default), `lint` and `check` when
+JSON mode when `--format` is `json` (their default), `lint`, `check` and `diff` when
 `--format` is `json`, `snapshot` when it writes to stdout (no `--output`), and
 `explorer-index` always. The CI formats (`--format sarif` and
 `--format github`) are not JSON mode; see [CI formats](#ci-formats).
@@ -140,6 +140,13 @@ stderr only, and the exit code and JSON report are what they would have been:
   revision (usually the wrong `--root` for a vault in a subdirectory).
 - `history --head HEAD` runs while Markdown in the vault has uncommitted
   changes, which it does not check.
+- `diff` finds no vault under `--root` in either revision.
+
+`diff` is a report, not a gate: it exits `0` whenever the comparison ran, even
+when the change introduces lint findings. Use `check` for the pass/fail
+decision. It compares the merge base of `--base` and `--head` with `--head`
+(what a pull request shows), and reads both from Git objects, so uncommitted
+edits are not part of it.
 
 `history --staged` compares the Git index with `--base` (default `HEAD`), which
 is what a pre-commit hook needs. Its report has `"head": "INDEX"` and
@@ -176,6 +183,7 @@ CLI actually prints.
 | `evidence retire --json` | `evidence-retire-result.schema.json` |
 | `adopt --json` | `adopt-report.schema.json` |
 | `history --json` | `history-report.schema.json` |
+| `diff --json` | `diff-report.schema.json` |
 | `rules --json` | `rule-catalog.schema.json` |
 | `rules <code> --json` | `rule-detail.schema.json` |
 | `doctor --json` | `doctor-report.schema.json` |
@@ -199,6 +207,8 @@ that is not what it expects.
 |---|---|---|
 | `lint --format sarif` | A SARIF 2.1.0 log for code-scanning dashboards. | `lint-sarif.schema.json` |
 | `lint --format github`, `check --format github` | GitHub Actions workflow commands (`::error file=…,line=…::…`), which the runner turns into annotations. | none (GitHub's text protocol) |
+| `diff --format github` | Workflow commands for the decision diff: a notice per new, superseded or archived decision and review-date move, a warning per decision citing changed evidence, and each new lint finding at its own level. | none (GitHub's text protocol) |
+| `diff --format markdown` | The decision diff as Markdown for a pull request comment. The first line is a hidden marker, `<!-- whykit-diff root=… -->`, naming the vault; text taken from the vault is escaped so it cannot add HTML, links or mentions; the comment stays under GitHub's size limit. | none |
 
 The SARIF log has one run. `tool.driver.rules` is the whole rule catalog in
 `whykit rules` order, and each rule's `helpUri` is its anchor in the
@@ -211,6 +221,19 @@ result has `ruleId` set to the stable rule code (the same value as
 does not open a new code-scanning alert. `runs[0].properties` carries
 `contract_version`, the file count and the vault's prefix in the work tree.
 `whykit.contract.FORMAT_SCHEMAS` maps the format to its schema.
+
+A vault's [team rules](configuration.md#team-rules) appear in the same places.
+Custom rule codes (`custom.<name>`) join `tool.driver.rules` after the built-in
+catalog, without a `helpUri` because they are not in the public rule reference.
+When `whykit.toml` has overrides, `lint --json` adds an `overrides` array (and
+`check --json` adds it under `lint`): one entry per override with `rule`,
+`level`, `paths`, `reason`, `security` and `matched`, the number of findings it
+changed or suppressed. Entries for security-relevant rules also list the
+`suppressed` findings. In SARIF those findings stay in `results` with an
+external `suppressions` entry carrying the reason, and `--format github` prints
+a `::notice` for each such override. Without overrides the key is absent.
+Security-relevant built-in rules carry a `security` tag in SARIF and
+`"security": true` in `rules --json`.
 
 `--format github` prints one workflow command per finding at its own level,
 then a plain summary line. When `--strict` (or a strict profile) fails on

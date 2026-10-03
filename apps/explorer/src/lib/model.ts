@@ -3,12 +3,21 @@ import { extractWikilinks } from "./markdown.ts";
 
 export type VaultModel = ReturnType<typeof createVaultModel>;
 
+/** Open-question headings and "Needs verification" markers: unknowns kept visible. */
+export function reviewCues(body: string): number {
+  return body.match(/Needs verification|## Open questions/gi)?.length ?? 0;
+}
+
 /**
  * Derive every lookup the Explorer needs from the generated index in one pass.
  * Kept free of the bundled JSON import so it can be tested against fixtures.
  */
 export function createVaultModel(vault: VaultIndex) {
   const docs = vault.docs;
+  // Bodies arrive with the index (tests, older builds) or later as a chunk.
+  const bodies = new Map<string, string>();
+  for (const d of docs) if (typeof d.body === "string") bodies.set(d.id, d.body);
+  let complete = bodies.size === docs.length;
   const byId = new Map(docs.map(d => [d.id.toLowerCase(), d]));
   const aliases = new Map<string, VaultDoc[]>();
   for (const d of docs) {
@@ -37,8 +46,11 @@ export function createVaultModel(vault: VaultIndex) {
   for (const doc of docs) {
     const targets: VaultDoc[] = [];
     const seen = new Set<string>();
-    for (const rawTarget of extractWikilinks(doc.body)) {
-      const target = resolveDoc(rawTarget);
+    // A split index carries the links resolved at build time by this same code.
+    const resolved = doc.links
+      ? doc.links.map(at => docs[at])
+      : extractWikilinks(doc.body ?? "").map(resolveDoc);
+    for (const target of resolved) {
       if (!target || target.id === doc.id || seen.has(target.id)) continue;
       seen.add(target.id);
       targets.push(target);
@@ -49,14 +61,33 @@ export function createVaultModel(vault: VaultIndex) {
     outgoing.set(doc.id, targets);
   }
 
-  const searchIndex = docs.map(doc => {
-    const title = doc.title.toLowerCase();
-    const id = doc.id.toLowerCase();
-    const tags = doc.tags.join(" ").toLowerCase();
-    const summary = doc.summary.toLowerCase();
-    const body = doc.body.toLowerCase();
-    return { doc, title, id, tags, summary, body, haystack: `${title} ${id} ${tags} ${summary} ${body}` };
-  });
+  // Built on the first search rather than at start-up: lowercasing every body
+  // of a large vault is work the first paint does not need.
+  type Entry = { doc: VaultDoc; title: string; id: string; tags: string; summary: string; meta: string; body: string };
+  let searchIndex: Entry[] | null = null;
+  function entries(): Entry[] {
+    if (searchIndex) return searchIndex;
+    searchIndex = docs.map(doc => {
+      const title = doc.title.toLowerCase();
+      const id = doc.id.toLowerCase();
+      const tags = doc.tags.join(" ").toLowerCase();
+      const summary = doc.summary.toLowerCase();
+      const body = (bodies.get(doc.id) ?? "").toLowerCase();
+      return { doc, title, id, tags, summary, meta: `${title} ${id} ${tags} ${summary}`, body };
+    });
+    return searchIndex;
+  }
+
+  /** Add the bodies chunk. It must belong to this index: one body per note. */
+  function attachBodies(chunk: Readonly<Record<string, string>>): void {
+    const missing = docs.filter(d => !Object.hasOwn(chunk, d.id) || typeof chunk[d.id] !== "string");
+    if (missing.length || Object.keys(chunk).length !== docs.length) {
+      throw new Error(`body chunk does not match this index (${missing.length} notes without a body)`);
+    }
+    for (const d of docs) bodies.set(d.id, chunk[d.id]!);
+    complete = true;
+    searchIndex = null;
+  }
 
   const evidenceByKey = new Map(vault.evidence.map(row => [row.id, row]));
   const evidenceUsage = new Map<string, VaultDoc[]>();
@@ -114,8 +145,8 @@ export function createVaultModel(vault: VaultIndex) {
     const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     if (!terms.length) return [];
     const hits: { doc: VaultDoc; score: number }[] = [];
-    for (const item of searchIndex) {
-      if (!terms.every(term => item.haystack.includes(term))) continue;
+    for (const item of entries()) {
+      if (!terms.every(term => item.meta.includes(term) || item.body.includes(term))) continue;
       let score = 0;
       for (const term of terms) {
         if (item.title === term) score += 20;
@@ -139,6 +170,14 @@ export function createVaultModel(vault: VaultIndex) {
     docs,
     resolveDoc,
     searchDocs,
+    attachBodies,
+    /** Build the search index now (e.g. while idle) instead of on the next query. */
+    prepareSearch: (): void => { entries(); },
+    /** True once every note's body is available (search covers note text). */
+    hasBodies: (): boolean => complete,
+    bodyOf: (doc: VaultDoc): string | undefined => bodies.get(doc.id),
+    /** Review cues across the vault; precomputed in a split index. */
+    openCues: (): number => docs.reduce((n, d) => n + (d.cues ?? reviewCues(bodies.get(d.id) ?? "")), 0),
     linksFor: (doc: VaultDoc): VaultDoc[] => outgoing.get(doc.id) || [],
     backlinksFor: (doc: VaultDoc): VaultDoc[] => incoming.get(doc.id) || [],
     canonicalDocs: (): VaultDoc[] => canonical,

@@ -34,6 +34,7 @@ From a source checkout, prefix commands with `uv run` (see
 | `lint [paths…]` | Check the vault, or some files in it; `--format` picks `text`, `json`, `sarif` (SARIF 2.1.0 for code scanning) or `github` (workflow annotations) | `--strict`, `--quiet`, `--json`, `--format`, `--no-orphans`, `--no-secrets`, `--today`, `--root` | [Rules](rules.md), [CI](ci.md) |
 | `check` | Run a named policy gate (`local`, `ci`, `release` or your own; default `ci`); `--format` picks `text`, `json` or `github` | `--profile`, `--base`, `--head`, `--today`, `--json`, `--format`, `--root` | [CI](ci.md) |
 | `history` | Verify that accepted reasoning and earlier review events were not rewritten between two commits, or (`--staged`) in the staged changes, for pre-commit | `--base`, `--head`, `--staged`, `--json`, `--root` | [Concepts](concepts.md#lifecycle) |
+| `diff` | Show what a change does to the decisions: new, superseded and archived decisions with their supersession chain, status and review-date moves, evidence added, retired or re-sourced, decisions citing changed evidence, and lint findings introduced or fixed. Reads both commits from Git without a checkout; `--format` picks `text`, `json`, `markdown` (a pull request comment) or `github` (workflow annotations) | `--base`, `--head`, `--today`, `--json`, `--format`, `--root` | [CI](ci.md#decision-diff-comment) |
 | `policy` | Show the effective repository policy | `--json`, `--root` | [Configuration](configuration.md) |
 | `status` | Summarize vault health and the review queue | `--due-days`, `--strict`, `--today`, `--json`, `--root` | [Concepts](concepts.md#the-review-cycle) |
 | `review list` | Show upcoming and overdue reviews | `--due-days`, `--overdue-only`, `--owner`, `--today`, `--json`, `--root` | [How-to](guide.md#record-a-review) |
@@ -49,7 +50,7 @@ From a source checkout, prefix commands with `uv run` (see
 | `trace` | Trace each decision to its evidence; flag missing, retired or stale sources | `--decision`, `--gaps-only`, `--max-age-days`, `--strict`, `--today`, `--json`, `--root` | [How-to](guide.md#trace-decisions-to-their-evidence) |
 | `snapshot` | Write a deterministic fingerprint of governed content; `--format v2` (default) normalizes line endings and a byte-order mark, `v1` hashes raw bytes | `--output`, `--compact`, `--format`, `--today`, `--root` | [How-to](guide.md#snapshot-and-detect-drift) |
 | `verify-snapshot <snapshot>` | Compare the vault with a snapshot | `--today`, `--json`, `--root` | [How-to](guide.md#snapshot-and-detect-drift) |
-| `rules [code]` | List the lint rules, or explain one | `--json`, `--markdown` | [Rules](rules.md) |
+| `rules [code]` | List the lint rules, or explain one; with a vault, its custom rules and overrides too | `--json`, `--markdown`, `--root` | [Rules](rules.md), [Team rules](configuration.md#team-rules) |
 | `doctor` | Check prerequisites, integrity and review hygiene | `--json`, `--root` | [Troubleshooting](troubleshooting.md) |
 | `install-hooks` | Install a pre-commit hook that runs the `local` profile | `--force`, `--root` | [CI](ci.md#local-hooks) |
 | `explorer-index` | Export the Explorer's vault index (always JSON) | `--today`, `--json`, `--root` | [Automation](automation.md#schemas) |
@@ -59,8 +60,9 @@ From a source checkout, prefix commands with `uv run` (see
 ## `whykit-mcp`
 
 The optional read-only MCP server is a separate command, installed with the
-`mcp` extra: `whykit-mcp --root DIR [--max-sensitivity LABEL]`. See the
-[MCP server guide](mcp.md).
+`mcp` extra: `whykit-mcp --root DIR [--max-sensitivity LABEL]
+[--watch-interval SECONDS] [--http [--host HOST] [--port PORT] [--token-file PATH]]`.
+It speaks stdio unless `--http` is given. See the [MCP server guide](mcp.md).
 
 ## Exit codes
 

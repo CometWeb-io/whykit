@@ -5,7 +5,18 @@ import { SYNTHETIC_URL } from "./ports.ts";
 // are several times the cost measured on a laptop so a slow CI runner does not
 // flake; they exist to catch a return of whole-vault rendering or quadratic
 // work, which costs seconds rather than milliseconds at this size.
-const BUDGET = { interactive: 4000, search: 250, view: 1000, graphFocus: 250 };
+//
+// Time to interactive was 760–970 ms on a laptop while the whole 10 MB index
+// was bundled; with note bodies split into a chunk loaded after first paint it
+// is 320–360 ms, so its budget dropped from 4,000 to 1,500 ms. `docText` is a
+// cold deep link to a note, which has to wait for that chunk.
+// Budgets are tuned on a laptop; shared CI runners are slower, so CI scales them
+// (PERF_BUDGET_SCALE, default 2.5 under CI) instead of loosening them for everyone.
+const SCALE = Number(process.env.PERF_BUDGET_SCALE ?? (process.env.CI ? 2.5 : 1));
+const BASE = { interactive: 1500, docText: 2500, search: 250, view: 1000, graphFocus: 250 };
+const BUDGET = Object.fromEntries(
+  Object.entries(BASE).map(([key, value]) => [key, value * SCALE]),
+) as typeof BASE;
 
 test.describe.configure({ mode: "serial" });
 
@@ -18,6 +29,15 @@ async function timeToInteractive(page: Page, hash = ""): Promise<number> {
   return page.evaluate(() => new Promise<number>(done => {
     requestAnimationFrame(() => requestIdleCallback(() => done(performance.now()), { timeout: 10_000 }));
   }));
+}
+
+/** Milliseconds from navigation start until a deep-linked note shows its text. */
+async function timeToText(page: Page, hash: string): Promise<number> {
+  // A hash-only goto would stay in the same document; leave it first so this is a cold load.
+  await page.goto("about:blank");
+  await page.goto(`${SYNTHETIC_URL}${hash}`);
+  await expect(page.locator("main .markdown p").first()).toBeVisible();
+  return page.evaluate(() => new Promise<number>(done => requestAnimationFrame(() => done(performance.now()))));
 }
 
 /** Milliseconds from an input event until the next painted frame shows `selector` text changed. */
@@ -95,10 +115,13 @@ test("a 5,000-note vault loads, searches and navigates within budget", async ({ 
     if (label === "Graph") results.graphFocus = await graphFocus(page, 40);
   }
 
+  results.docText = await timeToText(page, "#doc=06-decisions%2Fd-002-record");
+
   info.annotations.push({ type: "perf", description: JSON.stringify(results) });
   console.log(`perf (5k notes): ${JSON.stringify(Object.fromEntries(Object.entries(results).map(([k, v]) => [k, Math.round(v)])))}`);
 
   expect(results.interactive).toBeLessThan(BUDGET.interactive);
+  expect(results.docText).toBeLessThan(BUDGET.docText);
   expect(results.searchFirst).toBeLessThan(BUDGET.search);
   expect(results.searchNarrow).toBeLessThan(BUDGET.search);
   expect(results.graphFocus).toBeLessThan(BUDGET.graphFocus);

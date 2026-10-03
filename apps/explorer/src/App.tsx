@@ -6,12 +6,12 @@ import {
   BookOpen, CheckCircle2, ChevronRight, FileText, GitBranch, HeartPulse, History, Hourglass,
   Menu, Network, Scale, Search, Shield, X, AlertTriangle, Copy, Terminal,
 } from "lucide-react";
-import { vault, docs, resolveDoc, linksFor, backlinksFor, canonicalDocs, searchDocs, evidenceFor, docsForEvidence, decisionChain } from "./lib/vault.ts";
+import { vault, docs, resolveDoc, linksFor, backlinksFor, canonicalDocs, searchDocs, evidenceFor, docsForEvidence, decisionChain, bodyOf, openCues, useBodies } from "./lib/vault.ts";
 import { createSlugger, inlineText, parseMarkdown, type MdBlock, type MdInline } from "./lib/markdown.ts";
 import { hrefFor, type Params, type Route, type View } from "./lib/route.ts";
 import { describeDue, reviewQueue } from "./lib/reviews.ts";
 import { currentRoute, go, setParams, useRoute } from "./nav.ts";
-import { Empty, Metric, Sensitivity, ShowMore, StatusBadge, useIncremental } from "./ui.tsx";
+import { countExposed, Empty, ExposureNotice, Metric, Sensitivity, ShowMore, StatusBadge, useIncremental } from "./ui.tsx";
 import { GraphPage } from "./views/GraphPage.tsx";
 import { TimelinePage } from "./views/TimelinePage.tsx";
 import { FreshnessPage } from "./views/FreshnessPage.tsx";
@@ -111,7 +111,7 @@ function HomePage() {
   const working = docs.filter(d => d.status !== "template");
   const canon = canonicalDocs();
   const latest = [...vault.decisions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
-  const open = docs.reduce((n, d) => n + (d.body.match(/Needs verification|## Open questions/gi)?.length || 0), 0);
+  const open = openCues();
   return <div className="page wide">
     <div className="eyebrow">Git-native evidence & decision ledger</div>
     <h1>{vault.vaultName}</h1>
@@ -231,6 +231,7 @@ function AdoptPage() {
 }
 
 function DocPage({ id }: { id: string }) {
+  const bodies = useBodies(true);
   const doc = resolveDoc(id);
   if (!doc) return <div className="page"><h1>Document not found</h1><p className="lede">No note called <code>{id}</code> exists in the generated vault index. It may have been renamed, or the index may be older than the vault — rerun <code>npm run index</code>.</p><a className="button" href={hrefFor("home")}>Back home</a></div>;
   const links = linksFor(doc), backs = backlinksFor(doc);
@@ -240,13 +241,20 @@ function DocPage({ id }: { id: string }) {
     <div className="doc-meta"><StatusBadge status={doc.status}/><Sensitivity value={doc.sensitivity}/><span className="mono">{doc.type}</span>{doc.sourceOfTruth ? <span className="canonical">source of truth</span> : null}</div>
     <h1>{doc.title}</h1><div className="doc-sub"><span>{doc.owner || "No owner"}</span><span>Updated {doc.lastUpdated || "—"}</span>{doc.reviewBy ? <span>Review by {doc.reviewBy}</span> : null}{doc.sourceIds.length ? <span>{doc.sourceIds.length} evidence ID{doc.sourceIds.length === 1 ? "" : "s"}</span> : null}</div>
     {doc.decisionId ? <DecisionLineage decisionId={doc.decisionId}/> : null}
-    <MarkdownView source={doc.body}/>
+    <DocBody body={bodyOf(doc)} state={bodies}/>
     {(evidenceRows.length || missing.length) ? <section><h2>Registered evidence</h2>
       {evidenceRows.length ? <div className="cards two">{evidenceRows.map(e => <div className="card" key={e.id}><div className="eyebrow">{e.id} · {e.state === "active" ? (e.type || "evidence") : "retired"}</div><h3>{e.source}</h3><p>{e.state === "active" ? e.claims : e.why}</p><small className="mono">{e.state === "active" ? e.location : (e.replacedBy ? `replacement: ${e.replacedBy}` : `retired ${e.retiredOn || ""}`)}</small></div>)}</div> : null}
       {missing.length ? <Empty>Not in the evidence register: <code>{missing.join(", ")}</code></Empty> : null}
     </section> : null}
     {(links.length || backs.length) ? <section className="relations"><h2>Relationships</h2><div className="cards two">{links.length ? <div className="card"><div className="eyebrow">Links to</div>{links.map(d => <a className="relation" key={d.id} href={hrefFor("doc", d.id)}>{d.title}<ChevronRight size={14} aria-hidden="true"/></a>)}</div> : null}{backs.length ? <div className="card"><div className="eyebrow">Referenced by</div>{backs.map(d => <a className="relation" key={d.id} href={hrefFor("doc", d.id)}>{d.title}<ChevronRight size={14} aria-hidden="true"/></a>)}</div> : null}</div></section> : null}
   </div>;
+}
+
+function DocBody({ body, state }: { body: string | undefined; state: ReturnType<typeof useBodies> }) {
+  if (body !== undefined) return <MarkdownView source={body}/>;
+  return state === "failed"
+    ? <Empty>The note text could not be loaded. Reload the page to try again.</Empty>
+    : <p className="muted doc-loading" role="status">Loading the note text…</p>;
 }
 
 function DecisionLineage({ decisionId }: { decisionId: string }) {
@@ -274,7 +282,12 @@ function SearchOverlay({ initial, onClose }: { initial: string; onClose: () => v
   const [q, setQ] = useState(initial);
   const [active, setActive] = useState(0);
   const deferred = useDeferredValue(q);
-  const results = useMemo(() => searchDocs(deferred), [deferred]);
+  // Titles, ids, tags and summaries are searchable at once; note text joins
+  // the results when its chunk arrives.
+  const bodies = useBodies(true);
+  // `bodies` is a real input: searchDocs reads the chunk once it is attached.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const results = useMemo(() => searchDocs(deferred), [deferred, bodies]);
   // The highlighted row resets when the query changes; clamp while the
   // deferred result list catches up so it never points past the end.
   const current = Math.min(active, Math.max(results.length - 1, 0));
@@ -318,14 +331,19 @@ function SearchOverlay({ initial, onClose }: { initial: string; onClose: () => v
       <div className="palette-results" id="search-results" role="listbox" aria-label="Results" ref={list}>
         {results.map((d, i) => <div key={d.id} id={optionId(i)} data-index={i} role="option" aria-selected={i === current} className={i === current ? "option active" : "option"} onMouseMove={() => setActive(i)} onClick={() => open(d.id)}><div><strong>{d.title}</strong><small>{d.id}</small></div><StatusBadge status={d.status}/></div>)}
       </div>
-      <p className="palette-status" role="status" aria-live="polite">{!deferred.trim() ? "Type to search. ↑↓ to move, Enter to open, Esc to close." : results.length ? `${results.length} result${results.length === 1 ? "" : "s"}` : "No matching notes."}</p>
+      <p className="palette-status" role="status" aria-live="polite">{!deferred.trim() ? "Type to search. ↑↓ to move, Enter to open, Esc to close." : results.length ? `${results.length} result${results.length === 1 ? "" : "s"}` : "No matching notes."}{deferred.trim() && bodies !== "ready" ? (bodies === "failed" ? " Note text could not be loaded; titles, tags and summaries only." : " Still loading note text; titles, tags and summaries only so far.") : ""}</p>
     </div>
   </div>;
   /* eslint-enable jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus */
 }
 
+const EXPOSED = countExposed(docs);
+
 function App() {
   const route = useRoute();
+  // Fetch the note bodies once the first paint is done, so search and the
+  // document view rarely have to wait for them.
+  useBodies();
   const search = route.params?.search;
   const setSearch = (open: boolean) => setParams({ search: open ? (currentRoute().params?.search ?? "") : null });
   // The mobile menu belongs to the route it was opened on, so any navigation
@@ -367,7 +385,7 @@ function App() {
   return <div className="app"><a className="skip" href="#content" onClick={e => { e.preventDefault(); main.current?.focus(); }}>Skip to content</a><header><button className="icon-button mobile" onClick={() => setMenu(true)} aria-label="Open navigation" aria-expanded={menu} aria-controls="sidebar"><Menu size={18} aria-hidden="true"/></button><Wordmark/><button className="search-trigger" onClick={() => setSearch(true)} aria-label="Search vault" aria-haspopup="dialog" aria-keyshortcuts="Meta+K Control+K"><Search size={15} aria-hidden="true"/><span>Search vault</span><kbd aria-hidden="true">⌘K</kbd></button><div className="header-health"><span className={vault.lint.errors ? "dot bad" : "dot"} aria-hidden="true"/>{vault.lint.errors ? `${vault.lint.errors} errors` : "Vault clean"}</div></header>
     <aside id="sidebar" className={menu ? "sidebar open" : "sidebar"}>{menu ? <button className="close-nav" onClick={() => setMenu(false)} aria-label="Close navigation"><X size={18} aria-hidden="true"/></button> : null}<nav aria-label="Vault"><div className="nav-label">Vault</div>{PRIMARY.map(x => <button {...navButton(current === x.id)} key={x.id} onClick={() => go(x.id)}><x.icon size={16} aria-hidden="true"/>{x.label}</button>)}{streamDocs.length ? <><div className="nav-label">Spine</div>{streamDocs.map(x => <button key={x.dir} {...navButton(route.doc === x.doc.id)} onClick={() => go("doc", x.doc.id)}><span className="nav-index" aria-hidden="true">{x.index ?? ""}</span>{x.label}</button>)}</> : null}<div className="nav-label">More</div><button {...navButton(current === "templates")} onClick={() => go("templates")}><FileText size={16} aria-hidden="true"/>Templates</button><button {...navButton(current === "adopt")} onClick={() => go("adopt")}><GitBranch size={16} aria-hidden="true"/>Adopt</button></nav><div className="sidebar-foot"><span>Generated from Markdown</span><small><time dateTime={vault.generatedAt}>{new Date(vault.generatedAt).toLocaleString()}</time></small></div></aside>
     {menu ? <button className="scrim" onClick={() => setMenu(false)} aria-label="Close navigation" tabIndex={-1}/> : null}
-    <main id="content" ref={main} tabIndex={-1}>{route.view === "home" ? <HomePage/> : route.view === "decisions" ? <DecisionsPage/> : route.view === "timeline" ? <TimelinePage params={params}/> : route.view === "evidence" ? <EvidencePage params={params}/> : route.view === "freshness" ? <FreshnessPage params={params}/> : route.view === "reviews" ? <ReviewsPage/> : route.view === "graph" ? <GraphPage params={params}/> : route.view === "health" ? <HealthPage/> : route.view === "templates" ? <TemplatesPage/> : route.view === "adopt" ? <AdoptPage/> : <DocPage id={route.doc || "Home"}/>}</main>
+    <main id="content" ref={main} tabIndex={-1}><ExposureNotice counts={EXPOSED}/>{route.view === "home" ? <HomePage/> : route.view === "decisions" ? <DecisionsPage/> : route.view === "timeline" ? <TimelinePage params={params}/> : route.view === "evidence" ? <EvidencePage params={params}/> : route.view === "freshness" ? <FreshnessPage params={params}/> : route.view === "reviews" ? <ReviewsPage/> : route.view === "graph" ? <GraphPage params={params}/> : route.view === "health" ? <HealthPage/> : route.view === "templates" ? <TemplatesPage/> : route.view === "adopt" ? <AdoptPage/> : <DocPage id={route.doc || "Home"}/>}</main>
     {search !== undefined ? <SearchOverlay initial={search} onClose={() => setSearch(false)}/> : null}
   </div>;
 }

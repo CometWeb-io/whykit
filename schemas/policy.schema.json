@@ -45,6 +45,22 @@
           "additionalProperties": {
             "type": "object"
           }
+        },
+        "rules": {
+          "type": "object",
+          "description": "Team policy: [[rules.custom]] and [rules.overrides].",
+          "properties": {
+            "custom": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "overrides": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true

@@ -99,3 +99,54 @@ export function neighbourhood(edges: readonly GraphEdge[], id: string | null): S
   }
   return out;
 }
+
+/**
+ * The node a key moves keyboard focus to, or -1 when the key is not a
+ * movement key. Up and Down follow the reading order (down a column, then on
+ * to the top of the next); Left and Right go to the closest note in that
+ * direction, preferring the same row; Home and End go to the first and last
+ * note. At an edge the focus stays where it is.
+ */
+export function moveFocus(nodes: readonly GraphNode[], index: number, key: string): number {
+  if (!nodes.length) return -1;
+  const last = nodes.length - 1;
+  const at = Math.min(Math.max(index, 0), last);
+  switch (key) {
+    case "ArrowDown": return Math.min(at + 1, last);
+    case "ArrowUp": return Math.max(at - 1, 0);
+    case "Home": return 0;
+    case "End": return last;
+    case "ArrowLeft":
+    case "ArrowRight": {
+      const here = nodes[at]!;
+      const sign = key === "ArrowRight" ? 1 : -1;
+      let best = at, bestScore = Infinity;
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i]!;
+        const dx = (n.x - here.x) * sign;
+        if (dx <= 0) continue;
+        // A row change costs more than a column step, so Right stays on the row.
+        const score = dx + 3 * Math.abs(n.y - here.y);
+        if (score < bestScore) { bestScore = score; best = i; }
+      }
+      return best;
+    }
+    default: return -1;
+  }
+}
+
+/**
+ * Type-ahead: the first note after `index` whose title starts with `prefix`,
+ * wrapping round. A longer prefix may match the current note itself, so typing
+ * more of its title keeps focus where it is.
+ */
+export function typeahead(nodes: readonly GraphNode[], index: number, prefix: string): number {
+  const needle = prefix.toLocaleLowerCase();
+  if (!needle || !nodes.length) return -1;
+  const start = needle.length === 1 ? index + 1 : index;
+  for (let k = 0; k < nodes.length; k++) {
+    const i = (((start + k) % nodes.length) + nodes.length) % nodes.length;
+    if (nodes[i]!.d.title.toLocaleLowerCase().startsWith(needle)) return i;
+  }
+  return -1;
+}

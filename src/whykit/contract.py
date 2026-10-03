@@ -98,6 +98,7 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "evidence retire": "evidence-retire-result.schema.json",
     "adopt": "adopt-report.schema.json",
     "history": "history-report.schema.json",
+    "diff": "diff-report.schema.json",
     "rules": "rule-catalog.schema.json",
     "rules <code>": "rule-detail.schema.json",
     "doctor": "doctor-report.schema.json",

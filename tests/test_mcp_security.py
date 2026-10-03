@@ -174,6 +174,7 @@ class McpSensitivityTests(unittest.TestCase):
         registered_tools: dict[str, tuple[object, dict]] = {}
         registered_resources: dict[str, object] = {}
         registered_prompts: dict[str, object] = {}
+        registered_completions: list[object] = []
 
         class SDKServer:
             def __init__(self, name: str, **kwargs: object) -> None:
@@ -201,6 +202,13 @@ class McpSensitivityTests(unittest.TestCase):
 
                 return register
 
+            def completion(self):
+                def register(function):
+                    registered_completions.append(function)
+                    return function
+
+                return register
+
         class Model:
             def __init__(self, **kwargs: object) -> None:
                 self.__dict__.update(kwargs)
@@ -211,7 +219,7 @@ class McpSensitivityTests(unittest.TestCase):
         server_package.__path__ = []  # type: ignore[attr-defined]
         server_package.MCPServer = SDKServer  # type: ignore[attr-defined]
         mcp_types = types.ModuleType("mcp_types")
-        for name in ("CallToolResult", "TextContent", "ToolAnnotations"):
+        for name in ("CallToolResult", "TextContent", "ToolAnnotations", "Completion", "ListResourcesResult", "Resource"):
             setattr(mcp_types, name, type(name, (Model,), {}))
         mcp_types.INTERNAL_ERROR = -32603  # type: ignore[attr-defined]
         mcp_types.INVALID_PARAMS = -32602  # type: ignore[attr-defined]
@@ -220,6 +228,17 @@ class McpSensitivityTests(unittest.TestCase):
             setattr(exceptions, name, type(name, (Exception,), {}))
         shared = types.ModuleType("mcp.shared.exceptions")
         shared.MCPError = type("MCPError", (Exception,), {})  # type: ignore[attr-defined]
+        subscriptions = types.ModuleType("mcp.server.subscriptions")
+
+        class Bus:
+            def subscribe(self, listener):
+                return lambda: None
+
+        subscriptions.InMemorySubscriptionBus = Bus  # type: ignore[attr-defined]
+        subscriptions.ResourcesListChanged = type("ResourcesListChanged", (Model,), {})  # type: ignore[attr-defined]
+        subscriptions.ResourceUpdated = type("ResourceUpdated", (Model,), {})  # type: ignore[attr-defined]
+        anyio = types.ModuleType("anyio")
+        anyio.__path__ = []  # type: ignore[attr-defined]
         pydantic = types.ModuleType("pydantic")
         pydantic.Field = lambda **kwargs: kwargs  # type: ignore[attr-defined]
         pydantic.ValidationError = type("ValidationError", (ValueError,), {})  # type: ignore[attr-defined]
@@ -229,6 +248,9 @@ class McpSensitivityTests(unittest.TestCase):
             "mcp.server": server_package,
             "mcp.server.mcpserver": types.ModuleType("mcp.server.mcpserver"),
             "mcp.server.mcpserver.exceptions": exceptions,
+            "mcp.server.subscriptions": subscriptions,
+            "anyio": anyio,
+            "anyio.to_thread": types.ModuleType("anyio.to_thread"),
             "mcp.shared": types.ModuleType("mcp.shared"),
             "mcp.shared.exceptions": shared,
             "mcp_types": mcp_types,
@@ -246,6 +268,7 @@ class McpSensitivityTests(unittest.TestCase):
         self.assertEqual(set(registered_tools), {"query", "context", "impact", "status", "pack", "trace", "backlinks"})
         self.assertEqual(set(registered_resources), {"whykit://decisions", "whykit://record/{+target}"})
         self.assertEqual(set(registered_prompts), {"summarize_decision", "review_evidence_gaps"})
+        self.assertEqual(len(registered_completions), 1)
         for name, (_, options) in registered_tools.items():
             with self.subTest(tool=name):
                 annotations = options["annotations"]

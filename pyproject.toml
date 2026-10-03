@@ -159,9 +159,10 @@ python_version = "3.11"
 files = ["src/whykit"]
 warn_unused_configs = true
 warn_redundant_casts = true
-# The optional MCP SDK is not installed in the default dev environment.
+# The optional MCP SDK and the libraries it brings (anyio, uvicorn) are not
+# installed in the static CI job, which type-checks without extras.
 [[tool.mypy.overrides]]
-module = ["mcp.*", "mcp_types.*", "pydantic.*"]
+module = ["mcp.*", "mcp_types.*", "pydantic.*", "anyio.*", "uvicorn.*"]
 ignore_missing_imports = true
 
 # Baseline of findings that predate the type gate, narrowed to the exact error

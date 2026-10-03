@@ -100,3 +100,10 @@ td.decision-id,.timeline-meta .decision-id{white-space:nowrap}
 .graph-node{scroll-margin:220px 40px 40px}
 .citers summary{cursor:pointer;color:var(--muted);margin-top:4px}
 .citers summary:hover{color:var(--fg)}
+.exposure-wrap{padding:16px 34px 0}
+.exposure{display:flex;align-items:flex-start;gap:10px;max-width:1052px;margin:0 auto;padding:11px 14px;border:1px solid #c4898266;background:#c489820f;border-radius:9px;color:#e2bdb7;font-size:13px;line-height:1.5}
+.exposure svg{flex-shrink:0;margin-top:2px}
+.exposure strong{font-weight:600}
+.doc-loading{margin:0 0 16px}
+@media(max-width:900px){.exposure-wrap{padding:14px 22px 0}}
+@media(max-width:540px){.exposure-wrap{padding:12px 16px 0}}

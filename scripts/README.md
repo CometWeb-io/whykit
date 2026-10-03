@@ -62,12 +62,46 @@ uv build --out-dir dist && uv build --out-dir dist-rebuild
 python3 scripts/check_dist.py dist --reproducible-against dist-rebuild
 ```
 
+## `release_rehearsal.py`
+
+A local dry run of a package release against one clean commit: version from
+the changelog, two reproducible builds, `check_dist.py`, `twine check`, a
+wheel install and smoke test on every supported Python installed here, release
+notes, and the exact tag commands for the maintainer. It never tags, pushes or
+uploads. See step 3 of [docs/releasing.md](../docs/releasing.md).
+
+```bash
+python3 scripts/release_rehearsal.py                  # full rehearsal, offline
+python3 scripts/release_rehearsal.py --online         # first run on a cold uv cache
+python3 scripts/release_rehearsal.py --skip-build     # version, notes and commands only
+```
+
+## `pr_comment.py`
+
+Used by the composite Action when `comment: "true"`. Creates or updates the
+single pull request comment that carries the output of
+`whykit diff --format markdown`, found by the marker on its first line and
+edited only when a bot account wrote it. It reads the token from
+`GITHUB_TOKEN`, talks to the API at `GITHUB_API_URL` over HTTPS, and reports API
+refusals as workflow warnings instead of failing the job. Standard library
+only.
+
+## CI helpers
+
+`release-baseline.sh` prints the Git ref that the release-policy job in
+`ci.yml` compares against: the pull request base, the previous version tag, or
+the repository root. `check_commit_attribution.py` fails CI when a commit
+identity or trailer names a code-generation tool instead of a person.
+
 ## Git hooks
 
 ```bash
 sh scripts/install-hooks.sh          # for this repository
 whykit install-hooks               # for a vault created by `whykit init`
 ```
+
+`install-hooks.sh` links `.git/hooks/pre-commit` to `scripts/pre-commit`, which
+lints the example vault with the repository policy.
 
 Both run a whole-vault lint rather than checking only the staged files. Secrets
 and broken cross-references do not respect a staging area: a credential pasted

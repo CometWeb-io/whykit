@@ -96,6 +96,9 @@ class OfflineTests(unittest.TestCase):
                             "commit", "-qm", "init"], check=True, capture_output=True)
             for argv in (
                 ("history", "--base", "HEAD", "--root", r),
+                ("diff", "--base", "HEAD", "--root", r),
+                ("diff", "--base", "HEAD", "--root", r, "--format", "markdown"),
+                ("diff", "--base", "HEAD", "--root", r, "--format", "github"),
                 ("check", "--root", r, "--profile", "local", "--base", "HEAD"),
                 ("install-hooks", "--root", r),
                 ("doctor", "--root", r),
@@ -113,7 +116,7 @@ class OfflineTests(unittest.TestCase):
             "init", "new", "lint", "status", "graph", "backlinks", "impact", "query", "context",
             "pack", "review", "evidence", "snapshot", "verify-snapshot", "policy", "rules",
             "adopt", "explorer-index", "history", "check", "install-hooks", "doctor",
-            "trace", "completion",
+            "trace", "completion", "diff",
         }
         excluded = {"serve"}  # starts the optional Explorer dev server
         self.assertEqual(set(subparsers.choices), covered | excluded)

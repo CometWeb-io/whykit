@@ -96,6 +96,12 @@ whykit new note "Interview synthesis" \
   --json
 ```
 
+File names are ASCII kebab case derived from the title, so they survive every
+filesystem and Git setting: accents are folded (`Łódź` becomes `lodz`), and a
+title with no Latin letters at all, such as `会议记录`, gets a stable
+`record-` name with a short hash of the title. The title itself is kept as
+written.
+
 `--link-from` is explicit on purpose: WhyKit never rewrites `Home.md` or another
 map unless asked. When it is given, the note and the link are created in one
 atomic operation, and the note is rolled back if the map update fails.

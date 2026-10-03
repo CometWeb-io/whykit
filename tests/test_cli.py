@@ -519,13 +519,16 @@ class ContractTests(unittest.TestCase):
         self.assertIn("bash scripts/release-baseline.sh", ci)
         self.assertIn("environment: pypi", release)
         self.assertIn("id-token: write", release)
-        self.assertIn("uv build", release)
         self.assertIn("pypa/gh-action-pypi-publish@", release)
-        # The build runs without the OIDC token; the publish job holds it and
-        # only downloads the archives that job checked, from this same run.
-        build, publish = release.split("\n  build:\n", 1)[1].split("\n  publish:\n", 1)
+        # The build runs without the OIDC token, in the reusable job pull
+        # requests also run; the publish job holds the token and only
+        # downloads the archives that job checked, from this same run.
+        build_call, publish = release.split("\n  build:\n", 1)[1].split("\n  publish:\n", 1)
+        self.assertIn("uses: ./.github/workflows/release-build.yml", build_call)
+        build = (ROOT / ".github" / "workflows" / "release-build.yml").read_text(encoding="utf-8")
         self.assertIn("uv build", build)
         self.assertNotIn("id-token", build)
+        self.assertNotIn("id-token", build_call)
         self.assertNotIn("uv build", publish)
         self.assertIn("needs: build", publish)
         self.assertIn("name: release-distributions", publish)

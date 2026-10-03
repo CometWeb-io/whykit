@@ -4,7 +4,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from typing import Any
+
 from .console import emit_machine
 
 from .contract import CONTRACT_VERSION, emit_error
@@ -17,9 +19,13 @@ class Rule:
     summary: str
     why: str
     fix: str
+    # Security-relevant rules cannot be lowered or switched off in
+    # whykit.toml without a written reason, and every such override is
+    # reported with the lint and check output.
+    security: bool = False
 
 
-RULES = (
+_RULES = (
     Rule("agents.absent", "warning", "No AGENTS.md contract is present.", "Agents otherwise invent operating rules from context.", "Add AGENTS.md and state what agents may read, write, commit and escalate."),
     Rule("agents.unconfigured", "warning", "AGENTS.md still contains an unanswered TODO.", "A placeholder contract looks authoritative while leaving a material choice undefined.", "Replace every contract TODO with an explicit operating rule."),
     Rule("canonical.owner", "warning", "A canonical document has no real owner.", "A source of truth without ownership has no accountable reviewer.", "Set owner to a person or accountable role."),
@@ -98,6 +104,16 @@ RULES = (
     Rule("wikilink.outside", "warning", "A wikilink tries to traverse outside the vault.", "Vault links must not silently depend on files outside the governed boundary.", "Copy/register the source inside the vault or record an external location as evidence."),
 )
 
+SECURITY_RULE_CODES = frozenset({
+    "markdown_link.outside",
+    "secret.detected",
+    "secret.scan_non_utf8",
+    "secret.scan_skipped_large_file",
+    "secret.scan_unreadable",
+    "sensitivity.invalid",
+    "wikilink.outside",
+})
+RULES = tuple(replace(rule, security=rule.code in SECURITY_RULE_CODES) for rule in _RULES)
 RULE_BY_CODE = {rule.code: rule for rule in RULES}
 
 
@@ -119,9 +135,67 @@ def markdown_table() -> str:
     return "\n".join(lines)
 
 
+def builtin_entry(rule: Rule) -> dict[str, Any]:
+    return {**asdict(rule), "custom": False}
+
+
+def _scope_text(applies_to: dict[str, list[str]]) -> str:
+    if not applies_to:
+        return "every governed note"
+    return "; ".join(f"{key}: {', '.join(values)}" for key, values in applies_to.items())
+
+
+def _checks_text(checks: dict[str, Any]) -> str:
+    parts = []
+    for key, value in checks.items():
+        if isinstance(value, dict):
+            shown = ", ".join(f"{k} = {' or '.join(v)}" for k, v in value.items())
+        elif isinstance(value, list):
+            shown = ", ".join(f"`{item}`" if key.endswith("patterns") else item for item in value)
+        else:
+            shown = str(value)
+        parts.append(f"{key}: {shown}")
+    return "; ".join(parts)
+
+
+def policy_markdown(policy: Any) -> str:
+    """Markdown tables for a vault's custom rules and overrides (empty when none)."""
+    blocks: list[str] = []
+    if policy.custom:
+        lines = [
+            "### Custom rules (whykit.toml)",
+            "",
+            "| Code | Level | What it means | Applies to | Checks |",
+            "|---|---|---|---|---|",
+        ]
+        lines.extend(
+            f"| `{rule.code}` | {rule.level} | {_md_cell(rule.summary)} | {_md_cell(_scope_text(rule.applies_to))} | {_md_cell(_checks_text(rule.checks))} |"
+            for rule in policy.custom
+        )
+        blocks.append("\n".join(lines))
+    if policy.overrides:
+        lines = [
+            "### Overrides (whykit.toml)",
+            "",
+            "| Rule | Level | Paths | Reason |",
+            "|---|---|---|---|",
+        ]
+        lines.extend(
+            f"| `{entry.rule}` | {entry.level} | {_md_cell(', '.join(entry.paths) or 'whole vault')} | {_md_cell(entry.reason or '')} |"
+            for entry in policy.overrides
+        )
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def _override_entry(entry: Any) -> dict[str, Any]:
+    return {"rule": entry.rule, "level": entry.level, "paths": list(entry.paths), "reason": entry.reason, "security": entry.security}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="whykit rules", description="List WhyKit lint rules or explain one stable rule code.")
     parser.add_argument("code", nargs="?", help="rule code, for example evidence.missing")
+    parser.add_argument("--root", help="vault whose whykit.toml custom rules and overrides are listed too (default: nearest vault, if any)")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     parser.add_argument("--markdown", action="store_true", help="emit the complete Markdown rule table")
     args = parser.parse_args(argv)
@@ -132,28 +206,66 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_usage(sys.stderr)
         return emit_error("usage", f"{parser.prog}: error: --markdown renders the full catalog and does not accept a single code", json_mode=args.json)
 
+    from pathlib import Path
+
+    from .config import ConfigError, load_config
+    from .contract import vault_not_found
+    from .lint import find_vault_root, is_vault_root
+    from .rule_policy import EMPTY_POLICY, policy_from_config
+
+    policy = EMPTY_POLICY
+    root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
+    if args.root and (root is None or not is_vault_root(root)):
+        return vault_not_found(args.root, json_mode=args.json)
+    if root is not None:
+        try:
+            config, _ = load_config(root)
+            policy = policy_from_config(config)
+        except ConfigError as exc:
+            return emit_error("invalid_config", str(exc), json_mode=args.json)
+
+    entries = [builtin_entry(rule) for rule in RULES] + [rule.catalog_entry() for rule in policy.custom]
+    by_code = {entry["code"]: entry for entry in entries}
+
     if args.code:
-        rule = RULE_BY_CODE.get(args.code)
-        if rule is None:
+        entry = by_code.get(args.code)
+        if entry is None:
             return emit_error("invalid_argument", f"unknown rule code: {args.code}", json_mode=args.json)
         if args.json:
-            emit_machine(json.dumps({"contract_version": CONTRACT_VERSION, **asdict(rule)}, ensure_ascii=False, indent=2))
+            emit_machine(json.dumps({"contract_version": CONTRACT_VERSION, **entry}, ensure_ascii=False, indent=2))
         else:
-            print(f"{rule.code} [{rule.default_level}]")
-            print(rule.summary)
-            print(f"Why: {rule.why}")
-            print(f"Fix: {rule.fix}")
+            tags = " security" if entry["security"] else (" custom" if entry["custom"] else "")
+            print(f"{entry['code']} [{entry['default_level']}{tags}]")
+            print(entry["summary"])
+            print(f"Why: {entry['why']}")
+            print(f"Fix: {entry['fix']}")
+            if entry["custom"]:
+                print(f"Applies to: {_scope_text(entry['applies_to'])}")
+                print(f"Checks: {_checks_text(entry['checks'])}")
+            for override in policy.overrides:
+                if override.rule == entry["code"]:
+                    print(f"Override: {override.describe().split(' (', 1)[0]}" + (f" — reason: {override.reason}" if override.reason else ""))
         return 0
 
     if args.json:
-        emit_machine(json.dumps(
-            {"contract_version": CONTRACT_VERSION, "count": len(RULES), "rules": [asdict(rule) for rule in RULES]},
-            ensure_ascii=False,
-            indent=2,
-        ))
+        payload: dict[str, Any] = {"contract_version": CONTRACT_VERSION, "count": len(entries), "rules": entries}
+        if policy.overrides:
+            payload["overrides"] = [_override_entry(entry) for entry in policy.overrides]
+        emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
     elif args.markdown:
-        print(markdown_table())
+        extra = policy_markdown(policy)
+        print(markdown_table() + ("\n\n" + extra if extra else ""))
     else:
         for rule in RULES:
             print(f"{rule.default_level:<7} {rule.code:<34} {rule.summary}")
+        if policy.custom:
+            print("\nCustom rules (whykit.toml)")
+            for custom in policy.custom:
+                print(f"{custom.level:<7} {custom.code:<34} {custom.summary}")
+        if policy.overrides:
+            print("\nOverrides (whykit.toml)")
+            for override in policy.overrides:
+                scope = ", ".join(override.paths) if override.paths else "whole vault"
+                reason = f"  reason: {override.reason}" if override.reason else ""
+                print(f"{override.level:<7} {override.rule:<34} {scope}{reason}")
     return 0

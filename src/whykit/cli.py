@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import errno
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -549,6 +551,10 @@ def cmd_policy(args: argparse.Namespace) -> int:
         print(f"  status due days        {defaults['status_due_days']}")
         for name, profile in payload["config"]["profiles"].items():
             print(f"  profile {name:<10} strict={profile['strict']} orphans={profile['orphans']} secrets={profile['secrets']} history={profile['history']}")
+        rules = payload["config"].get("rules") or {}
+        if rules:
+            print(f"  custom rules           {len(rules.get('custom', []))} (see `whykit rules`)")
+            print(f"  rule overrides         {', '.join(sorted(rules.get('overrides', {}))) or 'none'}")
     return 0
 
 
@@ -609,6 +615,20 @@ def cmd_history(args: argparse.Namespace) -> int:
     return code
 
 
+def cmd_diff(args: argparse.Namespace) -> int:
+    from .diff import main as diff_main
+    argv = ["--base", args.base, "--head", args.head]
+    if args.root:
+        argv += ["--root", args.root]
+    if args.today:
+        argv += ["--today", args.today]
+    if args.format:
+        argv += ["--format", args.format]
+    if args.json:
+        argv.append("--json")
+    return diff_main(argv)
+
+
 def _uncommitted_markdown(vault: Path) -> list[str]:
     """Markdown under *vault* that differs from HEAD (staged, unstaged or new)."""
     try:
@@ -654,6 +674,7 @@ PRE_COMMIT_HOOK = """#!/bin/sh
 set -e
 root=$(git rev-parse --show-toplevel)
 cd "$root"
+# __WHYKIT_VAULT_CD__
 
 if ! command -v whykit >/dev/null 2>&1; then
   echo "whykit is not on PATH; skipping the vault check." >&2
@@ -669,22 +690,53 @@ fi
 """
 
 
+def _git_hooks_location(vault: Path) -> tuple[Path, str] | None:
+    """Where Git runs hooks for ``vault``, and the vault's path inside the work tree.
+
+    The vault may be a subdirectory of a larger repository or sit in a linked
+    worktree (where `.git` is a file), and `core.hooksPath` may move the hooks,
+    so ask Git instead of assuming `<vault>/.git/hooks`.
+    """
+    if not shutil.which("git"):
+        return None
+    result = subprocess.run(
+        ["git", "-C", str(vault), "rev-parse", "--git-path", "hooks", "--show-prefix"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    lines = result.stdout.splitlines()
+    if result.returncode != 0 or not lines:
+        return None
+    hooks = Path(lines[0])
+    if not hooks.is_absolute():
+        hooks = vault / hooks
+    prefix = lines[1].strip() if len(lines) > 1 else ""
+    return hooks, prefix
+
+
+def _render_pre_commit_hook(prefix: str) -> str:
+    """The hook runs from the work-tree root; step into the vault when it is a subdirectory."""
+    line = f"cd -- {shlex.quote(prefix.rstrip('/'))}" if prefix else ""
+    return PRE_COMMIT_HOOK.replace("# __WHYKIT_VAULT_CD__\n", f"{line}\n" if line else "")
+
+
 def cmd_install_hooks(args: argparse.Namespace) -> int:
     vault = _resolve_vault(args.root)
     if vault is None:
         print_no_vault(args.root)
         return 2
-    hooks = vault / ".git" / "hooks"
-    if not hooks.is_dir():
+    located = _git_hooks_location(vault)
+    if located is None:
         print(f"not a git repository: {vault}", file=sys.stderr)
         print("run `git init` first - the ledger's guarantees come from version control", file=sys.stderr)
         return 2
+    hooks, prefix = located
     target = hooks / "pre-commit"
     if target.exists() and not args.force:
         print(f"a pre-commit hook already exists: {target}", file=sys.stderr)
         print("inspect it, then re-run with --force to replace it", file=sys.stderr)
         return 2
-    target.write_text(PRE_COMMIT_HOOK, encoding="utf-8")
+    hooks.mkdir(parents=True, exist_ok=True)
+    target.write_text(_render_pre_commit_hook(prefix), encoding="utf-8")
     target.chmod(0o755)
     print(f"pre-commit hook installed: {target}")
     return 0
@@ -711,6 +763,8 @@ def cmd_rules(args: argparse.Namespace) -> int:
         argv.append("--json")
     if args.markdown:
         argv.append("--markdown")
+    if args.root:
+        argv += ["--root", args.root]
     return rules_main(argv)
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -755,12 +809,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         inside = subprocess.run(["git", "-C", str(vault), "rev-parse", "--git-dir"], capture_output=True, text=True, encoding="utf-8", errors="replace")
         tracked = inside.returncode == 0
         record("git_repository", tracked, "tracked" if tracked else "not a git repository yet - `git init`", required=False)
-        hook = vault / ".git" / "hooks" / "pre-commit"
-        record("pre_commit_hook", hook.exists(), "installed" if hook.exists() else "not installed - `whykit install-hooks`", required=False)
+        located = _git_hooks_location(vault) if tracked else None
+        hook_installed = bool(located and (located[0] / "pre-commit").exists())
+        record("pre_commit_hook", hook_installed, "installed" if hook_installed else "not installed - `whykit install-hooks`", required=False)
 
     record("node_explorer", bool(shutil.which("node")), shutil.which("node") or "not found (only needed for `serve`)", required=False)
 
-    files, findings = run_lint(vault, [], orphans=False)
+    # Same findings as `whykit lint` and `whykit status`, so the counts agree.
+    files, findings = run_lint(vault, [])
     errors = [f for f in findings if f.level == "error"]
     warnings = [f for f in findings if f.level == "warning"]
     record("vault_lint", not errors, f"{len(files)} files, {len(errors)} errors, {len(warnings)} warnings")
@@ -1150,10 +1206,27 @@ def build_parser() -> argparse.ArgumentParser:
     history.add_argument("--json", action="store_true", help=JSON_HELP)
     history.set_defaults(func=cmd_history)
 
+    diff = sub.add_parser(
+        "diff",
+        help="show what changed in decisions, evidence and lint findings between two commits",
+        description="Compare the vault at the merge base of --base and --head with --head, read from Git objects without a checkout.",
+    )
+    diff.add_argument("--base", required=True, metavar="REF", help="base commit or ref, e.g. origin/main")
+    diff.add_argument("--head", default="HEAD", metavar="REF", help="head commit or ref (default: %(default)s)")
+    diff.add_argument("--root", help=ROOT_HELP)
+    diff.add_argument("--today", help=TODAY_HELP)
+    diff.add_argument(
+        "--format", choices=("text", "json", "markdown", "github"), default=None,
+        help="output format: text (default), json, markdown (a pull request comment) or github (workflow annotations)",
+    )
+    diff.add_argument("--json", action="store_true", help=JSON_HELP)
+    diff.set_defaults(func=cmd_diff)
+
     rules = sub.add_parser("rules", help="list lint rules or explain one rule code")
     rules.add_argument("code", nargs="?", help="rule code to explain, e.g. evidence.unknown_id")
     rules.add_argument("--json", action="store_true", help=JSON_HELP)
     rules.add_argument("--markdown", action="store_true", help="emit the complete Markdown table")
+    rules.add_argument("--root", help="vault whose whykit.toml custom rules and overrides are listed too (default: nearest vault, if any)")
     rules.set_defaults(func=cmd_rules)
 
     doctor = sub.add_parser("doctor", help="check prerequisites and vault integrity")
@@ -1216,9 +1289,33 @@ def _wants_json(args: argparse.Namespace) -> bool:
         return not getattr(args, "output", None)
     if command in ("graph", "pack") and getattr(args, "format", None) in (None, "json"):
         return True
-    if command in ("lint", "check") and getattr(args, "format", None) == "json":
+    if command in ("lint", "check", "diff") and getattr(args, "format", None) == "json":
         return True
     return bool(getattr(args, "json", False))
+
+
+_WINDOWS = sys.platform == "win32"
+
+
+def _reader_gone(exc: OSError) -> bool:
+    """Whether *exc* means the reader of stdout went away (`| head -1`).
+
+    POSIX raises BrokenPipeError (EPIPE). Windows reports a write to a pipe
+    whose reader closed as EINVAL; that errno never carries a file name there,
+    which keeps a real filesystem refusal on the io_error path.
+    """
+    if isinstance(exc, BrokenPipeError) or exc.errno == errno.EPIPE:
+        return True
+    return _WINDOWS and exc.errno == errno.EINVAL and exc.filename is None
+
+
+def _silence_stdout() -> None:
+    """Point stdout at devnull so the interpreter's final flush stays quiet."""
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+    except (OSError, ValueError):
+        pass
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1237,19 +1334,20 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help(sys.stderr)
         return 2
     try:
-        return func(args)
+        code = func(args)
+        # Flush here, not at interpreter exit: a short report sits in the buffer
+        # until then, and a reader that already left (`| head -1`) would turn
+        # into an "Exception ignored" message and exit status 120.
+        sys.stdout.flush()
+        return code
     except KeyboardInterrupt:
         return emit_error("interrupted", "interrupted", json_mode=_wants_json(args))
-    except BrokenPipeError:
-        # The reader went away (`whykit query | head`). Point stdout at devnull
-        # so the interpreter's final flush does not print a second traceback.
-        try:
-            devnull = os.open(os.devnull, os.O_WRONLY)
-            os.dup2(devnull, sys.stdout.fileno())
-        except (OSError, ValueError):
-            pass
-        return 1
     except OSError as exc:
+        if _reader_gone(exc):
+            # The reader went away (`whykit query | head`): exit 1 quietly,
+            # without a second traceback from the final flush.
+            _silence_stdout()
+            return 1
         # A filesystem refusal is a user-facing condition, not a crash.
         # WHYKIT_DEBUG=1 restores the traceback for bug reports.
         if os.environ.get("WHYKIT_DEBUG"):

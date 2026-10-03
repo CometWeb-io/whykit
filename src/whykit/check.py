@@ -14,6 +14,7 @@ from .config import ConfigError, configuration_readiness, get_profile, load_conf
 from .immutability import changed_records
 from .lint import _parse_date, find_vault_root, is_vault_root, lint, rel, path_cache
 from .console import emit_machine
+from .rule_policy import Override, describe_override, secret_scan_skipped
 
 
 def _git_repo(root: Path) -> bool:
@@ -39,13 +40,17 @@ def run_check(
 ) -> dict:
     config, config_path = load_config(root)
     profile = get_profile(config, profile_name)
+    applied: list[Override] = []
     files, findings = lint(
         root,
         orphans=bool(profile["orphans"]),
         secrets=bool(profile["secrets"]),
         hub_links=bool(profile.get("require_hub_links", False)),
         today=today,
+        overrides=applied,
     )
+    if not profile["secrets"]:
+        applied.append(secret_scan_skipped(f"profile {profile_name} (secrets = false)"))
     errors = [item for item in findings if item.level == "error"]
     warnings = [item for item in findings if item.level == "warning"]
     checks: list[dict] = []
@@ -103,6 +108,14 @@ def run_check(
         checks.append({"name": "history", "passed": True, "detail": "optional; pass --base to enforce"})
 
     passed = all(item["passed"] for item in checks)
+    lint_report: dict = {
+        "files": len(files),
+        "errors": len(errors),
+        "warnings": len(warnings),
+        "findings": [asdict(item) for item in findings],
+    }
+    if applied:
+        lint_report["overrides"] = [entry.report() for entry in applied]
     return {
         "contract_version": 1,
         "profile": profile_name,
@@ -111,12 +124,7 @@ def run_check(
         "as_of": (today or dt.date.today()).isoformat(),
         "passed": passed,
         "checks": checks,
-        "lint": {
-            "files": len(files),
-            "errors": len(errors),
-            "warnings": len(warnings),
-            "findings": [asdict(item) for item in findings],
-        },
+        "lint": lint_report,
     }
 
 
@@ -171,6 +179,9 @@ def main(argv: list[str] | None = None) -> int:
         if report["lint"]["errors"] or report["lint"]["warnings"]:
             print(f"  lint findings  {report['lint']['errors']} error(s), {report['lint']['warnings']} warning(s)")
         _print_gate_findings(report)
+        for entry in report["lint"].get("overrides", []):
+            if entry["security"]:
+                print(f"  policy  {describe_override(entry)}")
     return 0 if report["passed"] else 1
 
 
@@ -188,6 +199,12 @@ def gate_annotations(report: dict, root: Path) -> list[str]:
     from .ci_formats import github_annotations, source_root, workflow_command
 
     lines = github_annotations(report["lint"]["findings"], root)
+    for entry in report["lint"].get("overrides", []):
+        if entry["security"]:
+            text = describe_override(entry)
+            lines.append(workflow_command(
+                "notice", text if entry.get("skipped_by") else f"whykit.toml policy: {text}", title="WhyKit policy",
+            ))
     _, prefix = source_root(root)
     for check in report["checks"]:
         if check["passed"] or check["name"] == "lint":

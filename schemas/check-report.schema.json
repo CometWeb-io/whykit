@@ -24,7 +24,31 @@
         "additionalProperties": true
       }
     },
-    "lint": {"type": "object"}
+    "lint": {
+      "type": "object",
+      "properties": {
+        "overrides": {
+          "type": "array",
+          "description": "Present only when whykit.toml declares [rules.overrides] or the profile sets secrets = false; same entries as lint --json.",
+          "items": {
+            "type": "object",
+            "required": ["rule", "level", "paths", "reason", "security", "matched"],
+            "properties": {
+              "rule": {"type": "string", "minLength": 1},
+              "level": {"enum": ["error", "warning", "off"]},
+              "paths": {"type": "array", "items": {"type": "string"}},
+              "reason": {"type": ["string", "null"]},
+              "security": {"type": "boolean"},
+              "matched": {"type": "integer", "minimum": 0},
+              "skipped_by": {"type": "string", "minLength": 1},
+              "suppressed": {"type": "array", "items": {"type": "object"}}
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    }
   },
   "additionalProperties": true
 }
