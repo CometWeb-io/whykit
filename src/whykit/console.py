@@ -178,7 +178,10 @@ def emit_machine(text: str, *, file: TextIO | None = None) -> None:
 # bidirectional overrides. Printed raw, vault text containing them could start
 # a new log line that a CI runner reads as a command (``::error::``), move the
 # terminal cursor or recolour it (ESC), or reorder what a reviewer sees.
-_UNSAFE_DISPLAY_RE = re.compile("[\x00-\x08\x0a-\x1f\x7f-\x9f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]")
+# A raw string so the regex engine, not the source file, holds the control
+# characters: C0 except tab, DEL and C1, ALM, LRM/RLM, the Unicode line and
+# paragraph separators, and the bidi embeddings, overrides and isolates.
+_UNSAFE_DISPLAY_RE = re.compile(r"[\x00-\x08\x0a-\x1f\x7f-\x9f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]")
 _DISPLAY_ESCAPES = {"\n": "\\n", "\r": "\\r"}
 
 
