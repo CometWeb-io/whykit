@@ -23,6 +23,9 @@ from .lint import (
     find_vault_root, is_vault_root, load_note,
 )
 from .console import emit_machine
+from .placeholders import (
+    ALTERNATIVES_EMPTY_ROW, ALTERNATIVES_HEADER, SCAFFOLD_EVIDENCE_TODO, SCAFFOLD_SECTION_PROMPTS,
+)
 
 DECISION_STATUS_TO_LOG = {
     "draft": "proposed",
@@ -249,25 +252,25 @@ tags: []
 
 ## Context
 
-What is true now, and what forces a choice?
+{SCAFFOLD_SECTION_PROMPTS['Context']}
 
 ## Decision
 
-State the choice in one sentence.
+{SCAFFOLD_SECTION_PROMPTS['Decision']}
 
 ## Rationale
 
-Why this option, given the evidence and constraints?
+{SCAFFOLD_SECTION_PROMPTS['Rationale']}
 
 ## Evidence
 
-{chr(10).join(f'- {sid}' for sid in source_ids) if source_ids else '- TODO — add E-NNN references or explain why none apply.'}
+{chr(10).join(f'- {sid}' for sid in source_ids) if source_ids else SCAFFOLD_EVIDENCE_TODO}
 
 ## Alternatives considered
 
-| Alternative | Upside | Risk | Why rejected |
+{ALTERNATIVES_HEADER}
 |---|---|---|---|
-|  |  |  |  |
+{ALTERNATIVES_EMPTY_ROW}
 
 ## Consequences
 
@@ -584,7 +587,3 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         return emit_error("operation_rejected", str(exc), json_mode=args.json)
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

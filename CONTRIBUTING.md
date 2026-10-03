@@ -71,12 +71,20 @@ end-to-end suite covers.
 
 ## Changing documentation
 
-Documentation is tested like code. `tests/test_docs.py` parses every `whykit`
-command in the README, `CONTRIBUTING.md`, `docs/` and the example READMEs against
-the real argument parser, executes the README quickstart in a temporary
-directory, and checks that relative links resolve. If you document a new flag or
-command, that test tells you when the docs and the CLI disagree. Write commands
-the way a reader will type them, and use reserved example domains.
+Documentation is tested like code. [`docs/README.md`](docs/README.md) is the
+index (Start, Concepts, How-to guides, Reference, Operations); give a new page
+one job, add it there, and link to existing pages instead of repeating them.
+
+`tests/test_docs.py` parses every `whykit` command in the Markdown files
+(fenced blocks and inline code) against the real argument parser, and checks
+that every flag, exit code, error code, lint rule code, `whykit.toml` key and
+MCP tool, resource and prompt name the docs mention exists. It also checks that
+[`docs/cli.md`](docs/cli.md) lists every command with exactly its options, that
+[`docs/rules.md`](docs/rules.md) matches `whykit rules --markdown`, that the
+README quickstart runs, and that relative links resolve.
+`tests/test_tutorials.py` runs each page in `docs/tutorials/` in a real shell
+and compares the output with the `text` blocks on the page. Write commands the
+way a reader will type them, and use reserved example domains.
 
 ## Good contribution areas
 

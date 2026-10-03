@@ -7,7 +7,7 @@ for evidence in the repository.
 ## Canonical documents
 
 - `company.md` — verified company profile and constraints
-- `goals.md` — approved business and GTM goals
+- `goals.md` — approved business goals
 - `terminology.md` — shared definitions, so two documents mean the same thing
 - `evidence-register.md` — source index for important claims
 

@@ -7,6 +7,7 @@ import json
 import re
 from pathlib import Path
 
+from .config import ConfigError, load_config
 from .contract import CONTRACT_VERSION, emit_error, vault_not_found
 from .lint import (
     path_cache,
@@ -79,6 +80,24 @@ def _vault_name(root: Path, index: VaultIndex) -> str:
     return root.name or "WhyKit vault"
 
 
+def _policy(root: Path) -> dict:
+    """The parts of ``whykit.toml`` the Explorer needs to judge freshness.
+
+    A malformed config is a lint error reported elsewhere; the Explorer then
+    shows no thresholds rather than guessing at them.
+    """
+    try:
+        config, _ = load_config(root)
+    except ConfigError:
+        return {"evidenceAccessAgeDays": {}, "decisionReviewDays": None, "statusDueDays": None}
+    defaults = config.get("defaults", {})
+    return {
+        "evidenceAccessAgeDays": {str(k): int(v) for k, v in sorted(config.get("evidence_access_age_days", {}).items())},
+        "decisionReviewDays": defaults.get("decision_review_days"),
+        "statusDueDays": defaults.get("status_due_days"),
+    }
+
+
 @path_cache()
 def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
     """Build the Explorer vault.json payload from the canonical Python parser."""
@@ -87,6 +106,11 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
     docs = []
     for note in index.notes:
         doc_id = rel(root, note.path).removesuffix(".md")
+        # Every E-NNN the note cites, in front matter or body, outside code:
+        # `Note.cited_evidence` is the one citation rule `whykit graph`,
+        # `impact` and `trace` use. The register itself lists IDs rather than
+        # citing them.
+        citations = [] if doc_id == "00-context/evidence-register" else list(note.cited_evidence)
         top = doc_id.split("/", 1)[0] if "/" in doc_id else "root"
         body = note.body
         docs.append({
@@ -102,6 +126,7 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
             "sourceOfTruth": note.front.get("source_of_truth") is True,
             "sensitivity": str(note.front.get("sensitivity") or "internal"),
             "sourceIds": _as_list(note.front.get("source_ids")),
+            "citations": citations,
             "tags": _as_list(note.front.get("tags")),
             "workstream": str(note.front.get("workstream") or top),
             "decisionId": str(note.front.get("decision_id") or "") or None,
@@ -224,6 +249,7 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
         "decisions": decisions,
         "reviews": reviews,
         "lint": lint_payload,
+        "policy": _policy(root),
     }
 
 
@@ -262,7 +288,3 @@ def main(argv: list[str] | None = None) -> int:
     # JSON escapes preserve Unicode content without requiring a UTF-8 console.
     emit_machine(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

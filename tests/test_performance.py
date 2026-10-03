@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from synthetic_vault import DIGEST_COMMANDS, generate, output_digests  # noqa: E402
+from synthetic_vault import AS_OF, DIGEST_COMMANDS, generate, output_digests  # noqa: E402
 from whykit import lint as lint_mod  # noqa: E402
 from whykit.cli import main as whykit_main  # noqa: E402
 
@@ -66,9 +66,14 @@ INTENTIONAL_CHANGES: dict[str, tuple[str, str]] = {
         "677e6cdb9a16bba31c24756a7b724b4fb96c854995b2c73b6307050ae31f02db",
         "evidence.retired is not reported on superseded or archived records",
     ),
+    # 56848f33… was the evidence.retired change (summary.warnings); `snapshot
+    # --format v1` still reproduces it byte for byte. The default is now v2,
+    # whose output differs only in "format" and the added "normalization" key
+    # (the synthetic vault is LF-only without BOMs, so every hash is unchanged).
     "snapshot": (
-        "56848f33191fc62cd0731b351367ad6bd627efee0e87a49c4bf7cc64c5b672ce",
-        "evidence.retired is not reported on superseded or archived records (summary.warnings)",
+        "7eb76cd644407ecceaf564da3873c6195c42b5339281cd05a0974c031f8b0635",
+        "evidence.retired is not reported on superseded or archived records (summary.warnings); "
+        "snapshot format v2 by default (format + normalization keys)",
     ),
     # The synthetic vault has lint errors, so explorer-index refuses. It used
     # to write nothing to stdout; it now writes the machine-contract error
@@ -78,6 +83,11 @@ INTENTIONAL_CHANGES: dict[str, tuple[str, str]] = {
         "JSON error object (vault_invalid) on stdout under the machine contract",
     ),
 }
+
+# `snapshot --format v1` must keep producing the bytes the v1 default produced
+# before v2 existed (the evidence.retired-era digest), so old baselines and
+# tooling that pins v1 see no change.
+SNAPSHOT_V1_DIGEST = "56848f33191fc62cd0731b351367ad6bd627efee0e87a49c4bf7cc64c5b672ce"
 
 PERF_NOTES = 1000
 # Seconds per command at PERF_NOTES. Measured at well under 1 s each; before
@@ -113,6 +123,14 @@ class SyntheticVaultTest(unittest.TestCase):
             with self.subTest(command=name):
                 self.assertNotEqual(expected == original, bool(why), f"{name}: stale INTENTIONAL_CHANGES entry")
                 self.assertEqual(actual[name], expected, f"`whykit {name}` output changed on the synthetic vault")
+
+    @unittest.skipIf(os.name == "nt", "golden digests are recorded with POSIX paths")
+    def test_snapshot_v1_reproduces_the_pre_v2_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = generate(Path(tmp) / "vault", 400)
+            command = ("snapshot-v1", ["snapshot", "--today", AS_OF, "--compact", "--format", "v1"])
+            actual = output_digests(vault, (command,))
+        self.assertEqual(actual["snapshot-v1"], SNAPSHOT_V1_DIGEST)
 
 
 @unittest.skipIf(os.environ.get("WHYKIT_SKIP_PERF"), "WHYKIT_SKIP_PERF is set")

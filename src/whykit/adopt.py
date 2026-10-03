@@ -569,7 +569,3 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Migration guide: {migration.relative_to(vault).as_posix() if migration else '—'}")
     print("Staging is gitignored on purpose. Normalize into a workstream before committing.")
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

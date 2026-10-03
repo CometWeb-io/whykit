@@ -31,6 +31,13 @@ check_dist = importlib.util.module_from_spec(_spec)
 sys.modules["check_dist"] = check_dist
 _spec.loader.exec_module(check_dist)
 
+# The build hook is loaded by hatchling from the project root; the helpers it
+# defines are importable without hatchling installed.
+_hook_spec = importlib.util.spec_from_file_location("whykit_hatch_build", ROOT / "hatch_build.py")
+assert _hook_spec is not None and _hook_spec.loader is not None
+hatch_build = importlib.util.module_from_spec(_hook_spec)
+_hook_spec.loader.exec_module(hatch_build)
+
 VERSION = check_dist.package_version()
 README_LINK = "https://github.com/CometWeb-io/whykit/blob/main/docs/guide.md"
 
@@ -82,6 +89,7 @@ def write_sdist(directory: Path, *, version: str = VERSION, meta: str | None = N
     files = {
         "PKG-INFO": meta if meta is not None else metadata(version=version),
         "pyproject.toml": "[project]\nname = 'whykit'\n",
+        "hatch_build.py": "",
         "README.md": "# WhyKit\n",
         "CHANGELOG.md": "# Changelog\n",
         "LICENSE": "Apache License\n",
@@ -186,6 +194,51 @@ class PyprojectMetadataTests(unittest.TestCase):
             "[e](https://github.com/CometWeb-io/whykit/blob/main/docs/x.md#y)",
         )
 
+    def test_release_ref_hook_runs_after_the_link_rewriter_and_ships_in_the_sdist(self) -> None:
+        hooks = PYPROJECT["tool"]["hatch"]["metadata"]["hooks"]
+        # Hatchling runs metadata hooks in declaration order; the repin needs
+        # the absolute URLs the fancy-pypi-readme substitutions produce.
+        self.assertEqual(list(hooks), ["fancy-pypi-readme", "custom"])
+        self.assertEqual(hooks["custom"], {"path": "hatch_build.py"})
+        self.assertIn("/hatch_build.py", PYPROJECT["tool"]["hatch"]["build"]["targets"]["sdist"]["include"])
+
+    def test_release_versions_link_to_their_tag_and_development_builds_to_main(self) -> None:
+        cases = {
+            "1.0.0": "v1.0.0", "0.3.0": "v0.3.0", "2.1.0rc1": "v2.1.0rc1", "1.0.0b2": "v1.0.0b2",
+            "1.0.0.post1": "v1.0.0.post1", "1!2.0": "v1!2.0",
+            "0.3.0.dev0": "main", "1.0.0rc1.dev3": "main", "1.0.0+local": "main", "": "main", "garbage": "main",
+        }
+        for version, ref in cases.items():
+            with self.subTest(version=version):
+                self.assertEqual(hatch_build.readme_ref(version), ref)
+                # check_dist.py enforces the same rule on the built archives.
+                self.assertEqual(check_dist.expected_readme_ref(version), ref)
+
+    def test_release_build_repins_every_rewritten_readme_link_to_the_tag(self) -> None:
+        hook = PYPROJECT["tool"]["hatch"]["metadata"]["hooks"]["fancy-pypi-readme"]
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        for substitution in hook["substitutions"]:
+            text = re.sub(substitution["pattern"], substitution["replacement"], text)
+        released = hatch_build.pin_readme_links(text, "1.2.3")
+        self.assertIn("](https://raw.githubusercontent.com/CometWeb-io/whykit/v1.2.3/docs/media/overview.svg)", released)
+        self.assertIn("](https://github.com/CometWeb-io/whykit/blob/v1.2.3/docs/README.md)", released)
+        self.assertEqual(check_dist.check_metadata(metadata(version="1.2.3", body=released), "1.2.3", "w"), [])
+        # A development build is left exactly as the substitutions wrote it.
+        self.assertEqual(hatch_build.pin_readme_links(text, "1.2.3.dev0"), text)
+        self.assertEqual(check_dist.check_metadata(metadata(version="1.2.3.dev0", body=text), "1.2.3.dev0", "w"), [])
+        # Links outside the repository, and the CI badge, are not file links.
+        self.assertIn("https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml", released)
+
+    def test_hook_updates_the_readme_text_in_place(self) -> None:
+        hook = hatch_build.ReadmeReleaseRefHook.__new__(hatch_build.ReadmeReleaseRefHook)
+        link = "[a](https://github.com/CometWeb-io/whykit/blob/main/docs/ci.md)"
+        meta = {"version": "0.4.0", "readme": {"content-type": "text/markdown", "text": link}}
+        hook.update(meta)
+        self.assertEqual(meta["readme"]["text"], link.replace("/main/", "/v0.4.0/"))
+        untouched = {"version": "0.4.0.dev0", "readme": {"content-type": "text/markdown", "text": link}}
+        hook.update(untouched)
+        self.assertEqual(untouched["readme"]["text"], link)
+
     def test_sdist_allowlist_is_anchored_to_the_project_root(self) -> None:
         include = PYPROJECT["tool"]["hatch"]["build"]["targets"]["sdist"]["include"]
         for pattern in include:
@@ -271,6 +324,15 @@ class CheckDistTests(unittest.TestCase):
         self.assertIn("relative link 'docs/rules.md'", errors)
         self.assertIn("relative link 'docs/media/a.svg'", errors)
         self.assertNotIn("inside/fence.md", errors)
+
+    def test_long_description_on_the_wrong_ref_fails(self) -> None:
+        on_main = metadata(version="1.2.3", body=f"See the [guide]({README_LINK}).\n")
+        self.assertIn(
+            "w: long description links to repository ref 'main'; version 1.2.3 must link to 'v1.2.3'",
+            check_dist.check_metadata(on_main, "1.2.3", "w"),
+        )
+        stale_tag = metadata(body=f"See the [guide]({README_LINK.replace('/main/', '/v0.1.0/')}).\n")
+        self.assertTrue(any("ref 'v0.1.0'" in p for p in check_dist.check_metadata(stale_tag, VERSION, "w")))
 
     def test_tests_stray_files_and_links_in_the_sdist_fail(self) -> None:
         write_wheel(self.dist)

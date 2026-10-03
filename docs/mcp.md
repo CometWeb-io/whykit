@@ -186,6 +186,16 @@ file the vault index skips (for example under `.obsidian/`) is reported as
 missing rather than confirmed. `status` drops the absolute root path that the
 CLI's `whykit status --json` includes.
 
+## Freshness
+
+Every call reads the vault as it is on disk at that moment. The server keeps
+the parsed notes between calls and reuses a note only while its file's
+modification time, change time, size and inode are all unchanged, so an edit,
+an atomic save, a rename or a deletion is seen by the next call. A file written
+in the last two seconds is always read again. Link resolution, findings and
+every other answer are computed fresh for each call. See
+[Performance](performance.md#mcp-server) for the measured effect.
+
 ## Sensitivity
 
 Every tool, resource and prompt works on a confined view of the vault that

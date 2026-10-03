@@ -193,6 +193,21 @@ def record_review(
         }
 
 
+def _queue_summary(count: int, today: dt.date, due_days: int, owner: str | None, overdue_only: bool) -> str:
+    """The closing line of `review list`, naming the window it searched.
+
+    "0 review(s)" alone reads as "nothing to review ever", when it only means
+    nothing falls inside this window.
+    """
+    if overdue_only:
+        window = f"overdue as of {today.isoformat()}"
+    else:
+        horizon = today + dt.timedelta(days=due_days)
+        window = f"overdue or due by {horizon.isoformat()} ({due_days} day(s) from {today.isoformat()})"
+    scope = f", owner matching {owner!r}" if owner else ""
+    return f"{count} review(s) {window}{scope}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="whykit review", description="List review work or record an auditable review event.")
     parser.add_argument("--root", help="vault root (default: nearest vault)")
@@ -241,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
             for item in queue:
                 marker = "OVERDUE" if item["state"] == "overdue" else "DUE"
                 print(f"{marker:<7} {item['review_by']}  {item['path']}  ({item['owner'] or 'no owner'})")
-            print(f"\n{len(queue)} review(s)")
+            print(f"\n{_queue_summary(len(queue), today or dt.date.today(), due_days, args.owner, args.overdue_only)}")
         return 0
 
     today = None
@@ -268,7 +283,3 @@ def main(argv: list[str] | None = None) -> int:
         if result.get("next_review"):
             print(f"next review: {result['next_review']}")
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

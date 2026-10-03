@@ -157,8 +157,10 @@ def load_config(root: Path) -> tuple[dict[str, Any], Path | None]:
         _validate(config)
         return config, None
     try:
-        raw = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+        # utf-8-sig: Windows editors (Notepad) save a byte-order mark, which TOML
+        # itself rejects at line 1, column 1. Markdown readers already accept it.
+        raw = tomllib.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise ConfigError(f"cannot read {CONFIG_FILE}: {exc}") from exc
     if not isinstance(raw, dict):
         raise ConfigError(f"{CONFIG_FILE} must contain a TOML table")

@@ -8,6 +8,7 @@ the suite must not grow one just to read its own CI files.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -136,9 +137,9 @@ class CompositeActionContractTests(unittest.TestCase):
         inputs = _children(_block(self.text, "inputs"), 2)
         outputs = _children(_block(self.text, "outputs"), 2)
         self.assertEqual(
-            set(inputs), {"root", "profile", "strict", "base", "history", "today"}
+            set(inputs), {"root", "profile", "strict", "base", "history", "today", "annotations", "sarif"}
         )
-        self.assertEqual(set(outputs), {"version"})
+        self.assertEqual(set(outputs), {"version", "sarif-file"})
         for name, body in [*inputs.items(), *outputs.items()]:
             with self.subTest(name=name):
                 self.assertTrue(any(line.strip().startswith("description:") for line in body))
@@ -164,7 +165,7 @@ class CompositeActionContractTests(unittest.TestCase):
             fake = Path(tmp) / "whykit"
             fake.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{record}"\n', encoding="utf-8")
             fake.chmod(0o755)
-            base_env = {**os.environ, "WHYKIT": str(fake), "WHYKIT_ROOT": "vault"}
+            base_env = {**os.environ, "WHYKIT": str(fake), "WHYKIT_ROOT": "vault", "WHYKIT_ANNOTATIONS": "false"}
 
             def run(step: str, **env: str) -> subprocess.CompletedProcess[str]:
                 record.unlink(missing_ok=True)
@@ -204,6 +205,78 @@ class CompositeActionContractTests(unittest.TestCase):
                 WHYKIT_BASE_SHA="", WHYKIT_EVENT="push", WHYKIT_TODAY="",
             )
             self.assertEqual(bad_history.returncode, 2)
+            self.assertFalse(record.exists())
+
+            annotated = run(
+                gate, WHYKIT_PROFILE="ci", WHYKIT_HISTORY="false", WHYKIT_BASE="",
+                WHYKIT_BASE_SHA="", WHYKIT_EVENT="push", WHYKIT_TODAY="", WHYKIT_ANNOTATIONS="true",
+            )
+            self.assertEqual(annotated.returncode, 0, annotated.stdout + annotated.stderr)
+            self.assertEqual(
+                record.read_text(encoding="utf-8").split(),
+                ["check", "--root", "vault", "--profile", "ci", "--format", "github"],
+            )
+            annotated_lint = run(lint, WHYKIT_STRICT="false", WHYKIT_TODAY="", WHYKIT_ANNOTATIONS="true")
+            self.assertEqual(annotated_lint.returncode, 0, annotated_lint.stdout + annotated_lint.stderr)
+            self.assertEqual(record.read_text(encoding="utf-8").split(), ["lint", "--root", "vault", "--format", "github"])
+            for step, extra in ((gate, {"WHYKIT_PROFILE": "ci", "WHYKIT_HISTORY": "false", "WHYKIT_BASE": "",
+                                        "WHYKIT_BASE_SHA": "", "WHYKIT_EVENT": "push", "WHYKIT_TODAY": ""}),
+                                (lint, {"WHYKIT_STRICT": "false", "WHYKIT_TODAY": ""})):
+                bad = run(step, WHYKIT_ANNOTATIONS="yes", **extra)
+                with self.subTest(step=step):
+                    self.assertEqual(bad.returncode, 2)
+                    self.assertIn("annotations must be", bad.stdout)
+                    self.assertFalse(record.exists())
+
+    @unittest.skipIf(os.name == "nt" or shutil.which("bash") is None, "needs a POSIX bash")
+    def test_sarif_export_tolerates_findings_but_not_failures(self) -> None:
+        self.assertRegex(
+            self.text,
+            r"uses: github/codeql-action/upload-sarif@[0-9a-f]{40} # v\d+(\.\d+)*\n"
+            r"      with:\n        sarif_file: \$\{\{ steps\.sarif\.outputs\.file \}\}",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            record = Path(tmp) / "argv"
+            output = Path(tmp) / "github-output"
+            fake = Path(tmp) / "whykit"
+
+            def run(exit_code: int, **env: str) -> subprocess.CompletedProcess[str]:
+                record.unlink(missing_ok=True)
+                output.write_text("", encoding="utf-8")
+                fake.write_text(
+                    f'#!/bin/sh\nprintf "%s\\n" "$@" > "{record}"\necho \'{{"version": "2.1.0"}}\'\nexit {exit_code}\n',
+                    encoding="utf-8",
+                )
+                fake.chmod(0o755)
+                return subprocess.run(
+                    ["bash", "-c", _action_step_script("Export lint findings as SARIF")],
+                    cwd=ROOT, text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=30,
+                    env={**os.environ, "WHYKIT": str(fake), "WHYKIT_ROOT": "vault", "RUNNER_TEMP": tmp,
+                         "GITHUB_OUTPUT": str(output), "WHYKIT_SARIF": "true", "WHYKIT_TODAY": "", **env},
+                )
+
+            for exit_code in (0, 1):
+                with self.subTest(whykit_exit=exit_code):
+                    ok = run(exit_code, WHYKIT_TODAY="2026-09-17")
+                    self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+                    self.assertEqual(
+                        record.read_text(encoding="utf-8").split(),
+                        ["lint", "--root", "vault", "--format", "sarif", "--today", "2026-09-17"],
+                    )
+                    written = output.read_text(encoding="utf-8").strip()
+                    self.assertRegex(written, r"^file=.+\.sarif$")
+                    report = Path(written.removeprefix("file="))
+                    self.assertEqual(report.parent, Path(tmp))
+                    self.assertEqual(json.loads(report.read_text(encoding="utf-8")), {"version": "2.1.0"})
+            broken = run(2)
+            self.assertEqual(broken.returncode, 2)
+            self.assertEqual(output.read_text(encoding="utf-8"), "")
+            bad_flag = run(0, WHYKIT_SARIF="yes")
+            self.assertEqual(bad_flag.returncode, 2)
+            self.assertIn("sarif must be", bad_flag.stdout)
+            self.assertFalse(record.exists())
+            bad_today = run(0, WHYKIT_TODAY="tomorrow")
+            self.assertEqual(bad_today.returncode, 2)
             self.assertFalse(record.exists())
 
 

@@ -276,7 +276,7 @@ class LineEndingTests(VaultCase):
         to_crlf(vault)
         steps = (
             ("new", "--root", str(vault), "decision", "Pick a café", "--source", "E-001"),
-            ("review", "--root", str(vault), "record", "D-001", "--reviewer", "A Person", "--today", TODAY),
+            ("review", "--root", str(vault), "record", "D-002", "--reviewer", "A Person", "--today", TODAY),
             ("new", "--root", str(vault), "evidence", "--source", "Survey", "--location", "https://example.com/s",
              "--type", "web", "--claims", "a claim"),
             ("evidence", "--root", str(vault), "retire", "E-003", "--why", "withdrawn"),
@@ -290,7 +290,7 @@ class LineEndingTests(VaultCase):
             "00-context/evidence-register.md",
             "00-context/review-log.md",
             "06-decisions/decision-log.md",
-            "06-decisions/d-001-start-with-a-minimal-whykit-vault.md",
+            "06-decisions/d-002-keep-the-ledger-to-evidence-and-decisions.md",
         ):
             with self.subTest(file=relative):
                 crlf, lf = line_endings(vault / relative)
@@ -434,6 +434,7 @@ class ReadOnlyFileTests(VaultCase):
         vault = self.vault()
         log = vault / "06-decisions" / "decision-log.md"
         before = log.read_bytes()
+        records = sorted(p.name for p in (vault / "06-decisions").glob("d-*.md"))
         self.make_read_only(log)
         result = run("new", "--root", str(vault), "decision", "Blocked", env=ASCII_CONSOLE)
         self.assertEqual(result.returncode, 2)
@@ -441,8 +442,7 @@ class ReadOnlyFileTests(VaultCase):
         self.assertIn("read-only", err)
         self.assertNotIn("Traceback", err)
         self.assertEqual(log.read_bytes(), before)
-        self.assertEqual(sorted(p.name for p in (vault / "06-decisions").glob("d-*.md")),
-                         ["d-001-start-with-a-minimal-whykit-vault.md"])
+        self.assertEqual(sorted(p.name for p in (vault / "06-decisions").glob("d-*.md")), records)
         self.assertEqual(list(vault.rglob("*.whykit-tmp-*")), [])
         self.assertFalse((vault / ".whykit" / "transactions").exists())
         # The vault is not wedged: once writable, the next mutation succeeds.

@@ -21,7 +21,8 @@ ID format: `D-NNN`, assigned in order, never reused.
 
 | ID | Decision | Date | Owner | Status | Record |
 |---|---|---|---|---|---|
-| D-001 | Start with a minimal WhyKit vault | 2026-09-17 | Vault owner | accepted | [[06-decisions/d-001-start-with-a-minimal-whykit-vault]] |
+| D-001 | Start with a minimal WhyKit vault | 2026-09-17 | Vault owner | superseded | [[06-decisions/d-001-start-with-a-minimal-whykit-vault]] |
+| D-002 | Keep the ledger to evidence and decisions | 2026-09-17 | Vault owner | accepted | [[06-decisions/d-002-keep-the-ledger-to-evidence-and-decisions]] |
 
 ## What belongs here
 

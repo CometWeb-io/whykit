@@ -1,7 +1,9 @@
 import type { VaultDoc } from "../types.ts";
 
 export const NODE_W = 168;
-export const NODE_H = 28;
+/** Tall enough for a two-line label at LINE_H spacing. */
+export const NODE_H = 38;
+export const LINE_H = 13;
 const COL_W = NODE_W + 24;
 const ROW_H = NODE_H + 10;
 const GROUP_LABEL_H = 26;

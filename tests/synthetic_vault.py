@@ -301,7 +301,7 @@ DIGEST_COMMANDS: tuple[tuple[str, list[str]], ...] = (
 _GENERATED_AT = re.compile(r'"generatedAt": "[^"]*"')
 
 
-def output_digests(root: Path) -> dict[str, str]:
+def output_digests(root: Path, commands: tuple[tuple[str, list[str]], ...] = DIGEST_COMMANDS) -> dict[str, str]:
     """SHA-256 of each pinned command's exit code and stdout, run in-process.
 
     The vault's absolute path and the Explorer's wall-clock stamp are the only
@@ -311,7 +311,7 @@ def output_digests(root: Path) -> dict[str, str]:
 
     root = Path(root).resolve()
     digests: dict[str, str] = {}
-    for name, argv in DIGEST_COMMANDS:
+    for name, argv in commands:
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             try:

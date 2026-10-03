@@ -1,0 +1,34 @@
+# Hooks for https://pre-commit.com. Use them from another repository:
+#
+#   repos:
+#     - repo: https://github.com/CometWeb-io/whykit
+#       rev: <reviewed-40-character-commit-sha>
+#       hooks:
+#         - id: whykit-lint
+#         - id: whykit-history
+#
+# A vault in a subdirectory needs `args: [--root, path/to/vault]` on each hook.
+# See docs/ci.md#pre-commit for the details.
+
+- id: whykit-lint
+  name: WhyKit lint
+  description: Check vault structure, links, evidence and decisions.
+  entry: whykit lint
+  language: python
+  # Links, the evidence register and the decision log cross files, so the
+  # whole vault is linted whenever a Markdown file or the policy changes.
+  pass_filenames: false
+  files: (\.md|(^|/)whykit\.toml)$
+  require_serial: true
+  minimum_pre_commit_version: "3.2.0"
+
+- id: whykit-history
+  name: WhyKit history (staged)
+  description: Refuse a commit that rewrites accepted decision reasoning or past review-log rows.
+  entry: whykit history --staged
+  language: python
+  pass_filenames: false
+  files: (^|/)(06-decisions/.+\.md|00-context/review-log\.md)$
+  require_serial: true
+  stages: [pre-commit]
+  minimum_pre_commit_version: "3.2.0"

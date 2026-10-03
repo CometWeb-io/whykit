@@ -355,6 +355,11 @@ class VaultTools:
             raise SystemExit(f"not a WhyKit vault: {vault}")
         self.policy = _validate_policy(max_sensitivity)
         self.allowed = _allowed_sensitivities(self.policy)
+        from whykit.vault_index import NoteCache
+
+        # Parsed notes survive between calls while their files are unchanged;
+        # everything derived from them is recomputed per call.
+        self.notes = NoteCache()
 
     def _visible_index(self):
         """Load the vault as if records above the ceiling did not exist.
@@ -471,7 +476,7 @@ class VaultTools:
             try:
                 config, _ = load_config(self.vault)
             except ConfigError:
-                raise ToolFailure("invalid_config", "the vault configuration does not validate; run `whykit config`") from None
+                raise ToolFailure("invalid_config", "the vault configuration does not validate; run `whykit policy`") from None
             due_days = int(config["defaults"]["status_due_days"])
 
         # Lint the confined view: a link to a hidden note is then reported
@@ -748,11 +753,13 @@ class VaultTools:
         except TypeError:
             return ToolFailure("invalid_argument", f"unexpected arguments for {name}").payload(), True
         from whykit.lint import path_cache
+        from whykit.vault_index import reuse_notes
 
         try:
             # One resolve cache per call, never per process: the vault may change
-            # on disk between calls and the next call must see it.
-            with path_cache():
+            # on disk between calls and the next call must see it.  Parsed notes
+            # are reused only after their stat signature is re-checked.
+            with path_cache(), reuse_notes(self.notes):
                 return handler(**arguments), False
         except ToolFailure as exc:
             return exc.payload(), True
@@ -1051,7 +1058,7 @@ def build_server(vault: Path, *, max_sensitivity: str = DEFAULT_MAX_SENSITIVITY)
     return mcp
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="whykit-mcp", description="Read-only WhyKit MCP server")
     parser.add_argument("--root", required=True, help="path to a WhyKit vault")
     parser.add_argument(
@@ -1060,7 +1067,17 @@ def main(argv: list[str] | None = None) -> int:
         choices=tuple(SENSITIVITY_LEVEL),
         help="highest sensitivity documents MCP may return (default: internal)",
     )
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    from .console import harden_stdio
+
+    # Same console rule as `whykit`: on an ASCII or legacy code-page console,
+    # help, usage errors and log lines on stderr degrade instead of raising.
+    # The MCP transport writes its own UTF-8 stream, so the protocol is unchanged.
+    harden_stdio()
+    args = build_parser().parse_args(argv)
     vault = Path(args.root).expanduser().resolve()
     server = build_server(vault, max_sensitivity=args.max_sensitivity)
     server.run()

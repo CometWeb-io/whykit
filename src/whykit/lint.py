@@ -22,6 +22,7 @@ import functools
 import json
 import os
 import re
+import stat
 import unicodedata
 from urllib.parse import unquote
 from dataclasses import asdict, dataclass, field
@@ -31,6 +32,14 @@ from typing import Iterable
 
 from .config import CONFIG_FILE, ConfigError, load_config
 from .console import emit_machine
+from .placeholders import (
+    PROSE_SECTIONS as PLACEHOLDER_PROSE_SECTIONS,
+    SCAFFOLD_EVIDENCE_TODO,
+    normalize as normalize_placeholder,
+    paragraphs as placeholder_paragraphs,
+    split_sections as split_placeholder_sections,
+    template_section_prompts,
+)
 
 VAULT_MARKERS = ("Home.md", "00-context")
 
@@ -90,7 +99,12 @@ def _real(path: Path) -> Path:
     key = os.fspath(path)
     hit = cache.realpaths.get(key)
     if hit is None:
-        hit = cache.realpaths[key] = _real_uncached(path)
+        hit = _real_uncached(path)
+        if type(hit) is type(path) and os.fspath(hit) == key:
+            # Already real (the common case under a resolved vault root): keep
+            # the caller's object instead of an equal copy of every path.
+            hit = path
+        cache.realpaths[key] = hit
     return hit
 
 
@@ -107,6 +121,31 @@ def _real_uncached(path: Path) -> Path:
     return path.resolve()
 
 
+def _relative_text(path: Path, root: Path) -> str | None:
+    """``path.relative_to(root).as_posix()``, or ``None`` when it raises.
+
+    For two real (absolute, normalised) POSIX paths this is a prefix test on
+    the strings.  ``relative_to`` gets the same answer by comparing every
+    ancestor of *path* with *root*, and caches a list of parts on both paths
+    while doing it, which at vault scale is both slow and tens of megabytes.
+    """
+    if not _POSIX:
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            return None
+    inner, outer = os.fspath(path), os.fspath(root)
+    if inner == outer:
+        return "."
+    if not (inner.startswith("/") and outer.startswith("/")):
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            return None
+    prefix = outer if outer.endswith("/") else outer + "/"
+    return inner[len(prefix):] if inner.startswith(prefix) else None
+
+
 def _within(root: Path, path: Path) -> bool:
     cache = _REQUEST.get()
     key = (os.fspath(root), os.fspath(path))
@@ -115,9 +154,8 @@ def _within(root: Path, path: Path) -> bool:
         if hit is not None:
             return hit
     try:
-        _real(path).relative_to(_real(root))
-        inside = True
-    except (OSError, ValueError):
+        inside = _relative_text(_real(path), _real(root)) is not None
+    except OSError:
         inside = False
     if cache is not None:
         cache.within[key] = inside
@@ -204,6 +242,35 @@ SECRET_PATTERNS = (
         r"[\"']?[A-Za-z0-9_\-/+=.]{20,}"
     )),
 )
+_CREDENTIAL_WORDS = ("key", "token", "secret", "password")
+
+
+def _may_hold_credential(text: str) -> bool:
+    # Every credential-assignment match contains one of these words, compared
+    # case-insensitively.  For ASCII text, `re.IGNORECASE` and `str.lower()`
+    # agree letter for letter.  Outside ASCII they do not (the regex also
+    # matches the Kelvin sign as `k` and the long s as `s`), so such text
+    # always gets the full scan.
+    if not text.isascii():
+        return True
+    lowered = text.lower()
+    return any(word in lowered for word in _CREDENTIAL_WORDS)
+
+
+# A necessary condition for each same-index SECRET_PATTERNS entry: if it is
+# false for a text, the pattern cannot match anywhere in it.  The patterns start
+# with ``\b``, so the regex engine tries them at every offset; the prefilters
+# start with a literal that it finds with a fast substring search.  Skipping a
+# pattern only when its prefilter fails leaves the findings unchanged.
+# ``tests/test_performance.py`` checks each prefilter against its pattern.
+SECRET_PREFILTERS: tuple[Callable[[str], object], ...] = (
+    re.compile(r"-----BEGIN ").search,
+    re.compile(r"sk-").search,
+    re.compile(r"AKIA").search,
+    re.compile(r"gh[pousr]_").search,
+    re.compile(r"xox[baprs]-").search,
+    _may_hold_credential,
+)
 CONTENT_SKIP_DIRS = {
     ".git", ".obsidian", ".import-staging", "node_modules", "__pycache__",
     "apps", "examples", "tests", ".github", "schemas",
@@ -237,12 +304,30 @@ class Note:
         """The text with code spans and fences blanked; offsets match ``text``."""
         return _mask_code(self.text)
 
+    @functools.cached_property
+    def cited_evidence(self) -> tuple[str, ...]:
+        """Sorted E-NNN IDs this note cites, in front matter or prose.
+
+        An ID inside inline code or a fenced code block is an example of the
+        syntax, not a citation, so graph, impact, context, query and trace all
+        ignore it; lint's fact-callout check reads the same masked text.
+        """
+        return tuple(sorted(set(EVIDENCE_ID_RE.findall(self.masked))))
+
     @property
     def body(self) -> str:
         """The note text after the front matter block (the whole text when there is none)."""
         if not self.has_front:
             return self.text
-        return "\n".join(self.text.split("\n")[self.body_offset:])
+        # Same as "\n".join(text.split("\n")[body_offset:]) without building
+        # a list of every line: skip past the first body_offset newlines.
+        text = self.text
+        at = 0
+        for _ in range(self.body_offset):
+            at = text.find("\n", at) + 1
+            if at == 0:
+                return ""
+        return text[at:]
 
 
 def _strip_yaml_comment(value: str) -> str:
@@ -299,7 +384,32 @@ def _split_inline_list(inner: str) -> list[str]:
     return parts
 
 
+# Front matter repeats the same keys and many of the same short values
+# (status, type, owner, tags) in every note.  Sharing one string object per
+# spelling saves tens of megabytes at 20,000 notes.  The pool is bounded so a
+# long-lived process reading many vaults cannot grow it without limit.
+_SHARED: dict[str, str] = {}
+_SHARED_MAX_ENTRIES = 8192
+_SHARED_MAX_CHARS = 64
+
+
+def _shared(value: str) -> str:
+    if len(value) > _SHARED_MAX_CHARS:
+        return value
+    hit = _SHARED.get(value)
+    if hit is not None:
+        return hit
+    if len(_SHARED) < _SHARED_MAX_ENTRIES:
+        _SHARED[value] = value
+    return value
+
+
 def _yaml_scalar(value: str) -> object:
+    result = _yaml_scalar_raw(value)
+    return _shared(result) if type(result) is str else result
+
+
+def _yaml_scalar_raw(value: str) -> object:
     import json as _json
 
     value = _strip_yaml_comment(value).strip()
@@ -367,7 +477,7 @@ def _parse_front_matter(raw: str) -> dict:
             if ":" not in content:
                 raise ValueError(f"cannot read line: {raw_line!r}")
             key, _, value = content.partition(":")
-            key = key.strip()
+            key = _shared(key.strip())
             if not key:
                 raise ValueError("front matter key cannot be empty")
             if key in out:
@@ -429,7 +539,7 @@ def _parse_front_matter(raw: str) -> dict:
         if not isinstance(parent, dict):
             raise ValueError(f"cannot nest under scalar key {current_top!r}")
         nested_key, _, value = content.partition(":")
-        nested_key = nested_key.strip()
+        nested_key = _shared(nested_key.strip())
         if not nested_key:
             raise ValueError("front matter nested key cannot be empty")
         if nested_key in parent:
@@ -480,9 +590,8 @@ def rel(root: Path, path: Path) -> str:
         if hit is not None:
             return hit
     resolved = _real(path)
-    try:
-        out = resolved.relative_to(_real(root)).as_posix()
-    except ValueError:
+    out = _relative_text(resolved, _real(root))
+    if out is None:
         out = resolved.as_posix()
     if cache is not None:
         cache.relative[key] = out
@@ -1256,6 +1365,78 @@ def check_decision_review(root: Path, notes: list[Note], findings: list[Finding]
                 "approved decision has no `review_by` date — nothing will ever prompt a re-check")
 
 
+# Statuses whose decision records must not keep template prompts. Superseded
+# and archived records are history and may not be edited, so they are skipped;
+# templates are meant to hold prompts. Every level is a warning for now (new
+# rules land as warnings); `--strict` and the `ci` profile still fail on it.
+PLACEHOLDER_LEVELS = {"approved": "warning", "in_review": "warning", "draft": "warning"}
+_BARE_LINES = frozenset({"", "-", "*", "+"})
+
+
+def _decision_placeholders(note: Note) -> list[tuple[int, str]]:
+    """``(line, section)`` for each section still holding template placeholders.
+
+    Headings and placeholder prose are read from the code-masked text, so a
+    record that quotes the template inside a code block is not flagged. Whether
+    a section is empty is judged on the raw text, so a section holding only a
+    code block still counts as written.
+    """
+    masked = note.masked.split("\n")
+    raw = note.text.split("\n")
+    prompts = template_section_prompts()
+    found: list[tuple[int, str]] = []
+    for heading, start, end in split_placeholder_sections(masked):
+        body = masked[start:end]
+        known = prompts.get(heading, frozenset())
+        if heading in PLACEHOLDER_PROSE_SECTIONS:
+            # A prompt left on its own line above real prose is still a leftover.
+            hits = [start + index + 1 for index, text in placeholder_paragraphs(body) if text in known]
+            hits += [start + index + 1 for index, line in enumerate(body) if normalize_placeholder(line) in known]
+            if hits:
+                found.append((min(hits), heading))
+            elif all(line.strip() in _BARE_LINES for line in raw[start:end]):
+                found.append((start, heading))
+        elif heading == "Evidence":
+            hits = [start + index + 1 for index, line in enumerate(body) if line.strip() == SCAFFOLD_EVIDENCE_TODO]
+            if hits:
+                found.append((hits[0], heading))
+        elif heading == "Alternatives considered":
+            rows = [line.strip() for line in body if line.strip().startswith("|")]
+            filled = [row for row in rows[2:] if any(cell.strip() for cell in row.strip("|").split("|"))]
+            prose = [text for _, text in placeholder_paragraphs(body) if text not in known]
+            if rows and not filled and not prose:
+                found.append((start, heading))
+        elif heading == "Consequences":
+            if all(line.strip() in _BARE_LINES or line.lstrip().startswith("#") for line in raw[start:end]):
+                found.append((start, heading))
+    return found
+
+
+def check_decision_placeholders(root: Path, notes: list[Note], findings: list[Finding]) -> None:
+    """Template prose left in a decision record that is meant to be read.
+
+    Shape alone cannot tell whether a rationale is good, but it can tell that
+    the record still says "State the choice in one sentence." The prompts are
+    the ones WhyKit itself writes (see ``whykit.placeholders``), so this rule
+    follows any change to the scaffold or the shipped template.
+    """
+    for note in notes:
+        r = Path(rel(root, note.path))
+        if "06-decisions" not in r.parts or not DECISION_FILE_RE.match(r.name):
+            continue
+        status = str(note.front.get("status") or "").strip()
+        level = PLACEHOLDER_LEVELS.get(status)
+        if level is None:
+            continue
+        leftovers = _decision_placeholders(note)
+        if not leftovers:
+            continue
+        sections = ", ".join(f"`## {heading}`" for _, heading in leftovers)
+        add(
+            findings, root, note.path, leftovers[0][0], level, "decision.placeholder",
+            f"{status} decision still has template text or nothing in {sections} — write the real content",
+        )
+
 
 REVIEW_OUTCOMES = {"confirmed", "update-required", "supersede-required", "archived"}
 
@@ -1371,22 +1552,37 @@ def check_hub_links(root: Path, notes: list[Note], findings: list[Finding]) -> N
             )
 
 
-def _text_files_for_secret_scan(root: Path) -> Iterable[Path]:
+def _text_files_for_secret_scan(root: Path) -> Iterable[tuple[Path, int]]:
+    """Yield ``(path, size)`` for every regular text file the secret scan covers.
+
+    The name filters run before the ``stat``: they are pure string tests, and
+    most files in a large vault pass them, but no file is stat-ed twice.
+    """
     depth = len(root.parts)
     for p in root.rglob("*"):
-        if not p.is_file() or not _within(root, p):
-            continue
         if any(part in SECRET_SKIP_DIRS for part in p.parts[depth:]):
             continue
-        if p.name.startswith(".env") or p.suffix.lower() in TEXT_SECRET_EXTENSIONS:
-            yield p
-
-
-def check_secrets(root: Path, findings: list[Finding]) -> None:
-    max_bytes = 5_000_000
-    for path in _text_files_for_secret_scan(root):
+        if not (p.name.startswith(".env") or p.suffix.lower() in TEXT_SECRET_EXTENSIONS):
+            continue
         try:
-            size = path.stat().st_size
+            info = p.stat()  # follows symlinks, like Path.is_file()
+        except (OSError, ValueError):
+            continue
+        if stat.S_ISREG(info.st_mode) and _within(root, p):
+            yield p, info.st_size
+
+
+def check_secrets(root: Path, findings: list[Finding], loaded: dict[Path, str] | None = None) -> None:
+    """Scan every text file under *root* for credential-shaped strings.
+
+    *loaded* maps a note's path to the text the vault index already read, so a
+    Markdown note is not read from disk a second time.  The index stripped a
+    leading byte-order mark; no pattern can match one or depends on it, so the
+    findings (including line numbers) are the same as for the raw file.
+    """
+    max_bytes = 5_000_000
+    for path, size in _text_files_for_secret_scan(root):
+        try:
             if size > max_bytes:
                 add(
                     findings,
@@ -1401,7 +1597,9 @@ def check_secrets(root: Path, findings: list[Finding]) -> None:
                     ),
                 )
                 continue
-            text = path.read_text(encoding="utf-8")
+            text = loaded.get(path) if loaded else None
+            if text is None:
+                text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             add(
                 findings,
@@ -1424,7 +1622,9 @@ def check_secrets(root: Path, findings: list[Finding]) -> None:
                 f"secret scan could not read file: {exc}",
             )
             continue
-        for label, pattern in SECRET_PATTERNS:
+        for (label, pattern), prefilter in zip(SECRET_PATTERNS, SECRET_PREFILTERS, strict=True):
+            if not prefilter(text):
+                continue
             numbers = _LineNumbers(text)
             for match in pattern.finditer(text):
                 line = numbers.at(match.start())
@@ -1457,11 +1657,25 @@ def collect_markdown(root: Path, paths: list[str]) -> list[Path]:
         return out
     depth = len(root.parts)
     return sorted(
-        p for p in root.rglob("*.md")
-        if p.is_file()
-        and _within(root, p)
-        and not any(part in CONTENT_SKIP_DIRS for part in p.parts[depth:])
+        (
+            p for p in root.rglob("*.md")
+            if p.is_file()
+            and _within(root, p)
+            and not any(part in CONTENT_SKIP_DIRS for part in p.parts[depth:])
+        ),
+        key=_path_order,
     )
+
+
+def _path_order(path: Path) -> list[str]:
+    """Sort key giving the same order as comparing the paths themselves.
+
+    ``PurePath.__lt__`` compares the case-normalised string split on the
+    separator, and caches that list on each path for the life of the object.
+    The paths of a vault index live as long as the index, so sorting them
+    directly would keep a second copy of every path's parts.
+    """
+    return os.path.normcase(os.fspath(path)).split(os.sep)
 
 
 @path_cache()
@@ -1517,6 +1731,7 @@ def lint(
     check_decision_ids(root, notes, findings)
     check_decision_log(root, all_notes, findings, index_model.resolve_link)
     check_decision_review(root, notes, findings)
+    check_decision_placeholders(root, notes, findings)
     if not paths:
         check_config(root, findings)
         check_path_collisions(root, all_notes, findings)
@@ -1533,7 +1748,7 @@ def lint(
     if hub_links and not paths:
         check_hub_links(root, all_notes, findings)
     if secrets and not paths:
-        check_secrets(root, findings)
+        check_secrets(root, findings, {note.path: note.text for note in all_notes})
     return files, findings
 
 
@@ -1564,6 +1779,9 @@ def resolve_root(explicit: str | None, paths: list[str], cwd: Path | None = None
     return cwd, paths, None
 
 
+LINT_FORMATS = ("text", "json", "sarif", "github")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="whykit lint", description="Check a WhyKit vault.")
     parser.add_argument("paths", nargs="*", help="Markdown files/directories to check")
@@ -1574,18 +1792,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-orphans", action="store_true", help="skip orphan-note warnings")
     parser.add_argument("--no-secrets", action="store_true", help="skip secret scan")
     parser.add_argument("--today", help="evaluate review dates as of this ISO date instead of today")
+    parser.add_argument("--format", choices=LINT_FORMATS, default=None, help="output format (default: text)")
     args = parser.parse_args(argv)
     from .contract import emit_error, vault_not_found
+
+    if args.json and args.format not in (None, "json"):
+        return emit_error(
+            "usage",
+            f"--json conflicts with --format {args.format}\nhint: pass one of them to `whykit lint`",
+            json_mode=True,
+        )
+    fmt = "json" if args.json else (args.format or "text")
+    # Only the JSON format has an error object; a SARIF or annotation consumer
+    # gets the human error on stderr and an empty stdout.
+    json_mode = fmt == "json"
 
     as_of = None
     if args.today:
         as_of = _parse_date(args.today)
         if as_of is None:
-            return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=args.json)
+            return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=json_mode)
 
     root, paths, note = resolve_root(args.root, list(args.paths))
     if not is_vault_root(root):
-        return vault_not_found(args.root, json_mode=args.json)
+        return vault_not_found(args.root, json_mode=json_mode)
 
     try:
         files, findings = lint(root, paths, orphans=not args.no_orphans, secrets=not args.no_secrets, today=as_of)
@@ -1594,12 +1824,24 @@ def main(argv: list[str] | None = None) -> int:
             "invalid_argument",
             str(exc),
             hint=f"hint: paths are relative to the vault root ({root}); lint checks .md files and directories",
-            json_mode=args.json,
+            json_mode=json_mode,
         )
     errors = [f for f in findings if f.level == "error"]
     warnings = [f for f in findings if f.level == "warning"]
+    failed = bool(errors or (warnings and args.strict))
 
-    if args.json:
+    if fmt == "sarif":
+        from .ci_formats import to_sarif
+        emit_machine(json.dumps(to_sarif([asdict(f) for f in findings], root, files=len(files)), ensure_ascii=False, indent=2))
+    elif fmt == "github":
+        from .ci_formats import github_annotations, workflow_command
+        lines = github_annotations([asdict(f) for f in findings], root)
+        summary = f"{len(files)} files — {len(errors)} error(s), {len(warnings)} warning(s)"
+        lines.append(f"whykit lint: {summary}")
+        if failed and not errors:
+            lines.append(workflow_command("error", f"whykit lint --strict: {len(warnings)} warning(s) fail this gate", title="WhyKit"))
+        emit_machine("\n".join(lines))
+    elif fmt == "json":
         emit_machine(json.dumps({
             "contract_version": 1,
             "root": str(root),
@@ -1622,10 +1864,4 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  {f.level:<7}{where:<6} [{f.code}] {f.message}")
         print(f"\n{len(files)} files — {len(errors)} error(s), {len(warnings)} warning(s)" if findings else f"\n{len(files)} files — clean")
 
-    if errors or (warnings and args.strict):
-        return 1
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    return 1 if failed else 0

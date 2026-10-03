@@ -1,40 +1,17 @@
-# WhyKit
+# How-to guides
 
-**The layer that remembers why.**
+Short recipes for the jobs you do with a vault once it exists. Each one assumes
+you know the three moving parts from [Concepts](concepts.md): evidence,
+decisions and the review cycle. For a guided first run, start with the
+[tutorials](README.md#start) instead. Every flag is listed in the
+[command reference](cli.md).
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](../LICENSE)
+## Run WhyKit from a checkout
 
-WhyKit is a Git-native evidence and decision ledger for teams and AI agents.
-It keeps durable context, sources, decisions and their rationale in plain
-Markdown, and enforces the parts that rot first: that evidence is cited, that
-accepted decisions are never quietly rewritten, and that somebody named a date on
-which each one gets re-checked.
-
-Copyright 2026 **Maciej Zmitrukiewicz** (hello@cometweb.io).
-[CometWeb](https://cometweb.io) is the product name, not a company and not
-the copyright holder. WhyKit is source preview
-`0.3.0.dev0`: no GitHub Release and no public PyPI package yet. See the
-[release checklist](../.github/RELEASE.md).
-Apache-2.0.
-
-It is deliberately not a vector database, CRM, task manager or chat history.
-Those keep execution and activity. WhyKit keeps the reasoning that has to
-survive them.
-
-## Why it exists
-
-Six months after a material change, a team can usually find *what* happened but
-not which evidence supported it, which assumptions were never proven, who
-accepted it, what was rejected, what superseded it, or whether any of it is still
-true. Those relationships are what WhyKit makes explicit and reviewable — by
-people and by the agents now writing half of this material.
-
-## Quick start
-
-WhyKit requires Python 3.11 or newer and has no runtime dependencies. Install
-[uv](https://docs.astral.sh/uv/getting-started/installation/), then use the
-checkout commands below. WhyKit is not on PyPI yet; do not run
-`uv tool install whykit` or `pipx install whykit` until a release is announced.
+WhyKit requires Python 3.11 or newer and has no runtime dependencies. It is
+not on PyPI yet; do not run `uv tool install whykit` or `pipx install whykit`
+until a release is announced in this repository. Install
+[uv](https://docs.astral.sh/uv/getting-started/installation/), then:
 
 ```bash
 git clone https://github.com/CometWeb-io/whykit.git
@@ -44,87 +21,65 @@ uv run whykit init ../my-ledger
 uv run whykit lint --root ../my-ledger
 ```
 
-The rest of this guide writes commands as bare `whykit ...` run from inside the
-vault directory. From a source checkout, either:
+The rest of this page writes commands as bare `whykit …`, run from inside the
+vault directory. From a source checkout you can get there three ways:
 
-- run `uv run whykit ...` from the WhyKit repository and pass `--root` to point
-  at the vault, or
-- run `uv run --project /path/to/whykit whykit ...` from inside the vault, or
+- run `uv run whykit …` from the WhyKit repository and pass `--root` to point at
+  the vault;
+- run `uv run --project /path/to/whykit whykit …` from inside the vault;
 - install a binary once with `uv tool install --from /path/to/whykit whykit`.
 
-Every command accepts `--root` anywhere, including after the action of
-`new`, `review` and `evidence` (`whykit new decision ... --root ../my-ledger`). After a future PyPI release, `uv tool install whykit` will put
-`whykit` on your `PATH` directly.
+Every command accepts `--root`, including after the action of `new`, `review`
+and `evidence` (`whykit new decision … --root ../my-ledger`). Without it, WhyKit
+walks up from the current directory to the nearest `Home.md` plus `00-context/`.
 
-A fresh vault has zero lint errors and uses the vendor-neutral default layout.
-Use `uv run whykit init --full ../my-ledger` for the optional GTM-oriented
-workstream starter. `--minimal` remains as a compatibility alias. Any warnings
-point to unanswered questions in `AGENTS.md`, the contract agents work under;
-answer those before relying on agents. The exact warning count and line numbers
-can change as the template evolves.
-If the destination already contains files, `init --force` adds only missing
-starter files. It preserves existing notes, configuration and agent rules, and
-keeps custom `.gitignore` patterns while adding WhyKit's protective defaults.
-It does not reset or upgrade existing files.
+## Create a vault
 
-### Already have a pile of Markdown
+`whykit init <dir>` writes the vendor-neutral default layout. A fresh vault has
+zero lint errors; its warnings point at the unanswered questions in `AGENTS.md`,
+the contract agents work under, so answer those before relying on agents. The
+exact warning count and line numbers can change as the template evolves.
 
-Nobody starts from nothing. `adopt` inventories what you have, hashes every file,
-flags duplicates and spots existing ADRs:
+- `whykit init --full <dir>` adds optional workstream folders (strategy,
+  website, research and others). `--minimal` is a compatibility alias for the
+  default.
+- `whykit init --force <dir>` adds only missing starter files to a non-empty
+  directory. It keeps existing notes, configuration, agent rules and custom
+  `.gitignore` patterns. It does not reset or upgrade anything.
 
-```bash
-whykit adopt ../old-docs --into ../my-ledger          # dry run
-whykit adopt ../old-docs --into ../my-ledger --write  # stage it + write an ingestion record
-```
+Obsidian is an optional editor for the result; see
+[Using WhyKit with Obsidian](obsidian.md).
 
-`--profile` tunes the inventory to what you are importing: `generic` (the
-default), `adr-only` for an existing ADR directory, or `obsidian-loose` for an
-Obsidian vault with partial front matter. Add `--json` for a machine-readable
-report. The readiness percentage checks front matter against WhyKit's linter,
-**not** links, evidence, decision integrity or approval, and the time estimate
-is heuristic. Only UTF-8 `*.md` files are scanned; review other assets
-separately. Known evidence-register and decision-log table layouts are flagged
-for manual mapping, and so is a `decision_id` claimed by two imported files or
-already used in the vault. Short files are left behind as stubs only when they
-have neither front matter nor an ADR shape.
+## Already have a pile of Markdown
 
-It never writes into a workstream. Raw exports are staged in a separate dated
-batch under `.import-staging/` for each import, with a SHA-256 for each source.
-A batch appears only once it is complete: if a source changes mid-import or a
-write fails, nothing from that run is left behind.
-The command reports the exact migration-report path, and a person decides what
-becomes canonical. The ingestion record lands in `notes/`; link it from a map or
-lint reports it as `note.orphan`. The inventory is the boring half, and the half
-everybody skips.
-
-### Establish repository policy
-
-A generated vault contains a versioned `whykit.toml`. There is no user-global
-configuration, so a checkout carries the policy that will be used locally, in CI
-and by an agent.
+`adopt` inventories what you have, hashes every file, flags duplicates and spots
+existing ADRs. It is a dry run until you pass `--write`:
 
 ```bash
-whykit policy
-whykit check --profile local
-whykit check --profile ci --today 2026-09-22
+whykit adopt ../old-docs --into ../my-ledger --profile obsidian-loose --json
+whykit adopt ../old-docs --into ../my-ledger --profile generic --write
 ```
 
-The default profiles are intentionally different:
+`--profile` tunes the inventory: `generic` (the default), `adr-only` for an ADR
+directory, or `obsidian-loose` for an Obsidian vault with partial front matter.
+The readiness percentage checks front matter against the linter, **not** links,
+evidence, decision integrity or approval, and the time estimate is heuristic.
+Only UTF-8 `*.md` files are scanned. Known evidence-register and decision-log
+table layouts are flagged for manual mapping, and so is a `decision_id` claimed
+by two imported files or already used in the vault.
 
-- `local` reports warnings but lets normal drafting continue;
-- `ci` treats warnings as failures;
-- `release` additionally requires Git, a clean tree and an explicit history
-  baseline (`--base`).
+`--write` never writes into a workstream. It copies the sources into a new dated
+batch under the vault's gitignored `.import-staging/`, with a SHA-256 for each
+file, and appears only once complete: if a source changes mid-import or a write
+fails, nothing from that run is left behind. The ingestion record lands in
+`notes/`; link it from a map or lint reports `note.orphan`. A person decides
+what becomes canonical.
 
-Edit the repository-local profiles if your team needs a different repeatable
-policy. `whykit policy --json` shows the effective merged configuration.
+## Create records
 
-### Keep evidence and reviews alive
-
-Create records through the CLI so stable IDs and indexes move together:
-
-The commands below use fictional example records. Replace them with evidence
-that is safe to store in the repository where the vault lives.
+Create records through the CLI so IDs and indexes move together. The records
+below are fictional; store only evidence that is safe for the repository the
+vault lives in.
 
 ```bash
 whykit new evidence \
@@ -141,14 +96,16 @@ whykit new note "Interview synthesis" \
   --json
 ```
 
-`--link-from` is explicit on purpose: WhyKit will not silently rewrite `Home.md` or
-another map, but a note created for a strict CI/release workflow can be linked in
-the same atomic operation. If the map update fails, the newly created note is
-rolled back. `new decision`, `new evidence` and `new note` all support `--json`
-for agent/tooling workflows.
+`--link-from` is explicit on purpose: WhyKit never rewrites `Home.md` or another
+map unless asked. When it is given, the note and the link are created in one
+atomic operation, and the note is rolled back if the map update fails.
 
-Approved decisions receive a review date from the repository policy when one is
-not supplied. The due queue is separate from the historical event log:
+An approved decision gets a `review_by` date from `defaults.decision_review_days`
+unless you pass `--review-by`. `--supersedes D-NNN` replaces an earlier decision
+and marks it `superseded` in the same operation; see
+[Concepts](concepts.md#changing-your-mind-supersede-do-not-rewrite).
+
+## Record a review
 
 ```bash
 whykit review list --due-days 30
@@ -158,46 +115,59 @@ whykit review record D-001 \
   --note "Evidence rechecked"
 ```
 
-The review log is append-only under `whykit history`; old review events cannot be
-rewritten or deleted.
+The review log is append-only under `whykit history`. The four outcomes and what
+each does to `review_by` are in [Concepts](concepts.md#the-review-cycle).
 
-Evidence is also lifecycle-managed rather than deleted:
+## Retire evidence
+
+Evidence is never deleted, so its ID keeps meaning the same source:
 
 ```bash
+whykit impact E-001
 whykit evidence list --state active
 whykit evidence retire E-001 \
   --why "Corrected source is now canonical" \
   --replaced-by E-014
 ```
 
-### Use bounded machine context
+Run `impact` first to see what cites the source. After retirement, current
+documents that still cite it get an `evidence.retired` warning.
 
-Agents should not ingest the whole vault blindly when a smaller deterministic
-handoff is sufficient:
+## Hand bounded context to an agent
+
+Agents should not ingest the whole vault when a smaller, deterministic handoff
+is enough:
 
 ```bash
 whykit query "onboarding" --type decision --json
 whykit context D-014 --max-chars 12000 --json
+whykit pack D-014 --query "onboarding" --max-chars 30000
 whykit graph --format json
 whykit impact E-014 --json
 ```
 
-`query` discovers candidate records. `context` returns one resolved target plus
-its evidence, relationships, supersession lineage and scoped findings. `graph`
-exports typed `wikilink`, `evidence` and `supersedes` relations. `impact` answers
-the reverse-dependency question before a source or record is changed.
+| Need | Command |
+|---|---|
+| Find candidate records | `query` |
+| Hand one record, its evidence, relations and findings to an agent | `context` |
+| Hand several related records under one body budget | `pack` |
+| Export the typed relations (`wikilink`, `evidence`, `supersedes`) | `graph` |
+| Check what depends on a record before changing it | `impact` |
 
-`graph --format mermaid` renders the same relations as a Mermaid flowchart that
-GitHub and Obsidian display inline: wikilinks are solid arrows, evidence
-citations dashed, supersession thick, and retired or missing evidence is drawn
-in red. Combine it with `--canonical-only` for a diagram of approved sources of
-truth only.
+`context` and `pack` cap the embedded bodies and report truncation, so a single
+large note cannot silently fill an agent's context window. For tools that speak
+MCP, the [read-only MCP server](mcp.md) exposes the same views; for scripts, the
+[JSON contract](automation.md) defines the output.
 
-### Trace decisions to their evidence
+`graph --format mermaid` renders the relations as a Mermaid flowchart that GitHub
+and Obsidian display inline: wikilinks are solid arrows, evidence citations
+dashed, supersession thick, and retired or missing evidence red. Add
+`--canonical-only` for a diagram of approved sources of truth only.
 
-`impact` looks at one record. `trace` checks the whole ledger the other way
-round: for every decision, which evidence it rests on, and whether that
-evidence can still carry it.
+## Trace decisions to their evidence
+
+`impact` looks at one record. `trace` checks every decision the other way
+round: which evidence it rests on, and whether that evidence can still carry it.
 
 ```bash
 whykit trace --today 2026-09-22
@@ -209,7 +179,7 @@ whykit trace --max-age-days 180            # fallback age window for untyped pol
 A decision cites evidence directly (an `E-NNN` in its text or `source_ids`) or
 inherits it from a non-decision note it links to, shown as `via <note>`.
 Evidence linked through another decision is not inherited, so a successor
-cannot lean on the record it superseded. Each decision can report these gaps:
+cannot lean on the record it superseded.
 
 | Gap | Meaning |
 |---|---|
@@ -218,15 +188,14 @@ cannot lean on the record it superseded. Each decision can report these gaps:
 | `retired_evidence` | Cites retired evidence; the replacement ID is shown when recorded |
 | `stale_evidence` | Cites active evidence last accessed longer ago than its age window |
 
-The age window comes from `[evidence_access_age_days]` in `whykit.toml`, the
-same policy behind the `evidence.access_stale` lint warning, so `trace` shows
-which decisions a stale source actually undermines. `--max-age-days` applies
-only to source types the policy does not list. Only approved decisions that
-nothing supersedes count as live; `--strict` and the summary consider live
-decisions only, because a historical record may legitimately cite evidence
-retired since.
+The age window comes from `[evidence_access_age_days]` in `whykit.toml`
+([Configuration](configuration.md#evidence-access-age)); `--max-age-days`
+applies only to source types the policy does not list. Only approved decisions
+that nothing supersedes count as live, and `--strict` and the summary consider
+live decisions only: a historical record may legitimately cite evidence retired
+since.
 
-### Snapshot and verify drift
+## Snapshot and detect drift
 
 A snapshot fingerprints governed Markdown plus `whykit.toml`:
 
@@ -235,226 +204,48 @@ whykit snapshot --output .whykit/snapshot.json --today 2026-09-22
 whykit verify-snapshot .whykit/snapshot.json --today 2026-10-22 --json
 ```
 
-Content identity and time-based health are reported separately. A vault can have
-identical bytes while its review queue changes simply because a due date passed.
+`matches` and `content_matches` report identity of governed content. Line
+endings and a leading byte-order mark do not count as content, so a snapshot
+taken on one platform verifies on another
+([snapshot formats](automation.md#snapshot-formats)).
+`health_changed` is separate, because a vault can become review-due as time
+passes without a single byte changing. `--output` is resolved relative to the
+vault root and may not leave it.
 
-### Put it in CI
-
-Use the composite GitHub Action from this repository, pinned to a reviewed commit
-SHA, with `profile: ci` and `fetch-depth: 0` so pull requests are checked
-against their base:
-
-```yaml
-- uses: CometWeb-io/whykit@<reviewed-40-character-commit-sha>
-  with:
-    root: knowledge
-    profile: ci
-```
-
-Other CI systems can call the same gate directly:
+## Gate changes locally and in CI
 
 ```bash
-whykit check --root knowledge --profile ci --base origin/main --head HEAD
+whykit policy
+whykit check --profile local
+whykit check --profile ci --base origin/main --head HEAD
+whykit install-hooks
 ```
 
-[Running WhyKit in CI](ci.md) covers the complete workflow file, every Action
-input, the release gate, exit codes and the pre-commit hook.
+The profiles live in the vault's `whykit.toml`
+([Configuration](configuration.md#whykittoml)). `install-hooks` adds a
+pre-commit hook that runs the `local` profile. For GitHub Actions, follow
+[Gate pull requests](tutorials/gate-pull-requests.md); [Running WhyKit in CI](ci.md)
+has every Action input and the setup for other CI systems.
 
-## Why not just ADRs?
+## Browse the vault in the Explorer
 
-Architecture Decision Records solve one part of this, and if that part is all you
-need, use them — `adopt` will recognise your existing ones.
-
-| | ADR / MADR / adr-tools | WhyKit |
-|---|---|---|
-| Scope | Architecture decisions | Any material decision: pricing, positioning, hiring, architecture |
-| Evidence | Prose links, if any | A register with stable `E-NNN` IDs, retirement and replacement |
-| Immutability | A convention people mean to follow | Enforced against the diff in CI |
-| Staleness | Nothing expires | `review_by` per decision; overdue reviews are reported |
-| Claim types | Undifferentiated prose | Fact / decision / hypothesis / recommendation / open question |
-| Secrets | Not addressed | Sensitivity labels + a heuristic text scanner |
-| Agents | Not addressed | `AGENTS.md` contract, `--json` output, provenance block |
-
-WhyKit does not replace an editor. It works with ordinary Markdown in Git;
-Obsidian is one optional editor, and no community plugin is required.
-
-## The five information types
-
-Do not let these blur:
-
-- **Verified fact** — supported by reviewed evidence, cited as `E-NNN`.
-- **Decision** — an authorized choice made at a known point in time.
-- **Hypothesis** — plausible but not demonstrated.
-- **Recommendation** — proposed; not a decision until accepted.
-- **Open question** — a known unknown with an owner.
-
-If a statement cannot be verified yet, label it. An unsupported claim should not
-become organizational memory merely because an agent wrote it confidently.
-
-## Evidence and decisions
-
-Evidence IDs are stable and never reused. A row with no source and no location is
-a placeholder, not evidence, and the linter treats it as such.
-
-Accepted decision records are historical documents. To reverse one:
-
-1. create a new `D-NNN` record;
-2. cite the earlier decision in `supersedes`;
-3. update the decision-log index;
-4. on the old record change **only** `status` to `superseded`, `last_updated`,
-   and optionally `superseded_by`. Leave its reasoning exactly as written.
-
-`whykit history` enforces step 4 against the diff: that one transition is allowed
-and every other edit to an accepted record is refused, so history cannot be
-quietly rewritten into agreement with the present. A decision that turned out to
-be wrong stays on the record as what was decided, with a newer record saying what
-replaced it.
-
-## What this does not solve
-
-It contacts nothing. No telemetry, no accounts, no service, no runtime
-dependencies — a vault holds the material a company is least willing to hand to
-a third party, so this is enforced by a test that breaks the socket layer and
-runs every vault command, rather than by a sentence in a README.
-
-It is deterministic by construction: one documented front-matter parser, no optional
-runtime parser path, and no network. The same supported YAML subset is interpreted
-the same way whether or not unrelated Python packages happen to be installed; richer
-YAML is rejected explicitly instead of changing semantics by environment.
-
-The linter checks **shape, not truth**. It will tell you a claim has no evidence.
-It cannot tell you the source is honest, the reasoning was sound, or the decision
-was any good.
-
-The failure mode worth naming: a decision is recorded correctly, the world moves,
-and the record stays valid-looking forever because nobody re-read it. Production
-drifts from the decision, and when someone finally checks, it turns out the
-*decision* was the stale artifact — not the system. Shape cannot catch that.
-
-What it can do is insist that every accepted decision carries a `review_by` date,
-and report the ones that have passed. The re-check is still yours to run. A tool
-that claimed otherwise would be lying.
-
-## One source of truth
-
-The Markdown vault is canonical. Everything else is derived from it.
-
-```text
-Markdown vault
-     │
-     ├──> linter / schemas / CI
-     ├──> graph + search index
-     └──> Explorer UI
-```
-
-Do not keep a second copy of facts or decisions in application code.
-
-## Security model
-
-**A real company vault should normally be private.** Every governed note carries
-`sensitivity: public | internal | confidential | restricted`.
-
-The built-in scanner catches common credential patterns, but it is not a
-substitute for repository permissions, provider-side secret scanning or human
-review. Read [SECURITY.md](../SECURITY.md) before importing CRM exports,
-transcripts, screenshots or customer material.
-
-## Repository layout
-
-| Path | Purpose |
-|---|---|
-| `src/whykit/` | The CLI, linter and history check |
-| `src/whykit/template/` | The vault `whykit init` writes |
-| `schemas/` | Machine-readable contracts for integrations |
-| `examples/northline/` | A complete worked vault, linted strictly in CI |
-| `apps/explorer/` | Optional read-only viewer |
-| `tests/` | Linter and CLI regression tests |
-
-## Commands
-
-| Command | Does |
-|---|---|
-| `whykit init <dir>` | Create a vault |
-| `whykit adopt <dir>` | Inventory existing Markdown and stage it |
-| `whykit new decision/evidence/note` | Create records and keep IDs/indexes in sync |
-| `whykit lint` | Check the vault (`--strict`, `--json`, `--today`) |
-| `whykit status` | Summarize health plus upcoming/overdue review work |
-| `whykit graph` | Export typed document/evidence/supersession relations as JSON, DOT or Mermaid |
-| `whykit impact <target>` | Show reverse dependency/blast radius for evidence, decisions or documents |
-| `whykit trace` | Trace each decision to its evidence; flag missing, retired or stale sources |
-| `whykit query [text]` | Search and filter records with a versioned JSON contract |
-| `whykit context <target>` | Produce a bounded agent/person context pack |
-| `whykit pack [targets…] --query …` | Produce a budgeted multi-record agent handoff bundle |
-| `whykit review list/record` | Show due work and append review events |
-| `whykit evidence list/retire` | Inspect and retire evidence while preserving stable IDs |
-| `whykit snapshot` / `verify-snapshot` | Fingerprint governed content and detect later drift |
-| `whykit check --profile …` | Run a named local/CI/release policy gate |
-| `whykit policy` | Show the effective repository-local policy |
-| `whykit history --base <ref>` | Verify accepted decision reasoning and prior review events were not rewritten |
-| `whykit rules [code]` | List the rules, or explain one and why it exists |
-| `whykit doctor` | Check prerequisites, integrity and review hygiene |
-| `whykit install-hooks` | Install the pre-commit vault check |
-| `whykit serve <vault>` | Run the optional Explorer (source checkout only) |
-| `whykit completion bash\|zsh\|fish` | Print a shell completion script (`eval "$(whykit completion zsh)"`) |
-
-Exit codes are stable, because CI depends on them:
-
-| Code | Means |
-|---|---|
-| `0` | No errors (and no warnings, under `--strict`) |
-| `1` | Findings that should fail the build |
-| `2` | The tool could not run: no vault, invalid configuration/input, or an unreadable Git baseline |
-| `130` | Interrupted (Ctrl-C) |
-
-Errors go to stderr with a `hint:` line naming the fix; set `WHYKIT_DEBUG=1` to get a
-Python traceback for a bug report instead.
-
-`2` is deliberately distinct from `1`. A pipeline that cannot tell "the vault has
-problems" from "the check never ran" will eventually report the second as the
-first and stop looking.
-
-## Explorer
-
-Optional, read-only, and not part of the data contract — it is a viewer, and its
-CI job cannot block a fix to the format. Obsidian is an optional editor; the
-Explorer exists so a vault is legible in a browser without installing a vault app.
-
-It needs Node.js and the Explorer's dependencies, and runs only from a source
-checkout. From the WhyKit repository:
+The Explorer is an optional, read-only viewer and not part of the data
+contract. It needs Node.js and runs only from a source checkout:
 
 ```bash
 npm ci --prefix apps/explorer
 uv run whykit serve examples/northline
 ```
 
-It listens on `127.0.0.1` by default and refuses to serve non-public documents on
-another interface unless you pass `--allow-sensitive-network`.
+It listens on `127.0.0.1`. It refuses to serve non-public documents on another
+interface unless you pass `--allow-sensitive-network`, because the browser
+bundle embeds document bodies; see
+[Configuration](configuration.md#explorer-network-safety).
 
-## Agents and other systems
+## Connect another system
 
-`AGENTS.md` inside a vault defines safe default behavior for coding agents, and
-`INTEROP.md` defines the boundary between a knowledge repository and the code
-repositories it describes.
-
-Any system that writes Markdown can write here. The optional `provenance` block
-([schema](../schemas/provenance.schema.json)) records which system produced a note
-without WhyKit having to model that system's internals. See
-[docs/integrations.md](../docs/integrations.md) for the design rule and a worked
-mapping from CometWeb's CW-AIP envelopes.
-
-## Project status
-
-WhyKit has no public PyPI release yet. Install it from the repository checkout
-as shown in the quick start.
-The data contract, linter and single-source architecture are the priority.
-Semantic search, embeddings, hosted accounts and chat-over-vault are out of scope
-until real usage shows they are needed.
-
-Contributions that help most are concrete: linter regression fixtures, format
-compatibility tests, import adapters that preserve provenance, Explorer
-accessibility fixes, and example vaults built from synthetic data. Start with
-[CONTRIBUTING.md](../CONTRIBUTING.md).
-
-## License
-
-Apache License 2.0. See [LICENSE](../LICENSE) and [NOTICE](../NOTICE).
+`AGENTS.md` in a vault defines safe default behaviour for agents, and
+`INTEROP.md` the boundary between the vault and the code repositories it
+describes. A system that writes Markdown can write to a vault and record itself
+in the optional `provenance` block; [Integrations](integrations.md) gives the
+design rule and a worked mapping.

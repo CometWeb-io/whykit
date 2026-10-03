@@ -2,8 +2,10 @@
 
 WhyKit re-reads the whole vault on every command, with no daemon, cache file or
 index on disk. That keeps results deterministic and safe to run in CI. The cost
-is that every command has to stay fast on a large vault. This page gives
-measured times and explains how to reproduce them.
+is that every command has to stay fast on a large vault. The MCP server, a
+long-lived process, also keeps parsed notes between calls while their files are
+unchanged (see [MCP server](#mcp-server)). This page gives measured times and
+explains how to reproduce them.
 
 ## Measured times
 
@@ -14,23 +16,42 @@ Apple-silicon laptop, CPython 3.12, warm file cache. Vaults come from
 
 | Command | 1,000 notes | 5,000 notes | 20,000 notes |
 |---|---:|---:|---:|
-| `lint --json` | 0.4 s | 1.4 s | 5.5 s |
-| `status --json` | 0.3 s | 1.4 s | 6.4 s |
-| `snapshot` | 0.3 s | 1.7 s | 7.0 s |
-| `check --profile ci` | 0.3 s | 1.3 s | 5.6 s |
-| `query pipeline` | 0.1 s | 0.6 s | 2.2 s |
-| `context D-010` | 0.2 s | 0.8 s | 3.3 s |
-| `pack D-010 --query pipeline` | 0.2 s | 1.0 s | 4.9 s |
-| `trace` | 0.2 s | 0.9 s | 3.9 s |
-| `explorer-index` | 0.3 s | 1.4 s | 6.1 s |
-| `graph --json` | 0.2 s | 0.9 s | 3.8 s |
-| `impact E-010` | 0.1 s | 0.5 s | 1.8 s |
-| `backlinks D-010` | 0.2 s | 0.8 s | 3.3 s |
-| `review list` | 0.1 s | 0.4 s | 1.7 s |
+| `lint --json` | 0.2 s | 0.9 s | 3.7 s |
+| `status --json` | 0.2 s | 0.9 s | 3.7 s |
+| `snapshot` | 0.3 s | 1.3 s | 4.9 s |
+| `check --profile ci` | 0.2 s | 0.9 s | 3.8 s |
+| `query pipeline` | 0.1 s | 0.4 s | 1.6 s |
+| `context D-010` | 0.2 s | 0.6 s | 2.5 s |
+| `pack D-010 --query pipeline` | 0.2 s | 0.8 s | 3.3 s |
+| `trace` | 0.2 s | 0.7 s | 3.1 s |
+| `explorer-index` | 0.2 s | 0.9 s | 3.9 s |
+| `graph --json` | 0.2 s | 0.8 s | 3.2 s |
+| `impact E-010` | 0.1 s | 0.4 s | 1.5 s |
+| `backlinks D-010` | 0.2 s | 0.7 s | 2.9 s |
+| `review list` | 0.1 s | 0.4 s | 1.4 s |
 
-Cost now grows linearly with vault size. Most of the remaining time goes to
-reading and parsing every note, plus the secret scan, which reads every text
-file a second time.
+Cost grows linearly with vault size. Most of the remaining time goes to
+reading and parsing every note and resolving its links.
+
+### Before the secret-scan and memory work
+
+The same commands at 20,000 notes, best of three runs each, with the two
+implementations measured alternately on the same machine:
+
+| Command | Before | After |
+|---|---:|---:|
+| `lint` | 7.9 s | 3.7 s |
+| `status` | 6.1 s | 3.7 s |
+| `snapshot` | 7.1 s | 4.9 s |
+| `check` | 6.2 s | 3.8 s |
+| `explorer-index` | 6.1 s | 3.9 s |
+| `pack` | 4.8 s | 3.3 s |
+| `context` | 3.8 s | 2.5 s |
+| `graph` | 4.3 s | 3.2 s |
+| `query` | 2.2 s | 1.6 s |
+
+At 5,000 notes `lint` went from 1.9 s to 0.9 s. Within that, the secret scan
+itself went from 1.45 s to 0.31 s at 20,000 notes (in-process, best of five).
 
 ### Before the request-scoped caches
 
@@ -77,6 +98,105 @@ is byte-identical to the earlier implementation (see
   every match (now counted incrementally), and `relative_to()` on paths that
   `rglob` already returns relative to the root.
 
+## The secret scan
+
+The secret scan covers every text file in the vault, not only the notes. It
+used to read each note a second time and run all six credential patterns over
+every file. The patterns begin with `\b`, so Python's regex engine tries them
+at every character offset, which made the scan the largest single cost of
+`lint`. Two changes leave its findings unchanged:
+
+- **The note text is reused.** `lint` hands the scanner the text the vault
+  index already read, so only files outside the index (configuration, JSON,
+  `.env` files, `examples/` and so on) are read again. The index strips a
+  leading byte-order mark; no pattern can match it or depends on it, so line
+  numbers are the same.
+- **A prefilter skips patterns that cannot match.** Each pattern has a
+  necessary condition: a literal such as `AKIA` or `gh[pousr]_` that every
+  match contains, found with a fast substring search. The case-insensitive
+  credential pattern is skipped only for ASCII text that contains none of
+  `key`, `token`, `secret` and `password` in any case. For non-ASCII text the
+  full pattern always runs, because `re.IGNORECASE` also matches, for
+  example, the Kelvin sign as `k`.
+
+`tests/test_scale.py` compares the scanner with the original
+read-everything implementation on `examples/northline`, `examples/tiny`, a
+synthetic vault, and a synthetic vault with planted fake credentials of every
+kind (including a byte-order mark, CRLF line endings, Unicode case variants,
+code fences, a non-UTF-8 file and files in skipped folders). It also checks on
+20,000 generated strings that every pattern match passes its prefilter. The
+planted values are assembled at run time from fragments and use reserved
+`example.com` / `.invalid` names, so the repository never contains a
+credential-shaped string.
+
+## Peak memory
+
+Peak memory traced by `tracemalloc` during one command, including the output
+it builds (`scripts/bench.py --memory`):
+
+| Command | 5,000 notes before | after | 20,000 notes before | after |
+|---|---:|---:|---:|---:|
+| `lint --json` | 40.5 MB | 28.8 MB | 160.2 MB | 115.3 MB |
+| `status --json` | 40.8 MB | 28.9 MB | 161.2 MB | 115.3 MB |
+| `pack D-010 --query pipeline` | 62.6 MB | 34.3 MB | 248.4 MB | 134.5 MB |
+| `explorer-index` | 51.7 MB | 40.1 MB | 205.0 MB | 160.1 MB |
+
+The 20,000-note vault holds 31 MB of text, which every command keeps in
+memory. What went:
+
+- **The whole graph inside `pack` and `context`.** Finding one record's
+  neighbours built the full graph export, with a dictionary per node and per
+  edge, and then kept a dictionary for every node. The wikilink adjacency is
+  now built directly, and a node's dictionary is made only when it is returned.
+- **A second copy of every path's parts.** Sorting `Path` objects, and
+  `Path.relative_to`, cache a list of path components on every path they
+  touch, and vault paths live as long as the index. Containment and relative
+  paths are now string prefix tests on the already-resolved paths (POSIX; other
+  platforms keep `relative_to`), sorting uses an equivalent key, and the
+  resolve cache keeps the caller's path object instead of an equal copy.
+- **Front-matter strings repeated per note.** Keys such as `status` and
+  values such as `approved` were separate strings in every note. Short keys and
+  values now share one string per spelling, through a pool capped at 8,192
+  entries.
+- **Split lines for the note body.** `Note.body` split the whole text into
+  lines and joined them again; it now slices after the front matter.
+
+`tests/test_scale.py` fails if one request's peak at 1,000 notes rises from
+about 5 MB (`lint`) and 6 MB (`pack`) back towards the 7-12 MB it used to take.
+
+## MCP server
+
+The MCP server is a long-lived process, so it can keep work between calls.
+It keeps the parsed notes and reuses a note only while its file's
+modification time, change time, size and inode all match. An edit, an atomic
+save (which replaces the inode), a rename or a deletion is therefore seen by
+the next call. A file whose timestamps are within two seconds of the clock is
+never kept, because a second write within the same timestamp tick and with the
+same size would otherwise be indistinguishable from the first. Everything
+derived from the notes (link resolution, findings, the graph) is still
+computed for every call, because it also depends on attachments, symlinks and
+configuration.
+
+Latency per tool call at 5,000 notes, through the SDK-free `VaultTools.call`
+the server uses (`scripts/bench.py --mcp`, best of three runs; "repeated" is
+the median of the later calls on the same server):
+
+| Tool | Cold before | Cold after | Repeated before | Repeated after |
+|---|---:|---:|---:|---:|
+| `query` | 0.60 s | 0.40 s | 0.52 s | 0.14 s |
+| `context` | 0.80 s | 0.55 s | 0.71 s | 0.29 s |
+| `impact` | 0.42 s | 0.38 s | 0.42 s | 0.13 s |
+| `status` | 1.24 s | 0.86 s | 1.27 s | 0.58 s |
+| `pack` | 0.86 s | 0.73 s | 0.85 s | 0.43 s |
+| `trace` | 0.68 s | 0.62 s | 0.73 s | 0.35 s |
+| `backlinks` | 0.70 s | 0.57 s | 0.69 s | 0.34 s |
+
+The cost of a repeated call is the stat of every note plus the per-call work.
+The cache holds the notes of one vault, about the size of its text.
+`tests/test_scale.py` edits a note between calls in each of those ways (new
+size, same size with the old modification time restored, deletion and
+re-creation) and checks that the next call sees the change.
+
 ## Cache scope
 
 The caches are request-scoped. `whykit.lint.path_cache()` wraps each read
@@ -87,6 +207,8 @@ therefore sees changes on disk at its next request. Commands that write to the
 vault never run inside a scope, and each MCP tool call opens its own scope.
 The cached evidence register is keyed by
 modification time and size, and callers get copies, never the cached objects.
+The one cache that outlives a request is the MCP server's parsed notes,
+described [above](#mcp-server).
 
 ## Method
 
@@ -104,6 +226,8 @@ path does real work.
 python3 tests/synthetic_vault.py /tmp/vault-5k --notes 5000
 python3 scripts/bench.py --vault /tmp/vault-5k
 python3 scripts/bench.py --vault /tmp/vault-5k --profile /tmp/prof   # cProfile per command
+python3 scripts/bench.py --vault /tmp/vault-5k --memory               # peak memory per command
+python3 scripts/bench.py --vault /tmp/vault-5k --mcp                  # MCP tool latency
 ```
 
 ## Proving output did not change
@@ -119,8 +243,12 @@ python3 scripts/bench.py --vault /tmp/vault-5k --src /path/to/old/src --record /
 python3 scripts/bench.py --vault /tmp/vault-5k --compare /tmp/before
 ```
 
-For this change, outputs matched for `examples/northline`, `examples/tiny`
-and the 1,000- and 5,000-note synthetic vaults.
+For the request-scoped caches, outputs matched for `examples/northline`,
+`examples/tiny` and the 1,000- and 5,000-note synthetic vaults. For the
+secret-scan and memory work they matched for `examples/northline`,
+`examples/tiny`, the 1,000-, 5,000- and 20,000-note synthetic vaults, and the
+5,000-note vault with the planted secrets from `tests/test_scale.py` added
+(21 `secret.detected` findings and one `secret.scan_non_utf8`).
 
 The test suite pins the same property. `tests/test_performance.py` checks
 SHA-256 digests of twelve commands' output on a 400-note synthetic vault

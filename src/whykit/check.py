@@ -128,7 +128,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--today", help="evaluate review dates as of this ISO date")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--format", choices=("text", "json", "github"), default=None, help="output format (default: text)")
     args = parser.parse_args(argv)
+    if args.json and args.format not in (None, "json"):
+        return emit_error(
+            "usage",
+            f"--json conflicts with --format {args.format}\nhint: pass one of them to `whykit check`",
+            json_mode=True,
+        )
+    fmt = "json" if args.json else (args.format or "text")
+    args.json = fmt == "json"
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
         return vault_not_found(args.root, json_mode=args.json)
@@ -146,6 +155,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
     else:
+        if fmt == "github":
+            annotations = gate_annotations(report, root)
+            if annotations:
+                emit_machine("\n".join(annotations))
         state = "PASS" if report["passed"] else "FAIL"
         print(f"WhyKit {report['profile']} gate — {state}")
         print(f"  config  {report['config_source']}")
@@ -162,6 +175,42 @@ def main(argv: list[str] | None = None) -> int:
 
 
 MAX_GATE_FINDINGS = 20
+
+
+def gate_annotations(report: dict, root: Path) -> list[str]:
+    """GitHub workflow commands for a gate report.
+
+    Every lint finding is annotated at its level, so a reviewer sees warnings
+    inline even when the profile does not fail on them. Rewritten decision
+    history is an error on the record; any other failed check is an error
+    without a file.
+    """
+    from .ci_formats import github_annotations, source_root, workflow_command
+
+    lines = github_annotations(report["lint"]["findings"], root)
+    _, prefix = source_root(root)
+    for check in report["checks"]:
+        if check["passed"] or check["name"] == "lint":
+            continue
+        blocked = check.get("blocked") or []
+        for item in blocked:
+            path = item["path"].split(" -> ")[0]
+            lines.append(workflow_command(
+                "error",
+                f"Accepted decision reasoning is append-only ({item['status']}); supersede it with a new record instead of rewriting it.",
+                file=f"{prefix}{path}",
+                title="WhyKit history",
+            ))
+        if not blocked:
+            lines.append(workflow_command("error", f"{check['name']}: {check['detail']}", title=f"WhyKit {report['profile']} gate"))
+    lint_check = next((c for c in report["checks"] if c["name"] == "lint"), None)
+    if lint_check is not None and not lint_check["passed"] and not report["lint"]["errors"]:
+        lines.append(workflow_command(
+            "error",
+            f"profile {report['profile']} is strict: {report['lint']['warnings']} warning(s) fail this gate",
+            title=f"WhyKit {report['profile']} gate",
+        ))
+    return lines
 
 
 def _print_gate_findings(report: dict) -> None:
@@ -188,7 +237,3 @@ def _print_gate_findings(report: dict) -> None:
         print(f"    ... {len(failing) - MAX_GATE_FINDINGS} more; run `whykit lint` for the full list")
     if strict and any(item["level"] == "warning" for item in failing):
         print("  this profile is strict: warnings fail it (see `whykit policy`)")
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -5,6 +5,10 @@ wire them up: the composite GitHub Action in this repository (`action.yml`), or
 the CLI called directly from any CI system. Both read the policy from the vault's
 own `whykit.toml`, so local runs, CI and agents agree on what "passing" means.
 
+New to this? [Gate pull requests with `whykit check`](tutorials/gate-pull-requests.md)
+walks through the setup and both outcomes in ten minutes. This page is the
+reference for the Action and for other CI systems.
+
 ## Before you start
 
 - **Answer the `AGENTS.md` questions first.** A fresh vault has zero errors but
@@ -74,9 +78,11 @@ directory, for example `root: knowledge`.
 | `base` | empty | Explicit Git baseline for `whykit check --base` in profile mode. Empty means "the PR base on pull requests, nothing otherwise". |
 | `strict` | `"false"` | Legacy mode only: treat warnings as failures. Prefer `profile: ci`. |
 | `today` | empty | Evaluate review dates as of this `YYYY-MM-DD` instead of the runner clock. Useful for example or archived vaults. |
+| `annotations` | `"false"` | Print findings as GitHub annotations (`--format github`), so they show up inline on the pull request diff. |
+| `sarif` | `"false"` | Also export every lint finding as SARIF and upload it to code scanning. See [Code scanning](#code-scanning-sarif). |
 
-`history` and `strict` accept only the strings `"true"` and `"false"`, and
-`today` must be a real `YYYY-MM-DD` date. Anything else exits with code 2 so a
+`history`, `strict`, `annotations` and `sarif` accept only the strings `"true"`
+and `"false"`, and `today` must be a real `YYYY-MM-DD` date. Anything else exits with code 2 so a
 typo cannot silently turn a check off.
 
 ### Outputs
@@ -84,6 +90,62 @@ typo cannot silently turn a check off.
 | Output | Meaning |
 |---|---|
 | `version` | The WhyKit version the Action installed and ran, as printed by `whykit --version`. Read it as `${{ steps.whykit.outputs.version }}` when the step has `id: whykit`. |
+| `sarif-file` | Path of the SARIF report when `sarif: "true"`, for example to keep it with `actions/upload-artifact`. Empty otherwise. |
+
+### Annotations
+
+With `annotations: "true"` the gate prints each finding as a workflow command
+(`::error file=knowledge/Home.md,line=12,title=WhyKit wikilink.missing::…`).
+GitHub shows them on the changed lines of the pull request and in the run
+summary, so a reviewer sees what failed without opening the log. Paths are
+relative to the repository, also when the vault lives in a subdirectory. The
+gate's pass/fail decision and exit code do not change.
+
+### Code scanning (SARIF)
+
+With `sarif: "true"` the Action runs `whykit lint --format sarif` and uploads
+the report with
+[`github/codeql-action/upload-sarif`](https://github.com/github/codeql-action),
+pinned by commit SHA inside the Action. Findings then appear on the
+repository's *Security → Code scanning* page and as pull request checks, keyed
+by rule code, with a link from every alert to its entry in the
+[rule reference](rules.md).
+
+The upload needs a token that may write security events, so grant the job
+exactly that and nothing else:
+
+```yaml
+jobs:
+  vault:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      # Only needed in a private repository:
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: CometWeb-io/whykit@<reviewed-40-character-commit-sha>
+        with:
+          profile: ci
+          annotations: "true"
+          sarif: "true"
+```
+
+The SARIF step runs before the gate and never fails on findings alone, so the
+report is uploaded even when the gate then fails the job. Code scanning must be
+available for the repository (public repositories, or GitHub Advanced Security
+on private ones). Pull requests from forks get a read-only token and cannot
+upload; leave `sarif` off for them, for example with
+`sarif: ${{ github.event.pull_request.head.repo.fork != true }}`. Each `root`
+uploads under its own category (`whykit:<root>`), so two vaults in one
+repository do not overwrite each other's alerts.
 
 ### Release gate
 
@@ -128,26 +190,75 @@ when the job runs. Without it, a `review_by` date passing overnight can turn a
 green pipeline red with no commit, which is usually what you want on a scheduled
 job and rarely what you want when bisecting.
 
-For machine-readable output, add `--json`.
+For machine-readable output, add `--json`. Two CI-native formats are also
+available from the CLI: `whykit lint --format sarif` writes a SARIF 2.1.0 log
+that most code-scanning tools import, and `--format github` (on `lint` and
+`check`) prints GitHub workflow annotations. [Automation](automation.md#ci-formats)
+describes both.
+
+```bash
+whykit lint --root . --format sarif > whykit.sarif
+whykit check --root . --profile ci --format github
+```
 
 ## Exit codes
 
-| Code | Means |
-|---|---|
-| `0` | The gate passed. |
-| `1` | The vault has findings that should fail the build. |
-| `2` | The check could not run: no vault at `--root`, invalid `whykit.toml`, an unknown profile, or a bad input value. `whykit history` also exits `2` when it cannot read the `--base` ref. |
+The exit code is the gate: `0` passed, `1` the vault has findings that should
+fail the build, `2` the check could not run (no vault at `--root`, an invalid
+`whykit.toml`, an unknown profile, a bad input value). Treat `2` as an
+infrastructure failure, not as "the vault has problems": a pipeline that
+confuses the two will eventually report a check that never ran as a check that
+failed. [Automation](automation.md#exit-codes) has the full table, every error
+code and the `--json` output for a job summary.
 
-One asymmetry to know about: `whykit check` reports an unreadable `--base` ref as
-a failed `history` check and exits `1`, not `2`. Either way the build fails; read
-the `history` line of the output to tell a rewritten record from a missing ref.
+One asymmetry to know about: `whykit history` exits `2` when it cannot read the
+`--base` ref, but `whykit check` reports the same problem as a failed `history`
+check and exits `1`. Either way the build fails; read the `history` line of the
+output to tell a rewritten record from a missing ref.
 
-[Automation](automation.md) lists every error code and its exit code, and
-what `--json` prints in each case.
+## pre-commit
 
-Treat `2` as an infrastructure failure, not as "the vault has problems". A
-pipeline that confuses the two will eventually report a check that never ran as
-a check that failed, and people will stop reading it.
+This repository is also a [pre-commit](https://pre-commit.com) hook repository.
+Add it to the vault repository's `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/CometWeb-io/whykit
+    rev: <reviewed-40-character-commit-sha>
+    hooks:
+      - id: whykit-lint
+      - id: whykit-history
+```
+
+| Hook | Runs | When |
+|---|---|---|
+| `whykit-lint` | `whykit lint` on the whole vault | a staged Markdown file or `whykit.toml` changed |
+| `whykit-history` | `whykit history --staged` | a staged decision record or `00-context/review-log.md` changed |
+
+`whykit-lint` always lints the whole vault, never only the changed files,
+because wikilinks, the evidence register and the decision log cross files: a
+renamed note breaks links in notes you did not touch. `whykit-history` compares
+what is staged with `HEAD`, so a commit that rewrites accepted reasoning or an
+earlier review-log row is refused before it exists, rather than in CI. Both
+need pre-commit 3.2 or newer.
+
+For a vault in a subdirectory, pass `--root` to each hook:
+
+```yaml
+      - id: whykit-lint
+        args: [--root, knowledge]
+      - id: whykit-history
+        args: [--root, knowledge]
+```
+
+Other lint options work the same way, for example
+`args: [--root, knowledge, --strict]`. pre-commit installs WhyKit into its own
+environment from the revision you pin, so the hooks do not depend on a
+`whykit` on `PATH`. To run the history check by hand on what you have staged:
+
+```bash
+whykit history --staged --root knowledge
+```
 
 ## Local hooks
 

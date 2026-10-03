@@ -31,6 +31,7 @@ RULES = (
     Rule("decision.duplicate", "error", "A decision ID is reused.", "D-NNN identifiers are stable references and must be unique forever.", "Allocate a new decision ID; never recycle an old one."),
     Rule("decision.id_filename", "error", "decision_id and filename number disagree.", "Humans and tools use both forms as identifiers.", "Rename the file or correct decision_id so they match."),
     Rule("decision.id_missing", "error", "A decision record has no D-NNN identifier.", "Without an ID, citations and supersession cannot be stable.", "Add decision_id and a matching d-NNN-*.md filename."),
+    Rule("decision.placeholder", "warning", "A draft, in-review or approved decision record still holds template placeholder text.", "A record that still says \"State the choice in one sentence.\" passes every other shape check while recording no decision.", "Replace the prompt with the real context, decision and rationale, fill the alternatives table or say there was one option, and list the consequences."),
     Rule("decision.review_missing", "warning", "An approved decision has no review_by date.", "Accepted decisions otherwise look current forever as assumptions change.", "Set a realistic review_by date."),
     Rule("decision.superseded_by_missing", "warning", "A superseded decision has no newer record pointing back to it.", "The chain of reasoning is incomplete.", "Create or fix the newer decision's supersedes field."),
     Rule("decision.superseded_by_format", "warning", "superseded_by is not a D-NNN identifier.", "Lifecycle metadata should point to the same stable decision namespace as supersedes.", "Use a D-NNN identifier or remove the convenience field."),
@@ -109,8 +110,10 @@ def markdown_table() -> str:
         "| Code | Level | What it means | Default fix |",
         "|---|---|---|---|",
     ]
+    # The named anchor lets SARIF helpUri and annotation links address one
+    # rule: docs/rules.md#evidence.missing. Tables have no per-row headings.
     lines.extend(
-        f"| `{rule.code}` | {rule.default_level} | {_md_cell(rule.summary)} | {_md_cell(rule.fix)} |"
+        f'| <a name="{rule.code}"></a>`{rule.code}` | {rule.default_level} | {_md_cell(rule.summary)} | {_md_cell(rule.fix)} |'
         for rule in RULES
     )
     return "\n".join(lines)
@@ -154,7 +157,3 @@ def main(argv: list[str] | None = None) -> int:
         for rule in RULES:
             print(f"{rule.default_level:<7} {rule.code:<34} {rule.summary}")
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
