@@ -109,6 +109,54 @@ def _real(path: Path) -> Path:
     return hit
 
 
+# Characters the Win32 namespace rejects in a file name before any file system
+# is asked. NUL is impossible on every platform.
+_WINDOWS_FORBIDDEN = frozenset('<>:"|?*') | frozenset(chr(code) for code in range(32))
+# Device names: on Windows ``notes/CON.md`` or ``nul`` opens a device, not a file.
+_WINDOWS_DEVICES = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"{kind}{digit}" for kind in ("com", "lpt") for digit in "123456789\u00b9\u00b2\u00b3"}
+)
+
+
+def _impossible_name(name: str, windows: bool = not _POSIX) -> bool:
+    """Whether no file or directory can be called *name* on this platform.
+
+    A pure string test, so a link target such as ``a<b`` or one holding a NUL
+    is answered without a system call (which on Windows can raise, or be slow).
+    """
+    if "\x00" in name:
+        return True
+    if not windows:
+        return False
+    if not _WINDOWS_FORBIDDEN.isdisjoint(name):
+        return True
+    return name.split(".", 1)[0].rstrip(" ").casefold() in _WINDOWS_DEVICES
+
+
+def _first_impossible_part(path: PurePath, windows: bool = not _POSIX) -> int | None:
+    """Index into ``path.parts`` of the first component that cannot exist."""
+    parts = path.parts
+    start = 1 if (path.drive or path.root) else 0  # the anchor (``C:\``) is not a name
+    for index in range(start, len(parts)):
+        if _impossible_name(parts[index], windows):
+            return index
+    return None
+
+
+def _foreign_anchor(root: PurePath, path: PurePath) -> bool:
+    """True when *path* is absolute on another drive, share or root than *root*.
+
+    ``\\\\host\\share\\x`` in a note is a UNC path on Windows: resolving
+    it asks the network for ``host``, which takes seconds and can offer the
+    user's network credentials to whoever answers. Such a path can never be inside
+    the vault, so containment is decided from the strings alone.
+    """
+    if not (path.anchor and root.anchor):
+        return False
+    return path.anchor.casefold() != root.anchor.casefold()
+
+
 def _real_uncached(path: Path) -> Path:
     # On POSIX, realpath(dir/name) is realpath(dir)/name whenever `name` is a
     # plain component that is not itself a symlink.  Reusing the cached parent
@@ -119,6 +167,15 @@ def _real_uncached(path: Path) -> Path:
         parent = path.parent
         if name not in ("", ".", "..") and parent != path and not os.path.islink(path):
             return _real(parent) / name
+    if not _POSIX and path.is_absolute():
+        # Windows normalises `..` lexically, so after normpath nothing at or
+        # below a component that cannot exist touches the file system: resolve
+        # the part above it and keep the rest as written.
+        normal = type(path)(os.path.normpath(path))
+        index = _first_impossible_part(normal)
+        if index is not None:
+            parts = normal.parts
+            return _real(type(path)(*parts[:index])).joinpath(*parts[index:])
     return path.resolve()
 
 
@@ -154,10 +211,15 @@ def _within(root: Path, path: Path) -> bool:
         hit = cache.within.get(key)
         if hit is not None:
             return hit
-    try:
-        inside = _relative_text(_real(path), _real(root)) is not None
-    except OSError:
+    if _foreign_anchor(root, path):
         inside = False
+    else:
+        try:
+            inside = _relative_text(_real(path), _real(root)) is not None
+        except (OSError, ValueError):
+            # A name the operating system rejects (an embedded NUL) is a link
+            # that does not resolve, never a crash.
+            inside = False
     if cache is not None:
         cache.within[key] = inside
     return inside
@@ -170,6 +232,8 @@ def path_exists(path: Path) -> bool:
     system rejects outright (a component longer than the filesystem allows,
     an embedded NUL). That is a link that does not resolve, not a crash.
     """
+    if _first_impossible_part(path) is not None:
+        return False
     try:
         return path.exists()
     except (OSError, ValueError):
@@ -178,6 +242,8 @@ def path_exists(path: Path) -> bool:
 
 def path_is_file(path: Path) -> bool:
     """``path.is_file()`` with the same tolerance as :func:`path_exists`."""
+    if _first_impossible_part(path) is not None:
+        return False
     try:
         return path.is_file()
     except (OSError, ValueError):
@@ -1015,7 +1081,9 @@ def _resolve(root: Path, target: str, index: dict[str, set[Path]]) -> tuple[Path
     if len(spelled) == 1:
         return spelled[0], False
     candidate = root / relative_target
-    if path_exists(candidate) and _within(root, candidate):
+    # Containment first: it rejects another drive or a UNC share from the
+    # strings alone, before anything asks the file system about the path.
+    if _within(root, candidate) and path_exists(candidate):
         return candidate, False
     if len(hits) == 1:
         return next(iter(hits)), False
@@ -1055,7 +1123,7 @@ class AttachmentIndex:
         if not suffix or suffix == ".md":
             return False
         for candidate in (self.root / normalized.lstrip("/"), note_dir / normalized):
-            if path_is_file(candidate) and _within(self.root, candidate):
+            if _within(self.root, candidate) and path_is_file(candidate):
                 return True
         # Obsidian resolves attachments by file name anywhere in the vault and
         # picks the nearest copy, so several matches are not an ambiguity here.

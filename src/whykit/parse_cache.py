@@ -16,7 +16,9 @@ Correctness rules, in order of precedence:
   and change time in nanoseconds, size, inode) is exactly the one recorded
   when the entry was parsed.  Any difference means a re-parse.  The change
   time cannot be set by a user, so neither ``touch -d``/``os.utime`` nor a
-  copied-in cache file from another checkout can fake a match.
+  copied-in cache file from another checkout can fake a match.  Windows has
+  no such change time in ``os.stat`` (``st_ctime`` is the creation time
+  there), so on Windows every entry is verified by content.
 * An entry whose file changed within two seconds of being parsed ("racy",
   as Git calls it), or whose timestamps lie in the future, is reused only
   after the file's SHA-256 matches the recorded one.  This covers file
@@ -78,6 +80,11 @@ LOCK_FILE = "write.lock"
 FORMAT = 2
 ENV_DISABLE = "WHYKIT_NO_CACHE"
 RACY_NS = 2_000_000_000
+# Whether ``st_ctime`` is the inode change time, which every content write
+# moves and no user can set.  On Windows it is the creation time instead, so a
+# same-size rewrite with the old mtime put back would keep the signature.
+CHANGE_TIME_TRUSTED = os.name != "nt"
+_SEP = os.sep
 
 # Derived views of a note's text that the cache stores when a run computed
 # them.  Each is a ``functools.cached_property`` on ``Note``; a view a run did
@@ -186,6 +193,8 @@ def _settled(info: os.stat_result, now_ns: int) -> bool:
     timestamp resolution (FAT); a timestamp in the future means the clock
     cannot be trusted, so such an entry is always verified by content.
     """
+    if not CHANGE_TIME_TRUSTED:
+        return False  # without a real change time, only the content proves a match
     newest = max(info.st_mtime_ns, info.st_ctime_ns)
     return now_ns - newest >= RACY_NS
 
@@ -512,9 +521,15 @@ class DiskCache:
         self._computed.setdefault(name, {})[key] = value
 
     def _key(self, path: Path) -> str:
+        """The note's vault-relative path, always with ``/`` separators.
+
+        One spelling on every platform, so a cache written on Windows is keyed
+        like every other record of the vault (``01-strategy/note.md``).
+        """
         text = os.fspath(path)
-        prefix = os.fspath(self.root).rstrip(os.sep) + os.sep
-        return text[len(prefix):] if text.startswith(prefix) else text
+        prefix = os.fspath(self.root).rstrip(_SEP) + _SEP
+        key = text[len(prefix):] if text.startswith(prefix) else text
+        return key if _SEP == "/" else key.replace(_SEP, "/")
 
     def load_all(self, paths: list[Path]) -> list[Note]:
         """Parse *paths* like ``load_note`` would, reusing unchanged entries."""

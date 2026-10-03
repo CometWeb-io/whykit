@@ -12,7 +12,7 @@ import tempfile
 import time
 import unittest
 from contextlib import redirect_stdout
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import fuzz_parsers  # noqa: E402
+from whykit import lint as lint_mod  # noqa: E402
 from whykit import rule_policy  # noqa: E402
 from whykit.lint import _parse_front_matter, _split_table_row, lint, load_note  # noqa: E402
 from whykit.lint import main as lint_main  # noqa: E402
@@ -62,6 +63,71 @@ class LinkTargetTests(VaultCase):
         self.note("notes/nul.md", "[[a\x00b]] [y](a\x00b.md)")
         _, findings = lint(self.vault, today=self.today)
         self.assertTrue(any(f.path == "notes/nul.md" and f.code == "wikilink.missing" for f in findings))
+
+
+    def test_a_nul_byte_is_a_finding_on_the_windows_resolve_route_too(self) -> None:
+        # Windows takes the full ``Path.resolve()`` route, whose ``stat`` raises
+        # ValueError for an embedded NUL; POSIX never reaches it.
+        self.note("notes/nul.md", "[[a\x00b]] [y](a\x00b.md) [z](sub/a\x00b/../c.md) ![[x/a\x00b.png]]")
+        with patch.object(lint_mod, "_POSIX", False):
+            _, findings = lint(self.vault, today=self.today)
+        codes = {(f.path, f.code) for f in findings}
+        self.assertIn(("notes/nul.md", "wikilink.missing"), codes)
+        self.assertIn(("notes/nul.md", "markdown_link.missing"), codes)
+
+    def test_containment_treats_a_path_the_os_rejects_as_outside(self) -> None:
+        root = self.vault.resolve()
+        with patch.object(lint_mod, "_real", side_effect=ValueError("embedded null character in path")):
+            self.assertFalse(lint_mod._within(root, root / "notes" / "x.md"))
+
+    def test_a_link_to_another_share_or_drive_never_reaches_the_file_system(self) -> None:
+        # `[x](\\host\share\x)` is a UNC path on Windows. Resolving it asks the
+        # network for `host` (seconds, and credentials offered to whoever
+        # answers). POSIX has the same shape: `//host/share` is its own root.
+        root = self.vault.resolve()
+        with patch.object(lint_mod, "_real", side_effect=AssertionError("file system touched")):
+            self.assertFalse(lint_mod._within(root, Path("//host/share/x.md")))
+        touched: list[str] = []
+        real_is_file, real_exists, real_uncached = Path.is_file, Path.exists, lint_mod._real_uncached
+
+        def record(original):  # type: ignore[no-untyped-def]
+            def probe(path, *args, **kwargs):  # type: ignore[no-untyped-def]
+                touched.append(str(path))
+                return original(path, *args, **kwargs)
+            return probe
+
+        self.note("notes/unc.md", "![[//host/share/x.png]] ![[//host/share/y]]")
+        with patch.object(Path, "is_file", record(real_is_file)), patch.object(Path, "exists", record(real_exists)), \
+                patch.object(lint_mod, "_real_uncached", record(real_uncached)):
+            _, findings = lint(self.vault, today=self.today)
+        self.assertEqual([path for path in touched if path.startswith("//")], [])
+        self.assertIn(("notes/unc.md", "embed.missing"), {(f.path, f.code) for f in findings})
+
+    def test_windows_anchors_are_compared_without_the_file_system(self) -> None:
+        root = PureWindowsPath("D:/a/vault")
+        for path, foreign in (
+            (PureWindowsPath("\\\\host\\share\\x.md"), True),
+            (PureWindowsPath("//host/share/x.md"), True),
+            (PureWindowsPath("C:/Windows/win.ini"), True),
+            (root / "C:x", True),  # drive-relative on another drive
+            (PureWindowsPath("d:/a/vault/notes/x.md"), False),  # drive letters ignore case
+            (root / "notes" / "x.md", False),
+        ):
+            with self.subTest(path=str(path)):
+                self.assertEqual(lint_mod._foreign_anchor(root, path), foreign)
+
+    def test_names_windows_cannot_store_are_rejected_from_the_string(self) -> None:
+        for name in ("a<b", "a>b", 'a"b', "a|b", "a?b", "a*b", "a:b", "a\tb", "CON", "nul.md", "Com1 .txt", "lpt9"):
+            with self.subTest(name=name):
+                self.assertTrue(lint_mod._impossible_name(name, windows=True))
+                self.assertFalse(lint_mod._impossible_name(name, windows=False))
+        for name in ("console.md", "a\u202eb", "com0", "\ud800", "notes"):
+            with self.subTest(name=name):
+                self.assertFalse(lint_mod._impossible_name(name, windows=True))
+        self.assertTrue(lint_mod._impossible_name("a\x00b", windows=False))
+        path = PureWindowsPath("D:/v/notes/a<b/c.md")
+        self.assertEqual(lint_mod._first_impossible_part(path, windows=True), 3)
+        self.assertIsNone(lint_mod._first_impossible_part(PureWindowsPath("C:/v/x.md"), windows=True))
 
 
 class TargetTests(VaultCase):

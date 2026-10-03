@@ -215,17 +215,50 @@ class InvalidationTest(_VaultCase):
             self.prime()
             path = self.note(self.target)
             info = os.stat(path)
-            text = path.read_text(encoding="utf-8")
-            # Same byte length, different content, mtime put back.
-            mutated = text[:-2] + ("Z\n" if text[-2:] != "Z\n" else "Y\n")
-            self.assertEqual(len(mutated.encode()), len(text.encode()))
-            path.write_text(mutated, encoding="utf-8")
+            data = path.read_bytes()
+            # Same byte length, different content, mtime put back. Bytes, not
+            # text: a text-mode write would turn `\n` into `\r\n` on Windows.
+            mutated = data[:-2] + (b"Z\n" if data[-2:] != b"Z\n" else b"Y\n")
+            self.assertEqual(len(mutated), len(data))
+            path.write_bytes(mutated)
             os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
             self.assertEqual(os.stat(path).st_size, info.st_size)
             self.assertEqual(os.stat(path).st_mtime_ns, info.st_mtime_ns)
             findings, cache = lint_once(self.vault)
         self.assertEqual(cache.misses, 1)
         self.assert_same_as_uncached(findings)
+
+    def test_without_a_change_time_a_same_size_edit_is_still_reparsed(self) -> None:
+        # Windows: `st_ctime` is the creation time, so a same-size rewrite with
+        # the old mtime put back leaves (mtime, ctime, size, inode) unchanged.
+        def windows_like(info: os.stat_result) -> tuple[int, int, int, int]:
+            return (info.st_mtime_ns, 0, info.st_size, info.st_ino)
+
+        with mock.patch.object(parse_cache, "_signature", windows_like), \
+                mock.patch.object(parse_cache, "CHANGE_TIME_TRUSTED", False), settled_immediately():
+            self.prime()
+            stored = json.loads((self.vault / CACHE).read_text(encoding="utf-8"))["entries"]
+            self.assertFalse(any(row[5] for row in stored.values()), "entries trusted by stat alone")
+            _, unchanged = lint_once(self.vault)
+            self.assertEqual(unchanged.misses, 0)  # verified by content, still reused
+            path = self.note(self.target)
+            info = os.stat(path)
+            data = path.read_bytes()
+            path.write_bytes(data.replace(b"note", b"NOTE", 1))
+            os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
+            findings, cache = lint_once(self.vault)
+        self.assertEqual(cache.misses, 1)
+        self.assert_same_as_uncached(findings)
+
+    def test_keys_are_vault_relative_with_forward_slashes(self) -> None:
+        cache = object.__new__(parse_cache.DiskCache)
+        cache.root = "C:\\vault"  # type: ignore[assignment]
+        with mock.patch.object(parse_cache, "_SEP", "\\"):
+            self.assertEqual(cache._key("C:\\vault\\01-strategy\\note.md"), "01-strategy/note.md")  # type: ignore[arg-type]
+        self.prime()
+        stored = json.loads((self.vault / CACHE).read_text(encoding="utf-8"))["entries"]
+        self.assertIn(self.target, stored)
+        self.assertFalse([key for key in stored if "\\" in key])
 
     def test_rename_drops_the_old_entry_and_links_follow_the_files(self) -> None:
         with settled_immediately():

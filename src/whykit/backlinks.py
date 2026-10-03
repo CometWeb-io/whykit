@@ -9,6 +9,7 @@ from pathlib import Path
 from .contract import vault_not_found
 from .graph import build_graph
 from .lint import (
+    _within,
     path_is_file,
     path_cache,
     strip_markdown_suffix,
@@ -40,7 +41,9 @@ def _normalize_target(root: Path, target: str, vault: VaultIndex) -> tuple[str, 
     except RuntimeError:  # `~name` for a user that does not exist
         path = Path(raw)
     if path.is_absolute():
-        if path.suffix.lower() == ".md" and path_is_file(path) and vault.note_for(path) is not None:
+        # Containment before any file system call: another drive or a UNC share
+        # is answered from the strings alone.
+        if path.suffix.lower() == ".md" and _within(root, path) and path_is_file(path) and vault.note_for(path) is not None:
             return "document", strip_markdown_suffix(vault.relative(path))
         return "document", strip_markdown_suffix(raw)
     resolved, ambiguous = vault.resolve_link(raw)
