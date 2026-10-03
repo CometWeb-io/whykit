@@ -138,6 +138,7 @@ class OutputIdentityTest(unittest.TestCase):
 
 
 class ReuseTest(_VaultCase):
+    @unittest.skipUnless(parse_cache.CHANGE_TIME_TRUSTED, "without a real change time every entry is verified by content")
     def test_unchanged_vault_reuses_every_note_without_reading_it(self) -> None:
         with settled_immediately():
             first, cold = lint_once(self.vault)
@@ -370,6 +371,7 @@ class InvalidationTest(_VaultCase):
             findings, _ = lint_once(self.vault)
         self.assert_same_as_uncached(findings)
 
+    @unittest.skipUnless(parse_cache.CHANGE_TIME_TRUSTED, "without a real change time every entry is verified by content")
     def test_concurrent_edit_after_stat_is_not_cached(self) -> None:
         with settled_immediately():
             self.prime()

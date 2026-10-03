@@ -404,6 +404,9 @@ def target_vault(rng: random.Random, workdir: Path) -> str:
     for index in range(rng.randint(1, 4)):
         folder = rng.choice(["06-decisions", "07-research", "notes", "notes/deep/er"])
         name = rng.choice([f"d-00{index + 1}-x", f"n{index}", _text(rng, 1, 6).replace("/", "_").replace("\x00", "_")])
+        # A backslash or colon is a separator or drive on Windows, so such a
+        # name would land outside the vault; keep every case inside it.
+        name = name.replace("\\", "_").replace(":", "_")
         path = vault / folder / f"{name}.md"
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
