@@ -13,7 +13,7 @@ from .contract import emit_error, vault_not_found
 from .config import ConfigError, configuration_readiness, get_profile, load_config
 from .immutability import changed_records
 from .lint import _parse_date, find_vault_root, is_vault_root, lint, rel, path_cache
-from .console import emit_machine
+from .console import emit_machine, one_line
 from .rule_policy import Override, describe_override, secret_scan_skipped
 
 
@@ -169,19 +169,19 @@ def main(argv: list[str] | None = None) -> int:
                 emit_machine("\n".join(annotations))
         state = "PASS" if report["passed"] else "FAIL"
         print(f"WhyKit {report['profile']} gate — {state}")
-        print(f"  config  {report['config_source']}")
+        print(f"  config  {one_line(report['config_source'])}")
         width = max(len(check["name"]) for check in report["checks"])
         for check in report["checks"]:
             marker = "OK" if check["passed"] else "FAIL"
-            print(f"  {marker:<4} {check['name']:<{width}}  {check['detail']}")
+            print(f"  {marker:<4} {check['name']:<{width}}  {one_line(check['detail'])}")
             for item in check.get("blocked", []):
-                print(f"         {item['status']}  {item['path']}")
+                print(f"         {item['status']}  {one_line(item['path'])}")
         if report["lint"]["errors"] or report["lint"]["warnings"]:
             print(f"  lint findings  {report['lint']['errors']} error(s), {report['lint']['warnings']} warning(s)")
         _print_gate_findings(report)
         for entry in report["lint"].get("overrides", []):
             if entry["security"]:
-                print(f"  policy  {describe_override(entry)}")
+                print(f"  policy  {one_line(describe_override(entry))}")
     return 0 if report["passed"] else 1
 
 
@@ -249,7 +249,7 @@ def _print_gate_findings(report: dict) -> None:
     print("  findings that fail this gate:")
     for item in failing[:MAX_GATE_FINDINGS]:
         location = f"{item['path']}:{item['line']}" if item["line"] else item["path"]
-        print(f"    {item['level']:<7} {location}  [{item['code']}] {item['message']}")
+        print(f"    {item['level']:<7} {one_line(location)}  [{item['code']}] {one_line(item['message'])}")
     if len(failing) > MAX_GATE_FINDINGS:
         print(f"    ... {len(failing) - MAX_GATE_FINDINGS} more; run `whykit lint` for the full list")
     if strict and any(item["level"] == "warning" for item in failing):

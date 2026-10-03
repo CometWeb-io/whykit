@@ -37,8 +37,10 @@ htmlcov/
 # Explorer build artifacts
 apps/explorer/node_modules/
 apps/explorer/dist/
+apps/explorer/dist-single/
 apps/explorer/src/generated/vault.json
 apps/explorer/src/generated/bodies.json
+apps/explorer/src/generated/findings.json
 apps/explorer/e2e/.build/
 apps/explorer/test-results/
 apps/explorer/playwright-report/

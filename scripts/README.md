@@ -35,7 +35,9 @@ uv tool install whykit
 
 Times the read commands on a vault, each in a fresh interpreter, and can record
 or compare their output byte for byte. Without `--vault` it writes a
-deterministic synthetic vault with `tests/synthetic_vault.py`. See
+deterministic synthetic vault with `tests/synthetic_vault.py`. `--cache off`
+(the default), `cold` or `warm` selects the state of the parse cache, and
+`--runs N` keeps the best of N runs. See
 [docs/performance.md](../docs/performance.md) for the numbers and method.
 
 ```bash

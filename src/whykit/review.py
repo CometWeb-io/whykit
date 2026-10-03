@@ -10,7 +10,7 @@ from pathlib import Path
 from .contract import TargetNotFound, describe_os_error, emit_error, vault_not_found
 from .io import apply_transaction, safe_vault_target, vault_mutation_lock
 from .config import ConfigError, load_config
-from .lint import DECISION_ID_RE, _build_index, _parse_date, _resolve, collect_markdown, find_vault_root, is_vault_root, load_note, rel, path_cache
+from .lint import DECISION_ID_RE, _build_index, _parse_date, _resolve, collect_markdown, find_vault_root, is_vault_root, load_note, rel, path_cache, strip_markdown_suffix
 from .scaffold import _frontmatter_replace, _table_cell
 from .status import build_review_queue
 from .vault_index import VaultIndex
@@ -164,7 +164,7 @@ def record_review(
         insert_at = header_idx + 2
         while insert_at < len(lines) and lines[insert_at].lstrip().startswith("|"):
             insert_at += 1
-        target_link = f"[[{rel(root, note.path).removesuffix('.md')}]]"
+        target_link = f"[[{strip_markdown_suffix(rel(root, note.path))}]]"
         row = "| " + " | ".join(_table_cell(value) for value in (
             today.isoformat(), target_link, reviewer, outcome, previous_review, resolved_next or "—", note_text or "—"
         )) + " |"

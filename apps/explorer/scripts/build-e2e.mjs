@@ -2,6 +2,7 @@
 //   e2e/.build/northline  the worked example vault (rich data)
 //   e2e/.build/empty      a fresh `whykit init --minimal` vault (empty states)
 //   e2e/.build/synthetic  a 5,000-note synthetic vault (performance, policy)
+//   e2e/.build/single     the example vault as one HTML file, opened from file://
 // The synthetic vault comes from tests/synthetic_vault.py and deliberately
 // carries lint errors, which `whykit explorer-index` refuses; its index is
 // therefore built by calling the same Python function without the lint gate,
@@ -53,6 +54,8 @@ try {
   build("empty", fresh);
   buildSynthetic("synthetic", join(scratch, "synthetic"));
   build("northline", resolve(REPO, "examples/northline"));
+  // Same index as the northline site, which is still in src/generated.
+  run(process.execPath, [resolve(APP, "node_modules/vite/bin/vite.js"), "build", "--mode", "single", "--outDir", join(OUT, "single"), "--emptyOutDir"]);
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

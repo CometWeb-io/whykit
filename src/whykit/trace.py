@@ -22,7 +22,7 @@ from pathlib import Path
 from .config import ConfigError, load_config
 from .contract import emit_error
 from .graph import build_graph
-from .lint import DECISION_ID_RE, EVIDENCE_ID_RE, _parse_date, evidence_register, find_vault_root, is_vault_root, path_cache
+from .lint import DECISION_ID_RE, EVIDENCE_ID_RE, _parse_date, evidence_register, find_vault_root, is_vault_root, path_cache, strip_markdown_suffix
 from .vault_index import VaultIndex
 from .console import emit_machine
 
@@ -121,7 +121,7 @@ def build_trace(
         if DECISION_ID_RE.fullmatch(replaced):
             superseded_by.setdefault(replaced, []).append(own)
 
-    decision_nodes = {vault_index.relative(note.path).removesuffix(".md") for _, note in decision_notes}
+    decision_nodes = {strip_markdown_suffix(vault_index.relative(note.path)) for _, note in decision_notes}
     states: dict[str, dict] = {}
 
     def state_of(evidence_id: str) -> dict:
@@ -133,7 +133,7 @@ def build_trace(
     for own, note in sorted(decision_notes, key=lambda item: (item[0], vault_index.relative(item[1].path))):
         if decision and own != decision:
             continue
-        node = vault_index.relative(note.path).removesuffix(".md")
+        node = strip_markdown_suffix(vault_index.relative(note.path))
         evidence: dict[str, dict] = {}
         for evidence_id in sorted(cites.get(node, ())):
             evidence[evidence_id] = {"id": evidence_id, "via": None, **state_of(evidence_id)}

@@ -68,9 +68,13 @@ Replace both paths with absolute paths on your machine. The default ceiling is
 are already authorized to read them. Sensitivity is a response filter, **not an
 access-control boundary**: the server runs with the operating-system
 permissions of its process, and repository permissions remain authoritative.
-Evidence-register entries do not currently carry their own sensitivity field;
-their details are therefore treated as `internal` and omitted from context
-responses when the ceiling is `public`.
+A note whose label WhyKit cannot read is treated as above every ceiling: front
+matter that does not parse (a tab, an unclosed bracket, a duplicate key) or a
+label spelt differently (`Sensitivity:`) hides the note rather than defaulting
+it to `internal`. A note with valid front matter and no `sensitivity` key is
+`internal`. Evidence-register entries do not carry their own sensitivity field;
+they inherit the label of `00-context/evidence-register.md` itself, so a
+register above the ceiling withholds every row, count and `E-NNN` completion.
 
 ## Protocol versions
 
@@ -151,7 +155,7 @@ Unknown extra arguments are ignored.
 | Tool | Returns |
 | --- | --- |
 | `query` | Ranked document summaries (path, title, status, owner, evidence IDs), no bodies; `total` counts every match, `results` holds one page of at most `limit`, `next_cursor` continues it |
-| `context` | One record: body (marked `content_trust: "untrusted_data"`), cited evidence, backlinks, supersession, lint findings |
+| `context` | One record: body (marked `content_trust: "untrusted_data"`), cited evidence, backlinks, supersession, lint findings. A body over `max_chars` drops its front matter first (`front_matter_omitted: true`) |
 | `impact` | Reverse dependencies of an E-NNN, D-NNN or document |
 | `status` | Lint counts, review queue and document states; never the host path of the vault |
 | `pack` | A budgeted multi-record bundle (`whykit.context-bundle/v1`); hidden and unknown targets are listed under `missing` with the same reason |
@@ -291,9 +295,11 @@ stdio:
 uv run whykit-mcp --root /absolute/path/to/private-vault --http --port 8000
 ```
 
-`--host` defaults to `127.0.0.1`, and on a loopback address the SDK also
-rejects requests whose `Host` or `Origin` header is not local, which blocks
-DNS rebinding from a web page. `--port` defaults to `8000`.
+`--host` defaults to `127.0.0.1`. Without a token, WhyKit rejects (HTTP 421,
+code `forbidden_host`) every request whose `Host` or `Origin` header does not
+name `127.0.0.1`, `localhost`, `[::1]` or the bound host, however the loopback
+bind address was spelt. That blocks DNS rebinding from a web page. `--port`
+defaults to `8000`.
 
 With `--token-file PATH` (or `WHYKIT_MCP_TOKEN` in the environment) every
 request must send `Authorization: Bearer <token>`; anything else gets HTTP 401
@@ -325,6 +331,7 @@ A tool call the server cannot answer comes back as a tool result with
 | `vault_unavailable` | The configured root is no longer a WhyKit vault |
 | `unknown_tool` | No tool has this name |
 | `unauthorized` | Streamable HTTP only: the request lacks the bearer token (HTTP 401, before any MCP processing) |
+| `forbidden_host` | Streamable HTTP without a token only: the `Host` or `Origin` header does not name this machine (HTTP 421, before any MCP processing) |
 | `internal_error` | Anything unexpected; the message is fixed and never carries exception text |
 
 The body is the same whether the SDK rejects arguments against the advertised

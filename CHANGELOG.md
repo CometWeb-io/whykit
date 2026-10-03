@@ -180,6 +180,21 @@ Each entry says what an existing vault, script or pipeline has to change. The
 - `--root` is accepted after a nested action as well as before it
   (`whykit new decision "Title" --root vault`).
 
+- `whykit lsp`, a read-only language server over stdio for editors: lint
+  diagnostics as you type (including for an unsaved evidence register),
+  wikilink and `E-NNN`/`D-NNN` completion, hover, go-to-definition and
+  document links. It never writes a file. Setup for VS Code, Neovim, Helix
+  and Zed is in [Editors](docs/editors.md).
+- `whykit new decision --from FILE` promotes an existing ADR (MADR, Nygard,
+  Y-statement or Polish headings), for example one staged by `adopt`, into a
+  decision record. It prints the section mapping, unmapped headings and
+  evidence candidates as a dry run, and writes the record and its
+  decision-log row only with `--write`; the original text is kept under
+  "Original record" and its SHA-256 in provenance, so the same file is not
+  promoted twice.
+- `--no-cache` (or `WHYKIT_NO_CACHE=1`) turns off the new parse cache; see
+  Performance.
+
 #### Machine contract and CI formats
 
 - A machine contract for every command that writes JSON: stdout holds exactly
@@ -297,6 +312,12 @@ Each entry says what an existing vault, script or pipeline has to change. The
   check`) and a Playwright end-to-end suite (desktop and mobile, with axe
   accessibility checks) run against static builds.
 
+- `npm run build:single` writes the Explorer as one self-contained HTML file
+  that opens straight from disk (`file://`), with its own Content Security
+  Policy (hash-pinned inline script and style, still no `unsafe-inline`).
+- A print stylesheet: a decision or note prints as a clean document without
+  navigation.
+
 #### Documentation, packaging and tooling
 
 - Documentation: a docs index; concepts, CI integration, Obsidian,
@@ -319,6 +340,16 @@ Each entry says what an existing vault, script or pipeline has to change. The
   `check_dist.py`, `twine check`, a wheel smoke test (`init`, `lint`, `trace`,
   MCP tool listing) on every supported Python installed, release notes, and
   the tag commands for the maintainer. It never tags, pushes or uploads.
+- [Security model](docs/security-model.md): what WhyKit protects, its trust
+  boundaries, what it guarantees and what it does not. `SECURITY.md` links it
+  and states what is in scope for a report.
+- `tests/fuzz_parsers.py`, a seeded fuzz harness for the front matter, table,
+  link, custom-rule and Git-path parsers and every read-only command, with a
+  time and memory budget per case and a check that fails superlinear parser
+  cost. A fixed-seed round runs with the test suite.
+- [Editors](docs/editors.md) for `whykit lsp`, and the Explorer README's
+  security headers for GitHub Pages, Netlify, Cloudflare Pages and nginx.
+- `scripts/bench.py --cache` (cold and warm parse cache) and `--runs N`.
 - [Migrating to 0.3](docs/migration-0.3.md), for vaults, scripts and CI
   coming from 0.2.0 or the source preview.
 
@@ -367,6 +398,23 @@ Each entry says what an existing vault, script or pipeline has to change. The
   suggests a more specific title.
 - Installed and checkout pre-commit hooks run `check --profile local`, so local
   validation uses the same versioned policy model as CI and release.
+
+- `whykit -h` lists the commands grouped by job (author, check, explore,
+  integrate, maintain), and `--root DIR` may come before the command
+  (`whykit --root vault lint`) as well as after it. `adopt` accepts `--root`
+  as a spelling of `--into`, `serve` accepts `--root` as well as a positional
+  vault, `doctor` accepts `--today` and `snapshot` accepts `--json`.
+- An unknown option names the command whose `-h` lists the accepted ones.
+- A `.md` suffix in any letter case marks a Markdown file for every command,
+  so `notes/Old.MD` is no longer skipped on Linux and macOS while being read
+  on Windows.
+- The Explorer loads lint findings only when Health opens, so the bundled
+  index no longer carries them.
+- `whykit serve` from an installed copy without the Explorer says where the
+  copy was installed from and how to run the Explorer from that checkout or a
+  clone of the same commit.
+- `whykit context` budgets report `front_matter_omitted` when front matter was
+  dropped to fit.
 
 #### Messages and output
 
@@ -486,6 +534,14 @@ Each entry says what an existing vault, script or pipeline has to change. The
   all four unanswered agent-contract questions.
 - The linter no longer exempts the retired root-level `NAMING.md` file from
   front-matter and orphan checks.
+
+- Notes that used to stop a command now produce a finding: a link target
+  longer than the file system allows or containing a NUL byte, a target
+  naming an unknown home directory (`~user/…`), a file that is not valid
+  UTF-8 (read with the bad bytes replaced and reported as
+  `frontmatter.invalid`), and deeply nested inline lists in front matter.
+- Decision and evidence IDs use ASCII digits only, so `E-００１` in fullwidth
+  digits is no longer a second ID that looks like `E-001`.
 
 #### Lint findings
 
@@ -660,6 +716,27 @@ Each entry says what an existing vault, script or pipeline has to change. The
   would be bundled into the Explorer, unless the operator passes
   `--allow-sensitive-network`.
 
+- The MCP server fails closed on labels: a note whose front matter does not
+  parse, or that spells the key differently (`Sensitivity:`), is treated as
+  above every ceiling, and evidence register rows, counts and completions are
+  shown only when the register itself is within the ceiling.
+- MCP over HTTP without a token rejects a foreign `Host` or `Origin` however
+  the loopback bind address was spelt, not only for the exact default host.
+
+#### Parsing and output
+
+- Wikilink, Markdown link and table parsing is linear in the size of the
+  note; a note of repeated `[` or `|` characters could take quadratic time.
+- Custom rule patterns in `whykit.toml` are parsed and checked for
+  catastrophic backtracking, including shapes that hide from a token scan,
+  under one time budget shared by all patterns; a check that runs out of
+  budget says so instead of passing silently.
+- Human-readable output of `lint`, `check`, `history`, `diff` and the
+  `new decision --from` dry run prints vault text on one line, with line
+  breaks, control characters and bidirectional overrides shown as visible
+  escapes, so a note cannot forge a CI workflow command or send terminal
+  escape sequences.
+
 #### GitHub Action, CI and releases
 
 - The composite Action installs the exact checked-out action revision instead
@@ -692,6 +769,11 @@ Each entry says what an existing vault, script or pipeline has to change. The
   warning.
 - `SECURITY.md` matches a public repository.
 
+- The Action passes its GitHub token only to the step that posts the
+  comment; `whykit diff` reads the change under review without it.
+- The pull request comment no longer autolinks URLs from vault text, and the
+  hidden marker that identifies it cannot be closed early by a note.
+
 ### Performance
 
 - Large vaults are much faster: on a 5,000-note vault `lint`, `status`,
@@ -709,6 +791,16 @@ Each entry says what an existing vault, script or pipeline has to change. The
   after the first paint, so time to interactive on the 5,000-note synthetic
   vault fell from 760–970 ms to 320–360 ms; its budget dropped from 4 s to
   1.5 s, with a new 2.5 s budget for a deep link to a note's text.
+
+- Read commands keep a parse cache in `.whykit/cache/`: each note's front
+  matter and derived views (links, citations, secret-scan hits), reused only
+  while the file's `stat` signature is exactly unchanged, verified by
+  SHA-256 when it was written within two seconds, and discarded whenever the
+  WhyKit version, its source, the Python version or `whykit.toml` changes.
+  Output is identical with the cache on, off, cold or warm. On 5,000 notes a
+  warm cache takes `lint` from 0.81 s to 0.43 s, `status` from 0.90 s to
+  0.49 s and `trace` from 0.74 s to 0.40 s; a cold run, which writes the
+  cache, costs about 10% more than running without it.
 
 ## [0.2.0] — 2026-09-17
 

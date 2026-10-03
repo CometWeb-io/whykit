@@ -1,6 +1,7 @@
 // Write the two files the Explorer bundles:
 //   src/generated/vault.json   the summary, part of the main bundle
 //   src/generated/bodies.json  every note body, a chunk loaded after first paint
+//   src/generated/findings.json  the lint findings, a chunk Health loads
 //
 // By default the full index comes from `whykit explorer-index` for
 // $WHYKIT_VAULT_DIR. `--from <file>` splits an index that was already written
@@ -17,6 +18,7 @@ const REPO = resolve(APP, "../..");
 const VAULT = resolve(process.env.WHYKIT_VAULT_DIR || resolve(REPO, "examples/northline"));
 const OUT = resolve(APP, "src/generated/vault.json");
 const BODIES = resolve(APP, "src/generated/bodies.json");
+const FINDINGS = resolve(APP, "src/generated/findings.json");
 const SENSITIVE = new Set(["confidential", "restricted"]);
 
 const fromAt = process.argv.indexOf("--from");
@@ -27,10 +29,11 @@ if (fromAt > 0 && !FROM) {
 }
 
 function write(payload, label) {
-  const { summary, bodies } = splitIndex(payload);
+  const { summary, bodies, findings } = splitIndex(payload);
   mkdirSync(dirname(OUT), { recursive: true });
   writeFileSync(OUT, JSON.stringify(summary) + "\n");
   writeFileSync(BODIES, JSON.stringify(bodies) + "\n");
+  writeFileSync(FINDINGS, JSON.stringify(findings) + "\n");
   console.log(
     `Indexed ${payload.docs.length} docs, ${payload.evidence.length} evidence rows, ` +
     `${payload.decisions.length} decisions, ${payload.reviews.length} review events from ${label}`,

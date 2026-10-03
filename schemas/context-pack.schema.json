@@ -12,6 +12,10 @@
     "path": {"type": ["string", "null"]},
     "content": {"type": "string"},
     "content_truncated": {"type": "boolean"},
+    "front_matter_omitted": {
+      "const": true,
+      "description": "Present when the body did not fit max_chars: the front matter was left out first (its fields are in `record`), so the content starts with the summary or the body."
+    },
     "evidence": {
       "description": "Evidence rows cited by a document or decision; for an E-NNN target, that entry's own register row.",
       "anyOf": [{"type": "array", "items": {"type": "object"}}, {"type": "object"}]

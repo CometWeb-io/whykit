@@ -284,3 +284,124 @@ class McpSensitivityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class McpFailClosedTests(unittest.TestCase):
+    """A label WhyKit cannot read must hide the record, never default it to `internal`."""
+
+    def setUp(self) -> None:
+        from whykit.mcp_server import VaultTools
+        from whykit.scaffold import create_evidence
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.vault = Path(self.tmp.name) / "vault"
+        day = fresh_vault(self.vault, "--minimal")
+        create_evidence(self.vault, source="Interview notes", location="https://example.com/a", kind="interview",
+                        claims="register-sentinel claim", today=day)
+        self.tools_cls = VaultTools
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def write(self, relative: str, front: str, body: str) -> None:
+        path = self.vault / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"---\n{front}\n---\n\n# Note\n\n{body}\n", encoding="utf-8")
+
+    def tools(self, ceiling: str = "internal"):
+        return self.tools_cls(self.vault, max_sensitivity=ceiling)
+
+    def visible_text(self, tools, target: str) -> str:
+        try:
+            report = tools.scoped(tools.context, target)
+        except Exception as exc:  # noqa: BLE001 - a refusal reveals nothing
+            return f"refused: {type(exc).__name__}"
+        return json.dumps(report)
+
+    def test_unreadable_or_misspelt_labels_hide_the_note(self) -> None:
+        base = "title: T\ntype: guide\nstatus: approved\nowner: O\ncreated: 2026-09-01\nlast_updated: 2026-09-01\nsource_of_truth: false"
+        cases = {
+            "notes/capital.md": base + "\nSensitivity: restricted",
+            "notes/tabbed.md": base + "\n\tsensitivity: restricted",
+            "notes/unclosed.md": base + "\nsensitivity: restricted\ntags: [a",
+            "notes/duplicate.md": base + "\nsensitivity: restricted\nsensitivity: internal",
+        }
+        for relative, front in cases.items():
+            self.write(relative, front, f"leak-sentinel-{Path(relative).stem}")
+        tools = self.tools()
+        for relative in cases:
+            with self.subTest(relative=relative):
+                self.assertNotIn("leak-sentinel", self.visible_text(tools, relative))
+        hits = tools.scoped(tools.query, "leak-sentinel", 50)
+        self.assertEqual(hits["results"], [])
+
+    def test_an_unlabelled_note_with_valid_front_matter_stays_internal(self) -> None:
+        self.write("notes/plain.md", "title: Plain\ntype: guide\nstatus: draft", "plain-sentinel")
+        tools = self.tools()
+        self.assertIn("plain-sentinel", self.visible_text(tools, "notes/plain.md"))
+        self.assertNotIn("plain-sentinel", self.visible_text(self.tools("public"), "notes/plain.md"))
+
+    def test_a_restricted_register_withholds_its_rows_everywhere(self) -> None:
+        register = self.vault / "00-context" / "evidence-register.md"
+        text = register.read_text(encoding="utf-8")
+        self.assertIn("sensitivity: internal", text)
+        register.write_text(text.replace("sensitivity: internal", "sensitivity: restricted", 1), encoding="utf-8")
+        tools = self.tools()
+        self.assertNotIn("register-sentinel", self.visible_text(tools, "E-001"))
+        completion = tools.scoped(tools.complete, "ref/resource", "whykit://record/{target}", "target", "E-")
+        self.assertNotIn("E-001", completion["values"])
+        status = tools.scoped(tools.status)
+        self.assertIsNone(status["evidence_active"])
+        trace = json.dumps(tools.scoped(tools.trace))
+        self.assertNotIn("register-sentinel", trace)
+        self.assertNotIn("Interview notes", trace)
+
+    def test_identifiers_accept_ascii_digits_only(self) -> None:
+        tools = self.tools()
+        from whykit.mcp_server import ToolFailure
+
+        with self.assertRaises(ToolFailure):
+            tools.scoped(tools.trace, "D-\uff10\uff10\uff11")
+
+
+class HttpRebindingTests(unittest.TestCase):
+    """Without a token, only requests addressed to this machine may reach the vault."""
+
+    def call(self, app, headers: list[tuple[bytes, bytes]]) -> int:
+        import asyncio
+
+        sent: list[dict] = []
+
+        async def receive() -> dict:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message: dict) -> None:
+            sent.append(message)
+
+        scope = {"type": "http", "method": "POST", "path": "/mcp", "headers": headers}
+        asyncio.run(app(scope, receive, send))
+        return next(message["status"] for message in sent if message["type"] == "http.response.start")
+
+    def app_for(self, host: str, token: str | None = None):
+        from whykit.mcp_server import http_app
+
+        async def inner(scope, receive, send):  # type: ignore[no-untyped-def]
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"{}"})
+
+        server = types.SimpleNamespace(streamable_http_app=lambda host: inner)
+        return http_app(server, host, 8000, token)
+
+    def test_every_loopback_spelling_rejects_a_foreign_host_or_origin(self) -> None:
+        for bind in ("127.0.0.1", "localhost", "LOCALHOST", "127.0.0.2", "::1", "0:0:0:0:0:0:0:1", "::ffff:127.0.0.1"):
+            app = self.app_for(bind)
+            with self.subTest(bind=bind):
+                self.assertNotEqual(self.call(app, [(b"host", b"evil.example:8000")]), 200)
+                self.assertNotEqual(self.call(app, [(b"host", b"127.0.0.1:8000"), (b"origin", b"http://evil.example:8000")]), 200)
+                self.assertEqual(self.call(app, [(b"host", b"127.0.0.1:8000")]), 200)
+                self.assertEqual(self.call(app, [(b"host", b"localhost:8000"), (b"origin", b"http://localhost:8000")]), 200)
+
+    def test_a_token_is_still_required_when_one_is_set(self) -> None:
+        app = self.app_for("0.0.0.0", "t" * 40)
+        self.assertEqual(self.call(app, [(b"host", b"vault.example:8000")]), 401)
+        self.assertEqual(self.call(app, [(b"host", b"vault.example:8000"), (b"authorization", b"Bearer " + b"t" * 40)]), 200)

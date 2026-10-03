@@ -231,7 +231,10 @@ def to_sarif(
 
 
 def _escape_data(value: str) -> str:
-    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    # The Unicode line and paragraph separators and NEL end a line for some
+    # log readers; inside an annotation they become an escaped line feed.
+    value = value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    return value.replace("\u2028", "%0A").replace("\u2029", "%0A").replace("\x85", "%0A")
 
 
 def _escape_property(value: str) -> str:

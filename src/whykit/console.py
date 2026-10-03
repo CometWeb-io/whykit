@@ -18,6 +18,7 @@ Two rules keep output safe without changing what UTF-8 consumers receive:
 from __future__ import annotations
 
 import codecs
+import re
 import sys
 from typing import Any, TextIO
 
@@ -171,4 +172,33 @@ def emit_machine(text: str, *, file: TextIO | None = None) -> None:
         stream.flush()
     finally:
         reconfigure(encoding=encoding, errors=errors)
+
+
+# Line breaks (including the Unicode ones), other control characters and the
+# bidirectional overrides. Printed raw, vault text containing them could start
+# a new log line that a CI runner reads as a command (``::error::``), move the
+# terminal cursor or recolour it (ESC), or reorder what a reviewer sees.
+_UNSAFE_DISPLAY_RE = re.compile("[\x00-\x08\x0a-\x1f\x7f-\x9f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]")
+_DISPLAY_ESCAPES = {"\n": "\\n", "\r": "\\r"}
+
+
+def one_line(value: object) -> str:
+    """*value* as one inert line of human-readable output.
+
+    Vault text (titles, paths, finding messages) is untrusted. Every
+    character that could break the line or control the terminal is shown as a
+    visible escape instead; ordinary text, tabs and non-Latin scripts are
+    unchanged. Machine formats (JSON, SARIF, GitHub annotations) keep the
+    exact value and do their own escaping.
+    """
+    text = str(value)
+    if not _UNSAFE_DISPLAY_RE.search(text):
+        return text
+
+    def escape(match: re.Match[str]) -> str:
+        char = match.group(0)
+        code = ord(char)
+        return _DISPLAY_ESCAPES.get(char) or (f"\\x{code:02x}" if code <= 0xFF else f"\\u{code:04x}")
+
+    return _UNSAFE_DISPLAY_RE.sub(escape, text)
 

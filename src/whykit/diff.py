@@ -27,7 +27,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .console import emit_machine
+from .console import emit_machine, one_line
 from .contract import CONTRACT_VERSION, emit_error
 from .immutability import _diff_entries, _git_arg, _git_prefix, _require_revisions, git
 from .lint import (
@@ -641,7 +641,7 @@ def render_text(report: dict[str, Any]) -> str:
     for title, entries in _lines(report, "text"):
         if entries:
             out.append(f"\n{title}")
-            out.extend(f"  {entry}" for entry in entries)
+            out.extend(f"  {one_line(entry)}" for entry in entries)
     parts = _summary_parts(report)
     lint = report["lint"]
     out.append("")
@@ -662,6 +662,10 @@ def _md(value: object) -> str:
     text = " ".join(str(value).split())
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     text = re.sub(r"([\\`*_\[\]#|~!])", r"\\\1", text)
+    # GitHub turns bare URLs and `www.` hosts into links on its own; an
+    # entity in the scheme or after `www` keeps them as plain text.
+    text = re.sub(r"(?i)\b(https?|ftp|mailto|xmpp|file|javascript|data)(:)", r"\1&#58;", text)
+    text = re.sub(r"(?i)\bwww\.", lambda match: match.group(0)[:-1] + "&#46;", text)
     return text.replace("@", "&#64;")
 
 
@@ -673,7 +677,9 @@ def _md_code(value: object) -> str:
 def marker(report: dict[str, Any]) -> str:
     """The hidden first line that identifies this vault's sticky comment."""
     vault = report["prefix"].rstrip("/") or "."
-    return f"{MARKER_PREFIX} root={_md_code(vault).replace('--', '-')} -->"
+    # Any run of hyphens collapses to one: a single replace of `--` would
+    # turn `--->` into `-->` and close the comment early.
+    return f"{MARKER_PREFIX} root={re.sub('-{2,}', '-', _md_code(vault))} -->"
 
 
 def render_markdown(report: dict[str, Any]) -> str:

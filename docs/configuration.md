@@ -265,11 +265,17 @@ the very phrase it forbids.
 Patterns run on Python's regular-expression engine, which has no timeout, so
 WhyKit bounds them instead. A pattern may be at most 256 characters, and it is
 rejected when it uses a backreference or a conditional group, nests a
-quantifier inside a repeated group (`(a+)+`), or repeats a group that contains
-an alternation (`(a|ab)*`): the shapes that can take exponential time. Patterns
-are matched one line at a time, and a line longer than 10,000 characters is
-checked on its first 10,000 only, with a finding that says so. Use `(?i)` for
-case-insensitive matching.
+quantifier inside a repeated group (`(a+)+`, `(a?){25}`), repeats a group that
+contains an alternation (`(a|ab)*`), or puts repeats that can match the same
+text next to each other (`\s*\s*x`, `.*x.*y`): the shapes that take
+exponential or high polynomial time. The check reads the pattern as the engine
+does, so verbose mode (`(?x)`) and inline comments cannot hide a shape.
+Patterns are searched anywhere in a line, so a leading or trailing `.*` is
+never needed. Patterns are matched one line at a time, and a line longer than
+10,000 characters is checked on its first 10,000 only, with a finding that
+says so. All pattern checks in one run share a 10-second time budget; on a
+vault built to be slow, the checks that did not run are reported as findings
+of the rule, never skipped silently. Use `(?i)` for case-insensitive matching.
 
 ### Overrides
 
@@ -309,8 +315,8 @@ a `config.invalid` finding, so the rest of the vault is still checked.
 
 ## Explorer network safety
 
-`whykit serve` binds to `127.0.0.1` by default. If a vault contains
-`confidential` or `restricted` documents, WhyKit refuses to bind the Explorer to
+`whykit serve` binds to `127.0.0.1` by default. If a vault contains any
+document that is not `public` (including the default `internal`), WhyKit refuses to bind the Explorer to
 a non-loopback host unless you explicitly pass:
 
 ```bash

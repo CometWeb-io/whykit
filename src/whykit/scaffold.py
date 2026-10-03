@@ -14,6 +14,7 @@ import json
 import re
 import unicodedata
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .contract import describe_os_error, emit_error, vault_not_found
 from .messages import parse_iso_date
@@ -21,9 +22,9 @@ from .io import apply_transaction, atomic_write_text, ensure_writable, safe_vaul
 from .config import ConfigError, load_config
 from .lint import (
     DECISION_ID_RE, EVIDENCE_ID_RE, _split_table_row, decision_log_rows, evidence_register,
-    find_vault_root, is_vault_root, load_note,
+    find_vault_root, is_markdown_name, is_vault_root, load_note,
 )
-from .console import emit_machine
+from .console import emit_machine, one_line
 from .placeholders import (
     ALTERNATIVES_EMPTY_ROW, ALTERNATIVES_HEADER, SCAFFOLD_EVIDENCE_TODO, SCAFFOLD_SECTION_PROMPTS,
 )
@@ -37,7 +38,10 @@ DECISION_STATUS_TO_LOG = {
 }
 VALID_SENSITIVITY = ("public", "internal", "confidential", "restricted")
 VALID_NOTE_TYPES = ("strategy", "research", "framework", "specification", "guide", "reference")
-ID_NUMBER_RE = re.compile(r"^[DE]-(\d+)$")
+ID_NUMBER_RE = re.compile(r"^[DE]-([0-9]+)$")
+
+if TYPE_CHECKING:
+    from .promote import Promotion
 
 
 def _yaml_string(value: str) -> str:
@@ -158,8 +162,10 @@ def _existing_decision_ids(vault: Path) -> list[str]:
     values: list[str] = []
     decisions = vault / "06-decisions"
     if decisions.is_dir():
-        for path in decisions.glob("d-*.md"):
-            match = re.match(r"d-(\d{3,})-", path.name)
+        for path in decisions.iterdir():
+            if not is_markdown_name(path.name):
+                continue
+            match = re.match(r"d-([0-9]{3,})-", path.name)
             if match:
                 values.append(f"D-{match.group(1)}")
     values.extend(str(row["id"]) for row in decision_log_rows(vault))
@@ -173,7 +179,10 @@ def _existing_evidence_ids(vault: Path) -> list[str]:
 
 def _decision_record_path(vault: Path, decision_id: str) -> Path:
     number = decision_id.split("-", 1)[1]
-    matches = sorted((vault / "06-decisions").glob(f"d-{number}-*.md"))
+    matches = sorted(
+        path for path in (vault / "06-decisions").glob(f"d-{number}-*")
+        if is_markdown_name(path.name)
+    )
     exact = [path for path in matches if str(load_note(path).front.get("decision_id") or "").strip() == decision_id]
     if len(exact) != 1:
         raise ValueError(f"{decision_id} does not resolve to exactly one decision record")
@@ -195,12 +204,22 @@ def create_decision(
     review_by: str | None = None,
     supersedes: str | None = None,
     today: dt.date | None = None,
+    promotion: Promotion | None = None,
 ) -> tuple[str, Path]:
     today = today or dt.date.today()
-    title = title.strip()
+    title = title.strip() or (promotion.title if promotion else "")
     if not title:
         raise ValueError("decision title cannot be empty")
     with vault_mutation_lock(vault):
+        if promotion is not None:
+            from .promote import promoted_from
+
+            earlier = promoted_from(vault, promotion.sha256)
+            if earlier:
+                raise FileExistsError(
+                    f"{promotion.source_label} was already promoted as {earlier}\n"
+                    "hint: edit that record, or supersede it with a new decision"
+                )
         existing_decisions = _existing_decision_ids(vault)
         decision_id = _next_id(existing_decisions, "D")
         number = decision_id.split("-", 1)[1]
@@ -243,6 +262,31 @@ def create_decision(
             optional += f"review_by: {review_by}\n"
         if supersedes:
             optional += f"supersedes: {supersedes}\n"
+        prose = dict(SCAFFOLD_SECTION_PROMPTS)
+        evidence_lines = [f"- {sid}" for sid in source_ids] or [SCAFFOLD_EVIDENCE_TODO]
+        alternative_rows = [ALTERNATIVES_EMPTY_ROW]
+        consequences = "### Positive\n\n-\n\n### Negative and trade-offs\n\n-"
+        appendix = ""
+        if promotion is not None:
+            from .promote import render_original, render_provenance, render_sections
+
+            optional += render_provenance(promotion.provenance(today.isoformat()))
+            sections = render_sections(promotion, SCAFFOLD_SECTION_PROMPTS)
+            prose = {name: sections[name] for name in SCAFFOLD_SECTION_PROMPTS}
+            evidence_lines += [
+                f"- TODO — candidate source from the original record: <{url}>"
+                for url in promotion.evidence_candidates
+            ]
+            if promotion.alternatives:
+                alternative_rows = [f"| {_table_cell(name)} |  |  | Not chosen; see the original record |" for name in promotion.alternatives]
+            general = sections["Consequences"]
+            positive = "\n".join(f"- {item}" for item in promotion.positive) or "-"
+            negative = "\n".join(f"- {item}" for item in promotion.negative) or "-"
+            consequences = (
+                (general + "\n\n" if general else "")
+                + f"### Positive\n\n{positive}\n\n### Negative and trade-offs\n\n{negative}"
+            )
+            appendix = "\n" + render_original(promotion)
         body = f'''---
 title: {_yaml_string(title)}
 aliases: []
@@ -270,35 +314,29 @@ tags: []
 
 ## Context
 
-{SCAFFOLD_SECTION_PROMPTS['Context']}
+{prose['Context']}
 
 ## Decision
 
-{SCAFFOLD_SECTION_PROMPTS['Decision']}
+{prose['Decision']}
 
 ## Rationale
 
-{SCAFFOLD_SECTION_PROMPTS['Rationale']}
+{prose['Rationale']}
 
 ## Evidence
 
-{chr(10).join(f'- {sid}' for sid in source_ids) if source_ids else SCAFFOLD_EVIDENCE_TODO}
+{chr(10).join(evidence_lines)}
 
 ## Alternatives considered
 
 {ALTERNATIVES_HEADER}
 |---|---|---|---|
-{ALTERNATIVES_EMPTY_ROW}
+{chr(10).join(alternative_rows)}
 
 ## Consequences
 
-### Positive
-
--
-
-### Negative and trade-offs
-
--
+{consequences}
 
 ## Ownership and review
 
@@ -307,7 +345,7 @@ tags: []
 - Review on: {review_by or 'TBD'}
 - Supersedes: {supersedes or '—'}
 - Superseded by: —
-'''
+{appendix}'''
         log = safe_vault_target(vault, "06-decisions/decision-log.md", create_parents=False)
         if not log.exists():
             raise FileNotFoundError(errno.ENOENT, "the decision log is missing", str(log))
@@ -379,7 +417,7 @@ def _resolve_link_from(vault: Path, value: str) -> Path:
         path.relative_to(vault.resolve())
     except ValueError as exc:
         raise ValueError("--link-from must stay inside the vault") from exc
-    if path.suffix.lower() != ".md" or not path.is_file():
+    if not is_markdown_name(path.name) or not path.is_file():
         raise ValueError(f"--link-from is not an existing Markdown file: {value}")
     return path
 
@@ -508,6 +546,95 @@ Separate verified facts from hypotheses, recommendations and open questions.
         return path
 
 
+def _promote(vault: Path, args: argparse.Namespace, *, owner: str, sensitivity: str, review_by: str | None) -> int:
+    """`new decision --from FILE`: print the mapping, or with --write create the record."""
+    from .promote import PromotionError, build_promotion, promoted_from
+
+    if not args.from_path:
+        return emit_error(
+            "usage", "--write only applies with --from FILE",
+            hint='hint: whykit new decision "Title" creates a record directly; --write confirms a --from promotion',
+            json_mode=args.json,
+        )
+    source = Path(args.from_path).expanduser()
+    if not source.exists():
+        return emit_error("invalid_target", f"no such file: {args.from_path}", json_mode=args.json)
+    try:
+        promotion = build_promotion(vault, source, title=args.title)
+    except PromotionError as exc:
+        return emit_error("invalid_target", str(exc), json_mode=args.json)
+    except OSError as exc:
+        return emit_error("io_error", describe_os_error(exc), json_mode=args.json)
+    earlier = promoted_from(vault, promotion.sha256)
+    if earlier and not args.write:
+        return emit_error(
+            "target_exists", f"{one_line(promotion.source_label)} was already promoted as {earlier}",
+            hint="hint: edit that record, or supersede it with a new decision",
+            json_mode=args.json,
+        )
+    if args.write:
+        try:
+            decision_id, path = create_decision(
+                vault, args.title or "", owner=owner, status=args.status, sensitivity=sensitivity,
+                source_ids=args.source_ids, review_by=review_by, supersedes=args.supersedes,
+                promotion=promotion,
+            )
+        except FileExistsError as exc:
+            return emit_error("target_exists", str(exc), json_mode=args.json)
+        except FileNotFoundError as exc:
+            return emit_error(
+                "vault_invalid", describe_os_error(exc),
+                hint="hint: restore the file from Git, or copy it from a fresh `whykit init` vault",
+                json_mode=args.json,
+            )
+        except ValueError as exc:
+            return emit_error("operation_rejected", str(exc), json_mode=args.json)
+        relative = path.relative_to(vault).as_posix()
+    else:
+        decision_id = _next_id(_existing_decision_ids(vault), "D")
+        relative = f"06-decisions/d-{decision_id.split('-', 1)[1]}-{_slugify(promotion.title)}.md"
+    title = (args.title or "").strip() or promotion.title
+    if args.json:
+        emit_machine(json.dumps({
+            "contract_version": 1,
+            "kind": "decision",
+            "id": decision_id,
+            "path": relative,
+            "write": bool(args.write),
+            "title": title,
+            "status": args.status,
+            "source": promotion.as_json(),
+            "mapping": promotion.mapping,
+            "unmapped": promotion.unmapped,
+            "evidence_candidates": promotion.evidence_candidates,
+            "warnings": promotion.warnings,
+        }, ensure_ascii=False, indent=2))
+        return 0
+    verb = "created" if args.write else "would create"
+    print(f"Promote {one_line(promotion.source_label)} ({promotion.shape})")
+    print(f"  sha256        {promotion.sha256}")
+    print(f"  {verb:<13} {decision_id}: {one_line(relative)} (status {args.status})")
+    print(f"  title         {one_line(title)}")
+    if promotion.mapping:
+        print("  mapping")
+        width = max(len(item["section"]) for item in promotion.mapping)
+        for item in promotion.mapping:
+            print(f"    {item['section']:<{width}}  <- {one_line(item['from'])}")
+    for name in promotion.unmapped:
+        print(f"  unmapped      {one_line(name)} (kept only under Original record)")
+    if promotion.source_status:
+        print(f"  source status {one_line(promotion.source_status)} (kept in provenance; the record is {args.status})")
+    if promotion.evidence_candidates:
+        print(f"  evidence      {len(promotion.evidence_candidates)} link(s) listed under Evidence as TODO candidates")
+    for warning in promotion.warnings:
+        print(f"  note: {one_line(warning)}")
+    if not args.write:
+        print("\nDry run. Nothing was written. Re-run with --write to create the record and its decision-log row.")
+    else:
+        print("The original text is kept under \"Original record\". Review the mapped sections, then approve it.")
+    return 0
+
+
 def _vault(value: str | None) -> Path | None:
     if value:
         path = Path(value).expanduser().resolve()
@@ -521,7 +648,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="kind", required=True)
 
     decision = sub.add_parser("decision", help="create a decision record and decision-log row")
-    decision.add_argument("title")
+    decision.add_argument("title", nargs="?")
+    decision.add_argument("--from", dest="from_path", metavar="FILE")
+    decision.add_argument("--write", action="store_true")
     decision.add_argument("--owner")
     decision.add_argument("--status", choices=tuple(DECISION_STATUS_TO_LOG), default="draft")
     decision.add_argument("--sensitivity", choices=VALID_SENSITIVITY)
@@ -563,6 +692,14 @@ def main(argv: list[str] | None = None) -> int:
     review_by = getattr(args, "review_by", None)
     if args.kind == "decision" and args.status == "approved" and not review_by:
         review_by = (dt.date.today() + dt.timedelta(days=int(config["defaults"]["decision_review_days"]))).isoformat()
+    if args.kind == "decision" and (args.from_path or args.write):
+        return _promote(vault, args, owner=owner, sensitivity=sensitivity, review_by=review_by)
+    if args.kind == "decision" and not (args.title or "").strip():
+        return emit_error(
+            "usage", "a decision needs a title",
+            hint='hint: whykit new decision "Adopt usage-based pricing", or --from FILE to promote an existing ADR',
+            json_mode=args.json,
+        )
     try:
         if args.kind == "decision":
             decision_id, path = create_decision(

@@ -31,7 +31,7 @@ from .contract import (
     error_payload,
     vault_not_found,
 )
-from .lint import find_vault_root, is_vault_root, lint as run_lint, rel
+from .lint import find_vault_root, is_markdown_name, is_vault_root, iter_markdown, lint as run_lint, rel
 from .completion import SHELLS, render_completion
 from .messages import print_no_vault
 from .vault_index import VaultIndex
@@ -53,9 +53,10 @@ Thumbs.db
 .obsidian/workspace.json
 .obsidian/workspace-mobile.json
 
-# WhyKit's own write lock and crash-recovery journal. Machine state, not knowledge.
+# WhyKit's own write lock, crash-recovery journal and parse cache. Machine state, not knowledge.
 .whykit/mutation.lock
 .whykit/transactions/
+.whykit/cache/
 """
 VAULT_GITIGNORE_MARKER = "# WhyKit protective defaults (managed by whykit init)"
 # Points at the repository when running from a checkout; harmless in a wheel.
@@ -130,7 +131,7 @@ def _is_whykit_package_source_root(path: Path) -> bool:
 def _stamp_vault_dates(target: Path, today: dt.date | None = None) -> None:
     """Make a newly generated vault honest about when its starter files were created."""
     value = (today or dt.date.today()).isoformat()
-    for path in target.rglob("*.md"):
+    for path in iter_markdown(target):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
@@ -289,7 +290,12 @@ def cmd_new(args: argparse.Namespace) -> int:
         argv += ["--root", args.root]
     argv.append(args.new_kind)
     if args.new_kind == "decision":
-        argv.append(args.title)
+        if args.title is not None:
+            argv.append(args.title)
+        if args.from_path:
+            argv += ["--from", args.from_path]
+        if args.write:
+            argv.append("--write")
         argv += ["--status", args.status]
         if args.owner:
             argv += ["--owner", args.owner]
@@ -643,7 +649,7 @@ def _uncommitted_markdown(vault: Path) -> list[str]:
     paths = []
     for line in result.stdout.splitlines():
         path = line[3:].split(" -> ")[-1].strip().strip('"')
-        if path.endswith(".md"):
+        if is_markdown_name(path):
             paths.append(path)
     return paths
 
@@ -771,6 +777,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     import json
     from .config import ConfigError, load_config
 
+    today: dt.date | None = None
+    if getattr(args, "today", None):
+        try:
+            today = dt.date.fromisoformat(args.today)
+        except ValueError:
+            return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}\nhint: use YYYY-MM-DD", json_mode=args.json)
     vault = _resolve_vault(args.root)
     checks: list[dict[str, object]] = []
 
@@ -816,7 +828,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     record("node_explorer", bool(shutil.which("node")), shutil.which("node") or "not found (only needed for `serve`)", required=False)
 
     # Same findings as `whykit lint` and `whykit status`, so the counts agree.
-    files, findings = run_lint(vault, [])
+    files, findings = run_lint(vault, [], today=today)
     errors = [f for f in findings if f.level == "error"]
     warnings = [f for f in findings if f.level == "warning"]
     record("vault_lint", not errors, f"{len(files)} files, {len(errors)} errors, {len(warnings)} warnings")
@@ -877,17 +889,104 @@ def cmd_explorer_index(args: argparse.Namespace) -> int:
     return explorer_index_main(argv)
 
 
+REPOSITORY_URL = "https://github.com/CometWeb-io/whykit"
+
+
+def _install_origin() -> dict | None:
+    """Where this copy was installed from: its PEP 610 ``direct_url.json``.
+
+    Installers write it for a local directory (``uv tool install ./whykit``,
+    ``pip install .``) or a VCS URL, and not for a package index.
+    """
+    import json
+    from importlib import metadata
+
+    try:
+        raw = metadata.distribution("whykit").read_text("direct_url.json")
+    except (metadata.PackageNotFoundError, OSError):
+        return None
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _serve_hint(origin: dict | None, vault: str) -> list[str]:
+    """What to do when the running copy has no Explorer next to it."""
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
+
+    target = shlex.quote(str(Path(vault).expanduser().resolve()))
+    url = str((origin or {}).get("url") or "")
+    if url.startswith("file://") and isinstance((origin or {}).get("dir_info"), dict):
+        checkout = Path(url2pathname(urlparse(url).path))
+        if (checkout / "apps" / "explorer" / "package.json").is_file():
+            return [
+                f"This copy was installed from the checkout at {checkout}, which has the Explorer.",
+                "Run it from that checkout:",
+                f"  cd {shlex.quote(str(checkout))} && uv run whykit serve {target}",
+            ]
+        return [
+            f"This copy was installed from {checkout}, which no longer has apps/explorer/.",
+            "Clone the repository and run `whykit serve` from the clone:",
+            f"  git clone {REPOSITORY_URL}",
+        ]
+    vcs = (origin or {}).get("vcs_info")
+    if url and isinstance(vcs, dict) and vcs.get("vcs") == "git":
+        lines = [
+            "This copy was installed from Git. Clone the same source and run `whykit serve` from the clone:",
+            f"  git clone {shlex.quote(url)} whykit",
+        ]
+        commit = str(vcs.get("commit_id") or "")
+        if re.fullmatch(r"[0-9a-f]{7,64}", commit):
+            lines.append(f"  git -C whykit checkout {commit}")
+        lines.append(f"  cd whykit && uv run whykit serve {target}")
+        return lines
+    return [
+        "Clone the repository and run `whykit serve` from the clone:",
+        f"  git clone {REPOSITORY_URL}",
+        f"  cd whykit && uv run whykit serve {target}",
+    ]
+
+
+def cmd_lsp(args: argparse.Namespace) -> int:
+    argv: list[str] = ["--debounce", str(args.debounce)]
+    if args.root:
+        argv += ["--root", args.root]
+    if args.today:
+        argv += ["--today", args.today]
+    from .lsp import main as lsp_main
+    return lsp_main(argv)
+
+
+def _serve_target(args: argparse.Namespace) -> str:
+    """The vault ``serve`` should show: the positional argument or ``--root``."""
+    positional, root = getattr(args, "vault", None), getattr(args, "root", None)
+    if positional and root and Path(positional).expanduser().resolve() != Path(root).expanduser().resolve():
+        raise ValueError(f"two different vaults given: {positional} and --root {root}; pass one")
+    return positional or root or "."
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
+    try:
+        target = _serve_target(args)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     explorer = SOURCE_ROOT / "apps" / "explorer"
     if not (explorer / "package.json").exists():
         print("The Explorer ships with the source repository, not the package.", file=sys.stderr)
-        print("Clone the repository and run `whykit serve` from there.", file=sys.stderr)
+        for line in _serve_hint(_install_origin(), target):
+            print(line, file=sys.stderr)
         return 2
     npm = shutil.which("npm")
     if not npm:
         print("npm is required for the Explorer", file=sys.stderr)
         return 2
-    vault = _resolve_vault(None if args.vault == "." else args.vault) or Path(args.vault).expanduser().resolve()
+    vault = _resolve_vault(None if target == "." else target) or Path(target).expanduser().resolve()
     if not is_vault_root(vault):
         print(f"not a WhyKit vault: {vault}", file=sys.stderr)
         return 2
@@ -918,10 +1017,28 @@ exit codes:
   0    success (no errors; no warnings under --strict)
   1    the check ran and found problems that should fail the build
   2    the tool could not run: no vault, invalid input or configuration
+  70   internal error: a bug in WhyKit, not a problem with the vault
   130  interrupted
 
 Run `whykit <command> -h` for a command's options.
 Docs: https://github.com/CometWeb-io/whykit#readme"""
+
+# Top-level help groups the commands by the job they do, so ~30 commands read
+# as five verbs rather than one flat list. Every command belongs to exactly one
+# group; tests/test_cli_consistency.py holds this table to the parser.
+COMMAND_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("author", "create and change records", ("init", "adopt", "new", "review", "evidence")),
+    ("check", "gate a vault or a change", ("lint", "check", "status", "trace", "history", "diff", "snapshot", "verify-snapshot")),
+    ("explore", "find and hand over context", ("query", "context", "pack", "graph", "backlinks", "impact")),
+    ("integrate", "connect hooks, viewers and shells", ("install-hooks", "explorer-index", "serve", "lsp", "completion")),
+    ("maintain", "inspect policy, rules and setup", ("policy", "rules", "doctor")),
+)
+
+COMMANDS_PREAMBLE = (
+    "Vault commands take --root DIR before or after the command (default: the\n"
+    "nearest vault), --json for one JSON document on stdout, and --today\n"
+    "YYYY-MM-DD where a result depends on the date."
+)
 
 
 class _Parser(argparse.ArgumentParser):
@@ -933,9 +1050,12 @@ class _Parser(argparse.ArgumentParser):
     """
 
     json_errors = False
+    # The command path being parsed (e.g. "review list"), read from the raw
+    # arguments in ``main`` so a top-level usage error can name its subcommand.
+    command_path = ""
 
     def error(self, message: str) -> NoReturn:
-        hint = _usage_hint(message)
+        hint = _usage_hint(message, _Parser.command_path)
         self.print_usage(sys.stderr)
         sys.stderr.write(f"{self.prog}: error: {message}\n")
         if hint:
@@ -950,12 +1070,91 @@ class _Parser(argparse.ArgumentParser):
         self.exit(2)
 
 
-def _usage_hint(message: str) -> str | None:
+def _usage_hint(message: str, command_path: str = "") -> str | None:
     """A next step for argparse errors where the message alone misleads."""
     if "invalid choice: 'accepted'" in message and "approved" in message:
         # Decision logs render the approved state as "Accepted", so people type it.
         return "decision logs display approved decisions as \"Accepted\"; on the command line use --status approved"
+    if message.startswith("unrecognized arguments") and command_path:
+        # argparse reports these from the top-level parser, whose usage line
+        # lists no subcommand options at all.
+        return f"`whykit {command_path} -h` lists the options of `whykit {command_path}`"
     return None
+
+
+class _TopParser(_Parser):
+    """The ``whykit`` parser: help lists commands grouped by job, and a
+    leading ``--root DIR`` is handed to the command that follows it."""
+
+    def parse_known_args(self, args=None, namespace=None):  # type: ignore[no-untyped-def]
+        raw = list(sys.argv[1:] if args is None else args)
+        return super().parse_known_args(_hoist_root(raw, set(_subcommand_helps(self))), namespace)
+
+    def format_help(self) -> str:
+        formatter = self._get_formatter()
+        formatter.add_usage(self.usage, self._actions, self._mutually_exclusive_groups)
+        formatter.add_text(self.description)
+        formatter.start_section("options")
+        formatter.add_arguments([a for a in self._actions if a.option_strings])
+        formatter.end_section()
+        text = formatter.format_help().rstrip("\n") + "\n\n"
+        return text + _grouped_commands(self) + "\n" + (self.epilog or "") + "\n"
+
+
+def _subcommand_helps(parser: argparse.ArgumentParser) -> dict[str, str]:
+    for action in parser._actions:  # argparse has no public introspection API
+        if isinstance(action, argparse._SubParsersAction):
+            return {str(choice.dest): str(choice.help or "") for choice in action._choices_actions}
+    return {}
+
+
+def _grouped_commands(parser: argparse.ArgumentParser) -> str:
+    import textwrap
+
+    helps = _subcommand_helps(parser)
+    width = max(len(name) for name in helps) + 2
+    columns = max(60, min(shutil.get_terminal_size().columns, 100) - 2)
+    lines = ["commands:", *(f"  {line}" for line in COMMANDS_PREAMBLE.splitlines()), ""]
+    for job, blurb, names in COMMAND_GROUPS:
+        lines.append(f"  {job} - {blurb}")
+        for name in names:
+            wrapped = textwrap.wrap(helps.get(name, ""), max(20, columns - width - 4)) or [""]
+            lines.append(f"    {name:<{width}}{wrapped[0]}".rstrip())
+            lines.extend(f"    {'':<{width}}{rest}" for rest in wrapped[1:])
+    return "\n".join(lines) + "\n"
+
+
+def _command_path(parser: argparse.ArgumentParser, raw: list[str]) -> str:
+    """The subcommand names in *raw*, in order (e.g. ``review list``)."""
+    path: list[str] = []
+    current: argparse.ArgumentParser | None = parser
+    for token in raw:
+        if token == "--" or current is None:
+            break
+        children = next(
+            (a.choices for a in current._actions if isinstance(a, argparse._SubParsersAction)), None
+        )
+        if not children:
+            break
+        if token in children:
+            path.append(token)
+            current = children[token]
+    return " ".join(path)
+
+
+def _hoist_root(raw: list[str], commands: set[str]) -> list[str]:
+    """Move a leading ``--root DIR`` behind the command name.
+
+    Every vault command accepts ``--root`` after its name; ``whykit --root DIR
+    lint`` used to fail with "invalid choice: 'DIR'". Only a leading
+    ``--root`` directly followed by a command is moved, so the command's own
+    parser still decides whether it accepts the option.
+    """
+    if raw and raw[0] == "--root" and len(raw) >= 3 and raw[2] in commands:
+        return [raw[2], raw[0], raw[1], *raw[3:]]
+    if raw and raw[0].startswith("--root=") and len(raw) >= 2 and raw[1] in commands:
+        return [raw[1], raw[0], *raw[2:]]
+    return raw
 
 
 def _add_leaf_root(parser: argparse.ArgumentParser) -> None:
@@ -970,13 +1169,17 @@ def _add_leaf_root(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = _Parser(
+    parser = _TopParser(
         prog="whykit",
         description="WhyKit - a Git-native evidence and decision ledger.",
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("-V", "--version", action="version", version=f"whykit {__version__}")
+    parser.add_argument(
+        "--no-cache", action="store_true",
+        help="do not read or update the parse cache in .whykit/cache/ (same as WHYKIT_NO_CACHE=1)",
+    )
     sub = parser.add_subparsers(dest="command", metavar="<command>", title="commands")
 
     init = sub.add_parser("init", help="create a new vault", description="Create a new WhyKit vault from the bundled template.")
@@ -1011,7 +1214,9 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--root", help=ROOT_HELP)
     new_sub = new.add_subparsers(dest="new_kind", required=True, metavar="<kind>", title="kinds")
     new_decision = new_sub.add_parser("decision", help="create a decision record and index row")
-    new_decision.add_argument("title", help="decision title, e.g. \"Adopt usage-based pricing\"")
+    new_decision.add_argument("title", nargs="?", help="decision title, e.g. \"Adopt usage-based pricing\" (optional with --from)")
+    new_decision.add_argument("--from", dest="from_path", metavar="FILE", help="promote an existing ADR (MADR, Nygard, Y-statement or Polish headings), e.g. one staged by `adopt`; prints the mapping unless --write")
+    new_decision.add_argument("--write", action="store_true", help="with --from: create the record and its decision-log row (default: dry run)")
     new_decision.add_argument("--owner", help="accountable person (default: policy defaults.owner)")
     new_decision.add_argument("--status", choices=("draft", "in_review", "approved", "superseded", "archived"), default="draft", help="initial status (default: %(default)s)")
     new_decision.add_argument("--sensitivity", choices=SENSITIVITIES, help="default: policy defaults.sensitivity")
@@ -1148,6 +1353,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="snapshot format: v2 (default) hashes text with CRLF line endings and a UTF-8 BOM "
         "normalized, so checkouts on different platforms match; v1 hashes raw bytes",
     )
+    snapshot.add_argument("--json", action="store_true", help="accepted for symmetry; stdout is always JSON unless --output is given")
     snapshot.set_defaults(func=cmd_snapshot)
 
     verify_snapshot = sub.add_parser("verify-snapshot", help="compare the vault with a prior snapshot")
@@ -1191,7 +1397,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     adopt = sub.add_parser("adopt", help="inventory existing Markdown and stage it for a vault")
     adopt.add_argument("source", help="directory of existing Markdown to inventory")
-    adopt.add_argument("--into", metavar="VAULT", help="vault to stage into (default: nearest vault)")
+    adopt.add_argument("--into", "--root", dest="into", metavar="VAULT", help="vault to stage into (default: nearest vault); --root is the same option, spelled as on every other command")
     adopt.add_argument("--owner", default="TODO", help="owner for adopted notes (default: %(default)s)")
     adopt.add_argument("--profile", choices=("generic", "adr-only", "obsidian-loose"), default="generic", help="how to interpret the source (default: %(default)s)")
     adopt.add_argument("--write", action="store_true", help="write the staged files (default: dry run)")
@@ -1231,6 +1437,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = sub.add_parser("doctor", help="check prerequisites and vault integrity")
     doctor.add_argument("--root", help=ROOT_HELP)
+    doctor.add_argument("--today", help=TODAY_HELP)
     doctor.add_argument("--json", action="store_true", help=JSON_HELP)
     doctor.set_defaults(func=cmd_doctor)
 
@@ -1249,11 +1456,24 @@ def build_parser() -> argparse.ArgumentParser:
     explorer_index.set_defaults(func=cmd_explorer_index)
 
     serve = sub.add_parser("serve", help="run the optional Explorer (source checkout only)")
-    serve.add_argument("vault", nargs="?", default=".", help="vault to serve (default: current directory)")
+    serve.add_argument("vault", nargs="?", default=None, help="vault to serve (default: current directory)")
+    serve.add_argument("--root", help="vault to serve, as on every other command (same as the positional vault)")
     serve.add_argument("--host", default="127.0.0.1", help="interface to bind (default: %(default)s)")
     serve.add_argument("--port", type=int, default=5173, help="port to listen on (default: %(default)s)")
     serve.add_argument("--allow-sensitive-network", action="store_true", help="allow non-loopback serving even when non-public docs are present")
     serve.set_defaults(func=cmd_serve)
+
+    lsp = sub.add_parser(
+        "lsp",
+        help="run the read-only language server for editors (stdio)",
+        description="Run the read-only WhyKit language server over stdio: lint diagnostics, "
+        "wikilink and ID completion, hover, go-to-definition and document links. It never writes a file.",
+    )
+    lsp.add_argument("--root", help="serve only this vault (default: the vault around each open file)")
+    lsp.add_argument("--debounce", type=int, default=300, metavar="MS", help="milliseconds to wait after an edit before linting (default: %(default)s)")
+    lsp.add_argument("--today", help=TODAY_HELP)
+    lsp.add_argument("--stdio", action="store_true", help="accepted for editor clients that pass it; stdio is the only transport")
+    lsp.set_defaults(func=cmd_lsp)
 
     completion = sub.add_parser(
         "completion",
@@ -1296,6 +1516,23 @@ def _wants_json(args: argparse.Namespace) -> bool:
 
 _WINDOWS = sys.platform == "win32"
 
+# Commands that only read the vault.  They reuse and refresh the parse cache;
+# commands that write the vault, or read other directories (`diff` exports
+# commits into a temporary directory), never touch it.
+_CACHED_COMMANDS = frozenset({
+    "lint", "check", "status", "snapshot", "verify-snapshot", "query", "context", "pack",
+    "graph", "backlinks", "impact", "trace", "explorer-index", "doctor",
+})
+
+
+def _uses_parse_cache(args: argparse.Namespace) -> bool:
+    if getattr(args, "no_cache", False):
+        return False
+    command = getattr(args, "command", None)
+    if command == "review":
+        return getattr(args, "review_command", None) == "list"
+    return command in _CACHED_COMMANDS
+
 
 def _reader_gone(exc: OSError) -> bool:
     """Whether *exc* means the reader of stdout went away (`| head -1`).
@@ -1324,17 +1561,23 @@ def main(argv: list[str] | None = None) -> int:
     harden_stdio()
     parser = build_parser()
     raw = list(sys.argv[1:] if argv is None else argv)
+    raw = _hoist_root(raw, set(_subcommand_helps(parser)))
     _Parser.json_errors = argv_wants_json(raw)
+    _Parser.command_path = _command_path(parser, raw)
     try:
         args = parser.parse_args(raw)
     finally:
         _Parser.json_errors = False
+        _Parser.command_path = ""
     func = getattr(args, "func", None)
     if func is None:
         parser.print_help(sys.stderr)
         return 2
     try:
-        code = func(args)
+        from .parse_cache import persistent
+
+        with persistent(_uses_parse_cache(args)):
+            code = func(args)
         # Flush here, not at interpreter exit: a short report sits in the buffer
         # until then, and a reader that already left (`| head -1`) would turn
         # into an "Exception ignored" message and exit status 120.

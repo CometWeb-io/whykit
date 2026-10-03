@@ -82,8 +82,10 @@ SERVER_INSTRUCTIONS = (
 
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
-_EVIDENCE_RE = re.compile(r"E-\d{3,}")
-_DECISION_RE = re.compile(r"D-\d{3,}")
+# ASCII digits only: `\d` would also accept fullwidth and other Unicode
+# digits, which look like an identifier but never name a record.
+_EVIDENCE_RE = re.compile(r"E-[0-9]{3,}")
+_DECISION_RE = re.compile(r"D-[0-9]{3,}")
 
 
 class ToolFailure(Exception):
@@ -211,9 +213,31 @@ def _validate_policy(value: str) -> str:
 # Sensitivity filtering
 # ---------------------------------------------------------------------------
 
+UNREADABLE_LEVEL = 99
+
+
 def _sensitivity_level(value: object) -> int:
     key = str(value or "internal").lower() or "internal"
     return SENSITIVITY_LEVEL.get(key, 99)
+
+
+def note_sensitivity_level(note: Any) -> int:
+    """The level a note is filtered at, failing closed when its label is unreadable.
+
+    A note without front matter, or with valid front matter that omits the
+    key, is `internal` (the documented default). Front matter that does not
+    parse, or a label spelt with different case or spacing (`Sensitivity:`),
+    may hide a stricter label WhyKit cannot read, so such a note is treated as
+    above every ceiling.
+    """
+    if note.front_error:
+        return UNREADABLE_LEVEL
+    front = note.front
+    level = _sensitivity_level(front.get("sensitivity"))
+    for key, value in front.items():
+        if key != "sensitivity" and str(key).strip().casefold() == "sensitivity":
+            level = max(level, _sensitivity_level(value), SENSITIVITY_LEVEL["restricted"])
+    return level
 
 
 def _visible(item: dict, policy: str) -> bool:
@@ -225,14 +249,20 @@ def _allowed_sensitivities(policy: str) -> set[str]:
     return {name for name, level in SENSITIVITY_LEVEL.items() if level <= ceiling}
 
 
-def _filter_nested(value: object, policy: str) -> object:
-    """Recursively drop dict nodes whose sensitivity exceeds *policy*."""
+def _filter_nested(value: object, policy: str, register_visible: bool | None = None) -> object:
+    """Recursively drop dict nodes whose sensitivity exceeds *policy*.
+
+    *register_visible* says whether the evidence register itself is within the
+    ceiling; by default the register is taken to be `internal`.
+    """
+    if register_visible is None:
+        register_visible = SENSITIVITY_LEVEL["internal"] <= SENSITIVITY_LEVEL[policy]
     if isinstance(value, dict):
-        # Evidence-register rows do not yet have a per-entry sensitivity field;
-        # they inherit the register's `internal` classification. Fail closed
-        # under a public-only ceiling rather than returning source/claim details.
+        # Evidence-register rows do not have a per-entry sensitivity field;
+        # they inherit the register's own label. Fail closed when the register
+        # is above the ceiling rather than returning source/claim details.
         if (
-            policy == "public"
+            not register_visible
             and isinstance(value.get("id"), str)
             and value["id"].startswith("E-")
             and {"state", "record"}.issubset(value)
@@ -246,7 +276,7 @@ def _filter_nested(value: object, policy: str) -> object:
             return None
         out: dict = {}
         for key, child in value.items():
-            filtered = _filter_nested(child, policy)
+            filtered = _filter_nested(child, policy, register_visible)
             if filtered is None and isinstance(child, dict):
                 continue
             out[key] = filtered
@@ -254,7 +284,7 @@ def _filter_nested(value: object, policy: str) -> object:
     if isinstance(value, list):
         filtered_items = []
         for item in value:
-            filtered = _filter_nested(item, policy)
+            filtered = _filter_nested(item, policy, register_visible)
             if filtered is None and isinstance(item, dict):
                 continue
             filtered_items.append(filtered)
@@ -262,7 +292,7 @@ def _filter_nested(value: object, policy: str) -> object:
     return value
 
 
-def filter_report(report: dict, policy: str) -> dict:
+def filter_report(report: dict, policy: str, register_visible: bool | None = None) -> dict:
     """Enforce sensitivity on the root record and every nested graph expansion."""
     record = report.get("record")
     if isinstance(record, dict) and (
@@ -274,12 +304,15 @@ def filter_report(report: dict, policy: str) -> dict:
                 f"exceeds MCP policy ({policy})"
             )
 
-    # Evidence targets have no document sensitivity today; default them to internal
-    # so a restricted-only reference graph cannot leak through an E-NNN lookup.
-    if report.get("kind") == "evidence" and _sensitivity_level("internal") > SENSITIVITY_LEVEL[policy]:
+    # Evidence targets carry the evidence register's label (`internal` unless
+    # the caller says otherwise), so a register above the ceiling cannot leak
+    # through an E-NNN lookup.
+    if register_visible is None:
+        register_visible = SENSITIVITY_LEVEL["internal"] <= SENSITIVITY_LEVEL[policy]
+    if report.get("kind") == "evidence" and not register_visible:
         raise PermissionError(f"evidence targets exceed MCP policy ({policy})")
 
-    filtered = _filter_nested(dict(report), policy)
+    filtered = _filter_nested(dict(report), policy, register_visible)
     assert isinstance(filtered, dict)
     return filtered
 
@@ -589,9 +622,24 @@ class VaultTools:
         from whykit.vault_index import VaultIndex
 
         ceiling = SENSITIVITY_LEVEL[self.policy]
-        return VaultIndex.load(self.vault).subset(
-            lambda note: _sensitivity_level(note.front.get("sensitivity")) <= ceiling
-        )
+        return VaultIndex.load(self.vault).subset(lambda note: note_sensitivity_level(note) <= ceiling)
+
+    def register_visible(self) -> bool:
+        """Whether the evidence register's own label is within the ceiling.
+
+        Register rows have no label of their own; they are exactly as
+        sensitive as the register note that holds them.
+        """
+        from whykit.lint import load_note
+
+        path = self.vault / "00-context" / "evidence-register.md"
+        try:
+            note = load_note(path)
+        except FileNotFoundError:
+            return True
+        except (OSError, UnicodeDecodeError):
+            return False
+        return note_sensitivity_level(note) <= SENSITIVITY_LEVEL[self.policy]
 
     def _check_vault(self) -> None:
         from whykit.lint import is_vault_root
@@ -667,7 +715,7 @@ class VaultTools:
         if not report.get("exists"):
             return report
         try:
-            filtered = filter_report(report, self.policy)
+            filtered = filter_report(report, self.policy, self.register_visible())
         except PermissionError:
             # Match the ordinary missing-target contract so a caller cannot
             # confirm the existence or sensitivity of a filtered document.
@@ -690,7 +738,7 @@ class VaultTools:
         if kind == "document" and "sensitivity" not in (report.get("record") or {}):
             return _missing_impact(target, kind)
         try:
-            return filter_report(report, self.policy)
+            return filter_report(report, self.policy, self.register_visible())
         except PermissionError:
             # Return the same shape as an absent target of this kind. In
             # particular, do not reveal a hidden record's sensitivity label.
@@ -717,7 +765,7 @@ class VaultTools:
         # duplicate of a visible decision ID is never mentioned.
         index = VaultIndex.load(self.vault)
         ceiling = SENSITIVITY_LEVEL[self.policy]
-        visible = index.subset(lambda note: _sensitivity_level(note.front.get("sensitivity")) <= ceiling)
+        visible = index.subset(lambda note: note_sensitivity_level(note) <= ceiling)
         report = build_status(self.vault, today=as_of, due_days=due_days, vault=visible)
         visible_notes = visible.notes
         hidden_paths = {index.relative(note.path) for note in index.notes} - {
@@ -725,6 +773,7 @@ class VaultTools:
         }
         visible_paths = {visible.relative(note.path) for note in visible_notes}
         internal_visible = SENSITIVITY_LEVEL["internal"] <= ceiling
+        register_visible = self.register_visible()
 
         def finding_visible(item: dict) -> bool:
             path = str(item.get("path") or "")
@@ -768,9 +817,9 @@ class VaultTools:
             "documents": len(visible_notes),
             "canonical": canonical,
             "decisions": decisions,
-            # The register is `internal`; under a public ceiling its counts are withheld.
-            "evidence_active": report["evidence_active"] if internal_visible else None,
-            "evidence_retired": report["evidence_retired"] if internal_visible else None,
+            # Register counts follow the register's own label.
+            "evidence_active": report["evidence_active"] if register_visible else None,
+            "evidence_retired": report["evidence_retired"] if register_visible else None,
             "errors": sum(1 for item in findings if item["level"] == "error"),
             "warnings": sum(1 for item in findings if item["level"] == "warning"),
             "finding_codes": dict(sorted(by_code.items())),
@@ -822,7 +871,7 @@ class VaultTools:
             allowed_sensitivities=self.allowed,
             vault=self.visible_index(),
         )
-        filtered = _filter_nested(report, self.policy)
+        filtered = _filter_nested(report, self.policy, self.register_visible())
         assert isinstance(filtered, dict)
         return {**filtered, "max_sensitivity": self.policy}
 
@@ -845,7 +894,8 @@ class VaultTools:
         cursor = _validate_cursor(cursor)
         self._check_vault()
         report = build_trace(self.vault, today=as_of, decision=decision, vault=self.visible_index())
-        if SENSITIVITY_LEVEL["internal"] > SENSITIVITY_LEVEL[self.policy]:
+        register_visible = self.register_visible()
+        if not register_visible:
             report = _withhold_register_details(report)
         records = report["decisions"]
         if gaps_only:
@@ -861,7 +911,7 @@ class VaultTools:
             "truncated": more,
             "next_cursor": next_cursor,
             "max_sensitivity": self.policy,
-        }, self.policy)
+        }, self.policy, register_visible)
         assert isinstance(filtered, dict)
         return filtered
 
@@ -872,8 +922,8 @@ class VaultTools:
         limit = _validate_int(limit, "limit", minimum=0, maximum=MAX_MCP_BACKLINKS)
         cursor = _validate_cursor(cursor)
         self._check_vault()
-        if _EVIDENCE_RE.fullmatch(target) and SENSITIVITY_LEVEL["internal"] > SENSITIVITY_LEVEL[self.policy]:
-            # Evidence inherits the register's `internal` classification.
+        if _EVIDENCE_RE.fullmatch(target) and not self.register_visible():
+            # Evidence inherits the register's own label.
             report: dict[str, Any] = {
                 "contract_version": 1,
                 "target": target,
@@ -1007,8 +1057,7 @@ class VaultTools:
     def _evidence_ids(self) -> list[str]:
         from whykit.lint import evidence_register
 
-        # The register is classified `internal`, like everywhere else here.
-        if SENSITIVITY_LEVEL["internal"] > SENSITIVITY_LEVEL[self.policy]:
+        if not self.register_visible():
             return []
         active, retired, _ = evidence_register(self.vault)
         return sorted(set(active) | set(retired))
@@ -1132,7 +1181,7 @@ class VaultWatcher:
         signature unusable, because a second write in the same timestamp tick
         with the same size would not change it (the NoteCache rule).
         """
-        from whykit.lint import CONTENT_SKIP_DIRS
+        from whykit.lint import CONTENT_SKIP_DIRS, iter_markdown
         from whykit.vault_index import NoteCache
 
         # The same traversal as `collect_markdown`, without its per-file
@@ -1142,7 +1191,7 @@ class VaultWatcher:
         now = time.time_ns()
         signature: list[tuple[str, tuple[int, int, int, int] | None]] = []
         paths = sorted(
-            path for path in root.rglob("*.md")
+            path for path in iter_markdown(root)
             if not any(part in CONTENT_SKIP_DIRS for part in path.parts[depth:])
         )
         for path in (*paths, root / "whykit.toml"):
@@ -1179,7 +1228,7 @@ class VaultWatcher:
                 text_digest = digest([relative, note.text])
                 for uri in uris:
                     state.setdefault(uri, []).append(text_digest)
-            if SENSITIVITY_LEVEL["internal"] <= SENSITIVITY_LEVEL[self.tools.policy]:
+            if self.tools.register_visible():
                 active, retired, _ = evidence_register(self.tools.vault)
                 for evidence_id, row in (*active.items(), *retired.items()):
                     state.setdefault(f"whykit://record/{evidence_id}", []).append(digest(row))
@@ -1812,6 +1861,63 @@ def require_bearer(app: Callable[..., Any], token: str) -> Callable[..., Any]:
     return guarded
 
 
+LOOPBACK_NAMES = ("127.0.0.1", "localhost", "[::1]")
+
+
+def _host_spelling(host: str) -> str:
+    host = host.strip().lower()
+    return f"[{host.strip('[]')}]" if ":" in host else host
+
+
+def require_local_host(app: Callable[..., Any], host: str, port: int) -> Callable[..., Any]:
+    """Wrap an ASGI app so only requests addressed to this machine reach it.
+
+    A browser page can point its own domain name at 127.0.0.1 (DNS
+    rebinding) and then talk to a tokenless loopback server. Such a request
+    still names the attacker's domain in ``Host`` and ``Origin``, so both
+    headers must name a loopback spelling (or the bound host) when present,
+    with or without the port. The check does not depend on how the bind
+    address was spelt.
+    """
+    names = {*LOOPBACK_NAMES, _host_spelling(host)}
+    allowed_hosts = {*names, *(f"{name}:{port}" for name in names)}
+    allowed_origins = {f"{scheme}://{value}" for scheme in ("http", "https") for value in allowed_hosts}
+    body = json.dumps(ToolFailure("forbidden_host", "request is not addressed to this machine").payload()).encode("ascii")
+
+    async def guarded(scope: dict[str, Any], receive: Callable[..., Any], send: Callable[..., Any]) -> None:
+        if scope.get("type") in ("http", "websocket"):
+            headers = scope.get("headers") or ()
+            hosts = [value.decode("latin-1").strip().lower() for name, value in headers if name.lower() == b"host"]
+            origins = [value.decode("latin-1").strip().lower() for name, value in headers if name.lower() == b"origin"]
+            if (
+                len(hosts) != 1
+                or hosts[0] not in allowed_hosts
+                or len(origins) > 1
+                or (origins and origins[0] not in allowed_origins)
+            ):
+                await send({
+                    "type": "http.response.start",
+                    "status": 421,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(body)).encode("ascii")),
+                    ],
+                })
+                await send({"type": "http.response.body", "body": body})
+                return
+        await app(scope, receive, send)
+
+    return guarded
+
+
+def http_app(server: Any, host: str, port: int, token: str | None) -> Callable[..., Any]:
+    """The ASGI app ``--http`` serves: bearer-guarded with a token, host-guarded without."""
+    app = server.streamable_http_app(host=host)
+    if token is not None:
+        return require_bearer(app, token)
+    return require_local_host(app, host, port)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="whykit-mcp", description="Read-only WhyKit MCP server")
     parser.add_argument("--root", required=True, help="path to a WhyKit vault")
@@ -1875,9 +1981,7 @@ def main(argv: list[str] | None = None) -> int:
     import anyio
     import uvicorn
 
-    app = server.streamable_http_app(host=host)
-    if token is not None:
-        app = require_bearer(app, token)
+    app = http_app(server, host, port, token)
     shown = f"[{host}]" if ":" in host else host
     print(f"whykit-mcp: serving streamable HTTP at http://{shown}:{port}/mcp", file=sys.stderr, flush=True)
     config = uvicorn.Config(app, host=host, port=port, log_level="warning")

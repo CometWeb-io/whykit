@@ -29,8 +29,9 @@ vault directory. From a source checkout you can get there three ways:
 - run `uv run --project /path/to/whykit whykit …` from inside the vault;
 - install a binary once with `uv tool install --from /path/to/whykit whykit`.
 
-Every command accepts `--root`, including after the action of `new`, `review`
-and `evidence` (`whykit new decision … --root ../my-ledger`). Without it, WhyKit
+Every command that reads a vault accepts `--root`, before or after the command
+name, and after the action of `new`, `review` and `evidence` too
+(`whykit new decision … --root ../my-ledger`). Without it, WhyKit
 walks up from the current directory to the nearest `Home.md` plus `00-context/`.
 
 ## Create a vault
@@ -64,7 +65,13 @@ whykit adopt ../old-docs --into ../my-ledger --profile generic --write
 directory, or `obsidian-loose` for an Obsidian vault with partial front matter.
 The readiness percentage checks front matter against the linter, **not** links,
 evidence, decision integrity or approval, and the time estimate is heuristic.
-Only UTF-8 `*.md` files are scanned. Known evidence-register and decision-log
+Only UTF-8 Markdown files are scanned: a name ending in `.md` in any letter
+case, so `docs/old.MD` counts, the same rule `lint` and every other command
+apply. A file is `heading-only` when it has nothing to keep: only headings,
+placeholders such as `TODO`, `TBD` or `Lorem ipsum`, empty list items or
+template fields left blank (`Date:`). Two real words are enough to make a note
+(`Shipped the export.`), and so is a link; files with front matter, files that
+look like ADRs and anything over 4,000 characters are never stubs. Known evidence-register and decision-log
 table layouts are flagged for manual mapping, and so is a `decision_id` claimed
 by two imported files or already used in the vault.
 
@@ -74,6 +81,50 @@ file, and appears only once complete: if a source changes mid-import or a write
 fails, nothing from that run is left behind. The ingestion record lands in
 `notes/`; link it from a map or lint reports `note.orphan`. A person decides
 what becomes canonical.
+
+## Promote an adopted ADR
+
+Once a person has decided that a staged ADR should become a decision record,
+`new decision --from` does the retyping. It is a dry run that prints the
+mapping until you pass `--write`:
+
+```bash
+whykit new decision --from .import-staging/2026-09-17/adr/0007-use-queues.md
+whykit new decision --from .import-staging/2026-09-17/adr/0007-use-queues.md --write
+```
+
+It recognises four shapes and copies each section it knows into the matching
+WhyKit section:
+
+| Shape | Recognised by | Mapped |
+|---|---|---|
+| MADR | `Context and Problem Statement`, `Decision Drivers`, `Considered Options`, `Decision Outcome` | context and drivers, decision, the `because` clause as rationale, unchosen options as alternatives, `Good, because` / `Bad, because` as positive and negative consequences |
+| Nygard (also adr-tools, log4brains) | `Status`, `Context`, `Decision`, `Consequences` | the same sections; consequences stay one paragraph |
+| Y-statement | `In the context of …, facing …, we decided for … and neglected …, to achieve …, accepting …` | context, decision, rationale, alternatives, negative consequences |
+| Polish headings | `Kontekst`, `Decyzja`, `Uzasadnienie`, `Rozważane opcje`, `Konsekwencje`, `Status` (also the Polish Y-statement) | as above |
+
+The title comes from the source's title or first heading, without ADR
+numbering (`7. Use queues` becomes `Use queues`); pass a title to override it.
+The next free `D-NNN` is allocated, and the record and its decision-log row are
+written in one journalled transaction, so an interrupted run leaves both or
+neither. The record keeps:
+
+- the whole source text under `## Original record`, in a fence lint does not
+  parse (line endings normalized to LF);
+- a `provenance` block: the staged path, the path inside the adopted folder,
+  the import batch, the SHA-256 of the source bytes, and the status, date and
+  number the source claimed;
+- every link in the source under `## Evidence` as a TODO candidate. No
+  evidence ID is invented; register the sources that support a claim with
+  `whykit new evidence` and cite them.
+
+IDs (`E-012`, `D-004`) and wikilinks copied from another ledger would not
+resolve in this one, so in the mapped sections they become code spans and the
+output says so. The record starts as `draft` (or `--status`) whatever the
+source claimed: an ADR marked "Accepted" was accepted by a process WhyKit
+cannot see, so approval stays a person's step. Sections the source does not
+have keep their prompt, which `decision.placeholder` reports until someone
+answers it. Promoting the same bytes twice is refused with `target_exists`.
 
 ## Create records
 
@@ -161,7 +212,12 @@ whykit impact E-014 --json
 | Check what depends on a record before changing it | `impact` |
 
 `context` and `pack` cap the embedded bodies and report truncation, so a single
-large note cannot silently fill an agent's context window. For tools that speak
+large note cannot silently fill an agent's context window. When a note does not
+fit, its front matter is left out of the content first (its fields are already
+in `record`), and `front_matter_omitted` is `true`. The budget then goes to a
+`summary` (or `description`) front-matter value, if the note has one, followed
+by the body from its first heading, so `--max-chars 200` returns the note's
+opening rather than its tags. For tools that speak
 MCP, the [read-only MCP server](mcp.md) exposes the same views; for scripts, the
 [JSON contract](automation.md) defines the output.
 
@@ -236,7 +292,10 @@ has every Action input and the setup for other CI systems.
 ## Browse the vault in the Explorer
 
 The Explorer is an optional, read-only viewer and not part of the data
-contract. It needs Node.js and runs only from a source checkout:
+contract. It needs Node.js and runs only from a source checkout. A copy
+installed from a checkout (`uv tool install ./whykit`) names that checkout and
+the command to run there; one installed from Git or a package index prints the
+`git clone` to run instead:
 
 ```bash
 npm ci --prefix apps/explorer

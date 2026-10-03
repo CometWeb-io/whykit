@@ -10,7 +10,9 @@ from pathlib import Path
 from .config import ConfigError, load_config
 from .contract import CONTRACT_VERSION, emit_error, vault_not_found
 from .lint import (
+    read_vault_lines,
     path_cache,
+    strip_markdown_suffix,
     _split_table_row,
     decision_log_rows,
     evidence_register,
@@ -105,7 +107,7 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
     index = VaultIndex.load(root)
     docs = []
     for note in index.notes:
-        doc_id = rel(root, note.path).removesuffix(".md")
+        doc_id = strip_markdown_suffix(rel(root, note.path))
         # Every E-NNN the note cites, in front matter or body, outside code:
         # `Note.cited_evidence` is the one citation rule `whykit graph`,
         # `impact` and `trace` use. The register itself lists IDs rather than
@@ -197,8 +199,7 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
     review_path = root / "00-context" / "review-log.md"
     reviews = []
     if review_path.is_file():
-        text = review_path.read_text(encoding="utf-8")
-        lines = text.splitlines()
+        lines = read_vault_lines(review_path)
         header = "| Date | Target | Reviewer | Outcome | Previous review | Next review | Note |"
         at = next((i for i, line in enumerate(lines) if line.strip() == header), None)
         if at is not None:

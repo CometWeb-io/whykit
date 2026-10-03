@@ -1,4 +1,4 @@
-import type { VaultIndex } from "../types.ts";
+import type { Finding, VaultIndex } from "../types.ts";
 import { createVaultModel, reviewCues } from "./model.ts";
 
 export { reviewCues };
@@ -12,8 +12,11 @@ export { reviewCues };
  * keeps everything else and adds what used to be derived from the bodies at
  * start-up: each note's resolved links, computed here by the same resolver
  * the browser runs, and its count of review cues.
+ *
+ * Lint findings are split off the same way (about half a megabyte at 5,000
+ * notes, read only by Health); the summary keeps their counts.
  */
-export function splitIndex(full: VaultIndex): { summary: VaultIndex; bodies: Record<string, string> } {
+export function splitIndex(full: VaultIndex): { summary: VaultIndex; bodies: Record<string, string>; findings: Finding[] } {
   const model = createVaultModel(full);
   const position = new Map(full.docs.map((d, i) => [d.id, i]));
   const entries: [string, string][] = [];
@@ -22,5 +25,6 @@ export function splitIndex(full: VaultIndex): { summary: VaultIndex; bodies: Rec
     entries.push([d.id, body]);
     return { ...rest, links: model.linksFor(d).map(target => position.get(target.id)!), cues: reviewCues(body) };
   });
-  return { summary: { ...full, docs }, bodies: Object.fromEntries(entries) };
+  const { findings = [], ...counts } = full.lint;
+  return { summary: { ...full, docs, lint: counts }, bodies: Object.fromEntries(entries), findings };
 }

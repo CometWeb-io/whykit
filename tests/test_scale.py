@@ -357,19 +357,24 @@ class ImpactViewTest(unittest.TestCase):
 
 @unittest.skipIf(os.environ.get("WHYKIT_SKIP_PERF"), "WHYKIT_SKIP_PERF is set")
 class PeakMemoryTest(unittest.TestCase):
-    """Peak traced allocation of one request stays well below where it was.
+    """Peak traced allocation of one request, relative to holding the notes.
 
-    Measured in a fresh interpreter at 1,000 notes: lint 5.2-5.5 MB (6.7-8.0
-    MB before the streaming work), pack 7.1-7.4 MB (10.8-12.4 MB before),
-    across CPython 3.11, 3.12 and 3.14. Each budget sits between the two
-    ranges, so it fails on a return of the whole-graph copy in `pack` or of a
-    second copy of every path, but not on a Python version's object sizes.
+    The budget is a ratio to a baseline measured in the same interpreter in
+    the same run: the peak of loading every note of the vault into a list.
+    Object sizes move with the Python version and with the parser, so an
+    absolute megabyte budget flaked (lint measured 6.12 MB against a 6.0 MB
+    budget with no change to lint) while giving a leaner interpreter more
+    room to regress. Measured at 1,000 notes across CPython 3.11, 3.12 and
+    3.14: lint 1.94-2.23x the baseline, pack 2.40-2.67x; before the
+    streaming work pack held a whole-graph copy at about 3.7-4.3x. Each
+    budget leaves 15-20% headroom over the highest measurement, so it fails
+    on a returned whole-graph copy or a second copy of every note, not on
+    an interpreter's object sizes.
 
     The measurement runs in its own interpreter. Inside the full suite the
     peak drifted with whatever earlier tests had left behind: a full `re`
     cache recompiles patterns inside the traced window, and a large
-    long-lived heap delays cyclic collection, which pushed lint to 6.5 MB on
-    a loaded machine without any change to WhyKit. The best of three runs is
+    long-lived heap delays cyclic collection. The best of three runs is
     taken, since noise can only add to a peak.
     """
 
@@ -379,7 +384,10 @@ class PeakMemoryTest(unittest.TestCase):
         "from whykit import lint\n"
         "from whykit.pack import build_pack\n"
         "vault = Path(sys.argv[1])\n"
+        "def baseline():\n"
+        "    return [lint.load_note(p) for p in lint.iter_markdown(vault) if p.is_file()]\n"
         "runs = {\n"
+        "    'baseline': baseline,\n"
         "    'lint': lambda: lint.lint(vault, today=dt.date(2026, 9, 17)),\n"
         "    'pack': lambda: build_pack(vault, targets=['D-010'], query='pipeline'),\n"
         "}\n"
@@ -420,8 +428,15 @@ class PeakMemoryTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         peaks = json.loads(result.stdout)
-        self.assertLess(peaks["lint"], 6.0, f"lint peaked at {peaks['lint']:.1f} MB on 1,000 notes")
-        self.assertLess(peaks["pack"], 8.5, f"pack peaked at {peaks['pack']:.1f} MB on 1,000 notes")
+        base = peaks["baseline"]
+        self.assertGreater(base, 0.5, f"loading 1,000 notes peaked at only {base:.2f} MB; the baseline is broken")
+        for name, budget in (("lint", 2.6), ("pack", 3.2)):
+            ratio = peaks[name] / base
+            self.assertLess(
+                ratio, budget,
+                f"{name} peaked at {peaks[name]:.2f} MB on 1,000 notes, {ratio:.2f}x the {base:.2f} MB "
+                f"of loading them (budget {budget}x)",
+            )
 
 
 # ---------------------------------------------------------------------------

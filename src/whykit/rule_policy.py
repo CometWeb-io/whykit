@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -60,6 +61,10 @@ MAX_OVERRIDE_ENTRIES = 50
 # first MAX_LINE_CHARS characters and the truncation is reported, so a pattern
 # cannot be made to run for minutes and a skipped tail is never silent.
 MAX_LINE_CHARS = 10_000
+# Every accepted pattern is at most quadratic in the line length, but a vault
+# can hold many long lines. Pattern checks share this wall-clock budget per
+# lint run; once it is spent the remaining checks are reported as not run.
+PATTERN_BUDGET_SECONDS = 10.0
 
 APPLIES_TO_KEYS = ("type", "status", "paths", "workstream")
 CHECK_KEYS = (
@@ -235,6 +240,227 @@ def regex_problem(pattern: str) -> str | None:
             continue
         i += 1
         last_group, last_is_atom = None, True
+    return _structure_problem(pattern)
+
+
+# The token scan above reads the pattern as written. Verbose mode (``(?x)``),
+# inline comments and flag groups change what the engine sees without
+# changing those characters, so the parsed form is checked as well, together
+# with shapes a token scan cannot judge: a repeated body that can match empty
+# (``(a?){25}``) and adjacent repeats that can match the same text
+# (``\s*\s*x``, ``.*x.*y``), which take polynomial time on a long line.
+_SAMPLE = frozenset(
+    [chr(code) for code in range(32, 127)]
+    + ["\t", "\n", "\r", "\x0b", "\x0c", "\u00a0", "\u00e9", "\u00c9", "\u4e2d", "\u0661", "\u2028", "\uff11", "\U0001f600"]
+)
+_CATEGORY_PROBES = {
+    "DIGIT": re.compile(r"\d"), "SPACE": re.compile(r"\s"), "WORD": re.compile(r"\w"),
+    "LINEBREAK": re.compile(r"\n"),
+}
+# A fixed count above this is treated like a variable one: `.*\s{200}` costs
+# as much as two open-ended repeats.
+_SMALL_FIXED_COUNT = 16
+# At most this many optional parts may overlap in one stretch (`a?a?a?...a`
+# is exponential in their number).
+_MAX_OVERLAPPING_OPTIONALS = 6
+
+
+class _PatternTooSlow(Exception):
+    pass
+
+
+def _category_chars(category: object) -> frozenset[str]:
+    name = getattr(category, "name", str(category))
+    for key, probe in _CATEGORY_PROBES.items():
+        if key in name:
+            matched = frozenset(char for char in _SAMPLE if probe.match(char))
+            return _SAMPLE - matched if "NOT" in name else matched
+    return _SAMPLE
+
+
+def _chars(op: object, av: Any, ignorecase: bool, dotall: bool) -> frozenset[str] | None:
+    """Sample characters a one-character matcher accepts, or None if *op* is not one."""
+    from re import _constants as sre  # type: ignore[attr-defined]
+
+    def literal(code: int) -> set[str]:
+        char = chr(code)
+        return {char, char.lower(), char.upper()} if ignorecase else {char}
+
+    if op is sre.LITERAL:
+        return frozenset(literal(av))
+    if op is sre.NOT_LITERAL:
+        return _SAMPLE - literal(av)
+    if op is sre.ANY:
+        return _SAMPLE if dotall else _SAMPLE - {"\n"}
+    if op is sre.IN:
+        out: set[str] = set()
+        negate = False
+        for item_op, item_av in av:
+            if item_op is sre.NEGATE:
+                negate = True
+            elif item_op is sre.LITERAL:
+                out |= literal(item_av)
+            elif item_op is sre.RANGE:
+                low, high = item_av
+                out |= {char for char in _SAMPLE if low <= ord(char) <= high}
+                if ignorecase:
+                    out |= {char.swapcase() for char in _SAMPLE if low <= ord(char) <= high}
+            elif item_op is sre.CATEGORY:
+                out |= _category_chars(item_av)
+            else:
+                out |= _SAMPLE
+        return _SAMPLE - out if negate else frozenset(out)
+    return None
+
+
+@dataclass
+class _Summary:
+    chars: frozenset[str] = frozenset()
+    nullable: bool = True
+    quantified: bool = False   # holds a quantifier or an alternation somewhere
+
+
+def _summarize(seq: Any, ignorecase: bool, dotall: bool) -> _Summary:
+    from re import _constants as sre  # type: ignore[attr-defined]
+
+    total = _Summary()
+    for op, av in seq:
+        single = _chars(op, av, ignorecase, dotall)
+        if single is not None:
+            part = _Summary(single, False, False)
+        elif op in (sre.MAX_REPEAT, sre.MIN_REPEAT, sre.POSSESSIVE_REPEAT):
+            low, _high, body = av
+            inner = _summarize(body, ignorecase, dotall)
+            part = _Summary(inner.chars, low == 0 or inner.nullable, True)
+        elif op is sre.SUBPATTERN:
+            part = _summarize(av[3], ignorecase, dotall)
+        elif op is sre.ATOMIC_GROUP:
+            part = _summarize(av, ignorecase, dotall)
+        elif op is sre.BRANCH:
+            branches = [_summarize(branch, ignorecase, dotall) for branch in av[1]]
+            part = _Summary(
+                frozenset().union(*(b.chars for b in branches)),
+                any(b.nullable for b in branches),
+                True,
+            )
+        else:  # anchors, lookarounds and anything zero-width
+            part = _Summary()
+        total = _Summary(total.chars | part.chars, total.nullable and part.nullable, total.quantified or part.quantified)
+    return total
+
+
+def _check_nesting(seq: Any, ignorecase: bool, dotall: bool) -> None:
+    """Reject a group repeated more than once that holds a quantifier, an
+    alternation or a body that can match the empty string."""
+    from re import _constants as sre  # type: ignore[attr-defined]
+
+    for op, av in seq:
+        if op in (sre.MAX_REPEAT, sre.MIN_REPEAT, sre.POSSESSIVE_REPEAT):
+            _low, high, body = av
+            if high > 1 and op is not sre.POSSESSIVE_REPEAT:
+                inner = _summarize(body, ignorecase, dotall)
+                if inner.quantified:
+                    raise _PatternTooSlow(
+                        "has a nested quantifier (a quantifier inside a repeated group), which can take exponential time"
+                    )
+                if inner.nullable:
+                    raise _PatternTooSlow(
+                        "has a nested quantifier (a repeated group that can match nothing), which can take exponential time"
+                    )
+            _check_nesting(body, ignorecase, dotall)
+        elif op is sre.SUBPATTERN:
+            _check_nesting(av[3], ignorecase, dotall)
+        elif op is sre.ATOMIC_GROUP:
+            _check_nesting(av, ignorecase, dotall)
+        elif op is sre.BRANCH:
+            for branch in av[1]:
+                _check_nesting(branch, ignorecase, dotall)
+        elif op in (sre.ASSERT, sre.ASSERT_NOT):
+            _check_nesting(av[1], ignorecase, dotall)
+
+
+_OVERLAP = (
+    "has overlapping repeated parts (such as \\s*\\s* or .*x.*), which take polynomial time on a long line; "
+    "patterns are searched anywhere in a line, so a leading or trailing .* is never needed"
+)
+
+
+def _scan(seq: Any, chain: list[tuple[frozenset[str], bool]], ignorecase: bool, dotall: bool) -> list[tuple[frozenset[str], bool]]:
+    """Walk a sequence, tracking the repeats that can still give text back.
+
+    *chain* holds (characters, open-ended) for every quantified part since the
+    last element that none of them can match. A new open-ended part that
+    overlaps an open-ended part in the chain means the engine can split the
+    same text between them in quadratically many ways.
+    """
+    from re import _constants as sre  # type: ignore[attr-defined]
+
+    def add(chars: frozenset[str], wide: bool) -> None:
+        overlapping = [entry for entry in chain if entry[0] & chars]
+        if wide and any(entry[1] for entry in overlapping):
+            raise _PatternTooSlow(_OVERLAP)
+        if len(overlapping) >= _MAX_OVERLAPPING_OPTIONALS:
+            raise _PatternTooSlow(_OVERLAP)
+        chain.append((chars, wide))
+
+    def mandatory(chars: frozenset[str]) -> None:
+        if not any(entry[0] & chars for entry in chain):
+            chain.clear()
+
+    for op, av in seq:
+        single = _chars(op, av, ignorecase, dotall)
+        if single is not None:
+            mandatory(single)
+        elif op in (sre.MAX_REPEAT, sre.MIN_REPEAT):
+            low, high, body = av
+            inner = _summarize(body, ignorecase, dotall)
+            if high > 1 and (high != low or high > _SMALL_FIXED_COUNT):
+                _scan(body, [], ignorecase, dotall)
+                add(inner.chars, True)
+            elif high == 1 and low == 0:
+                # An optional part: what it holds joins the chain.
+                chain[:] = _scan(body, list(chain), ignorecase, dotall) if inner.quantified else chain
+                add(inner.chars, False)
+            else:
+                for _ in range(max(low, 1) if not inner.quantified else 1):
+                    chain[:] = _scan(body, chain, ignorecase, dotall)
+        elif op is sre.POSSESSIVE_REPEAT or op is sre.ATOMIC_GROUP:
+            body = av[2] if op is sre.POSSESSIVE_REPEAT else av
+            _scan(body, [], ignorecase, dotall)
+            inner = _summarize(body, ignorecase, dotall)
+            if not inner.nullable:
+                mandatory(inner.chars)
+        elif op is sre.SUBPATTERN:
+            chain[:] = _scan(av[3], chain, ignorecase, dotall)
+        elif op is sre.BRANCH:
+            merged: list[tuple[frozenset[str], bool]] = []
+            for branch in av[1]:
+                for entry in _scan(branch, list(chain), ignorecase, dotall):
+                    if entry not in merged:
+                        merged.append(entry)
+            chain[:] = merged
+        elif op in (sre.ASSERT, sre.ASSERT_NOT):
+            _scan(av[1], [], ignorecase, dotall)
+        # anchors and other zero-width items neither add nor separate
+    return chain
+
+
+def _structure_problem(pattern: str) -> str | None:
+    try:
+        from re import _parser as sre_parse  # type: ignore[attr-defined]
+    except ImportError:  # pragma: no cover - CPython 3.11+ ships it
+        return None
+    tree = sre_parse.parse(pattern)
+    flags = tree.state.flags
+    ignorecase = bool(flags & re.IGNORECASE)
+    dotall = bool(flags & re.DOTALL)
+    try:
+        _check_nesting(tree, ignorecase, dotall)
+        _scan(tree, [], ignorecase, dotall)
+    except _PatternTooSlow as exc:
+        return str(exc)
+    except RecursionError:
+        return "is nested too deeply to check"
     return None
 
 
@@ -756,6 +982,7 @@ def check_custom_rules(
         return
     from .lint import Finding, _parse_date
 
+    deadline = time.monotonic() + PATTERN_BUDGET_SECONDS
     for note in notes:
         path = relative(note.path)
         rules = [rule for rule in policy.custom if _matches_scope(rule, note, path)]
@@ -807,9 +1034,17 @@ def check_custom_rules(
                         report(None, f"missing required section \"{section.strip()}\" ({rule.summary})")
             if not (rule.required or rule.forbidden):
                 continue
+            if time.monotonic() > deadline:
+                report(None, f"pattern checks did not run: this run's {PATTERN_BUDGET_SECONDS:g} s time budget for custom patterns is spent ({rule.summary})")
+                continue
             remaining_required = dict(rule.required)
             forbidden_hits: dict[str, int] = {}
+            stopped = False
             for number, text in lines:
+                if time.monotonic() > deadline:
+                    report(number, f"pattern checks stopped at this line: this run's {PATTERN_BUDGET_SECONDS:g} s time budget for custom patterns is spent ({rule.summary})")
+                    stopped = True
+                    break
                 if len(text) > MAX_LINE_CHARS:
                     report(number, f"line is longer than {MAX_LINE_CHARS} characters; pattern checks read only its first {MAX_LINE_CHARS} ({rule.summary})")
                     text = text[:MAX_LINE_CHARS]
@@ -820,6 +1055,8 @@ def check_custom_rules(
                 for source, compiled in rule.forbidden:
                     if source not in forbidden_hits and compiled.search(text):
                         forbidden_hits[source] = number
+            if stopped:
+                remaining_required = {}
             for source in remaining_required:
                 report(None, f"no line matches required pattern /{source}/ ({rule.summary})")
             for source, number in forbidden_hits.items():

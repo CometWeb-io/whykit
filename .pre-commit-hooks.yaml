@@ -18,7 +18,7 @@
   # Links, the evidence register and the decision log cross files, so the
   # whole vault is linted whenever a Markdown file or the policy changes.
   pass_filenames: false
-  files: (\.md|(^|/)whykit\.toml)$
+  files: (\.[mM][dD]|(^|/)whykit\.toml)$
   require_serial: true
   minimum_pre_commit_version: "3.2.0"
 
@@ -28,7 +28,7 @@
   entry: whykit history --staged
   language: python
   pass_filenames: false
-  files: (^|/)(06-decisions/.+\.md|00-context/review-log\.md)$
+  files: (^|/)(06-decisions/.+\.[mM][dD]|00-context/review-log\.md)$
   require_serial: true
   stages: [pre-commit]
   minimum_pre_commit_version: "3.2.0"

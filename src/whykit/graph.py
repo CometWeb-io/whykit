@@ -14,8 +14,8 @@ from pathlib import Path
 from .contract import emit_error, vault_not_found
 from .lint import (
     path_cache,
+    strip_markdown_suffix,
     DECISION_ID_RE,
-    WIKILINK_RE,
     evidence_register,
     find_vault_root,
     is_vault_root,
@@ -42,8 +42,7 @@ def document_node(note, node_id: str) -> dict:
 
 def wikilink_resolutions(note, vault_index: VaultIndex) -> Iterator[tuple[str, Path | None, bool]]:
     """Yield ``(target, resolved, ambiguous)`` for each wikilink outside code."""
-    for match in WIKILINK_RE.finditer(note.masked):
-        target = match.group(1).strip()
+    for target, _line, _embed in note.wikilink_hits:
         if not target or target.startswith(("http://", "https://")):
             continue
         resolved, ambiguous = vault_index.resolve_link(target)
@@ -72,7 +71,7 @@ def build_graph(
     duplicate_decisions: set[str] = set()
 
     def node_id(path: Path) -> str:
-        return vault_index.relative(path).removesuffix(".md")
+        return strip_markdown_suffix(vault_index.relative(path))
 
     for note in notes:
         value = str(note.front.get("decision_id") or "").strip()

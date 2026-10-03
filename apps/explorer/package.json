@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "prebuild": "npm run index",
     "build": "tsc --noEmit && vite build",
+    "build:single": "npm run index && tsc --noEmit && vite build --mode single",
     "check": "npm run index && npm run check:index && npm run typecheck && npm run lint && npm test && vite build",
     "check:index": "node scripts/check-index.mjs",
     "test": "node --test \"tests/*.test.ts\"",

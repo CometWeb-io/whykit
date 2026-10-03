@@ -33,7 +33,7 @@ from .contract import emit_error
 from .io import atomic_write_bytes, atomic_write_text, safe_vault_dir, safe_vault_target, vault_mutation_lock
 from .lint import (
     EVIDENCE_ID_RE, DECISION_ID_RE, WIKILINK_RE, _split_table_row,
-    Note, check_front_matter, find_vault_root, is_vault_root, load_note,
+    Note, check_front_matter, find_vault_root, is_markdown_name, is_vault_root, iter_markdown, load_note,
 )
 from .console import as_printed, emit_machine
 
@@ -126,15 +126,74 @@ def _has_front_matter(text: str) -> bool:
     return bool(FRONT_MATTER_RE.match(text.removeprefix("\ufeff")))
 
 
+HEADING_LINE_RE = re.compile(r"(?m)^\s{0,3}#{1,6}(?:\s.*)?$")
+HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])(?:\s+\[[ xX]?\])?\s*")
+# A line that only says the content is missing. Matched after list markers
+# and emphasis are removed, case-insensitively.
+PLACEHOLDER_LINE_RE = re.compile(
+    r"^(?:"
+    r"(?:todo|tbd|tba|fixme|xxx|wip)\b.*"
+    r"|n/?a|none|nothing yet|empty|placeholder|draft"
+    r"|(?:notes\s+)?(?:coming soon|to follow|to be (?:written|added|done|decided))"
+    r"|lorem ipsum\b.*"
+    r"|\.{2,}|…|-+|_+"
+    r")[\s.!:;…]*$",
+    re.I,
+)
+# `Date:` or `**Attendees:**` with nothing after it: a template field left blank.
+EMPTY_FIELD_RE = re.compile(r"^[\w][\w ./&()-]{0,40}:$")
+LINK_RE = re.compile(r"\[\[[^\]]+\]\]|\]\([^)]+\)|https?://\S+")
+WORD_RE = re.compile(r"\w{2,}|\d")
+# A short note is real content once it says this much: "Shipped the export."
+# is a note; a lone "Draft" under a heading is not.
+MIN_CONTENT_WORDS = 2
+STUB_MAX_CHARS = 4000
+
+
+def _content_words(text: str) -> int:
+    """Words a person wrote, not counting headings, placeholders and blank fields.
+
+    This is what separates a stub from a short note. A standup line, a one
+    sentence decision or a list of links is short but real; a heading followed
+    by ``TODO``, empty bullets or an unfilled template is not.
+    """
+    if len(text) > STUB_MAX_CHARS:
+        # Nobody writes kilobytes of placeholders; this also bounds the regexes.
+        return MIN_CONTENT_WORDS
+    text = HTML_COMMENT_RE.sub(" ", text)
+    words = 0
+    lines = HEADING_LINE_RE.sub("", text).splitlines()
+    for index, raw in enumerate(lines):
+        if words >= MIN_CONTENT_WORDS:
+            break
+        following = lines[index + 1].strip() if index + 1 < len(lines) else ""
+        if following.startswith("|") and set(following) <= set("|-: "):
+            continue  # a table header: column names are not content
+        line = LIST_MARKER_RE.sub("", raw.strip())
+        line = line.strip("|").strip()
+        if not line or set(line) <= set("|-: "):
+            continue
+        plain = re.sub(r"[*_`~>]+", "", line).strip()
+        if not plain or PLACEHOLDER_LINE_RE.match(plain) or EMPTY_FIELD_RE.match(plain):
+            continue
+        if LINK_RE.search(line):
+            # A bare link is a pointer somebody kept on purpose.
+            words += MIN_CONTENT_WORDS
+            continue
+        words += len(WORD_RE.findall(plain))
+    return words
+
+
 def _assess(text: str, *, profile: str, name: str) -> str:
     stripped = text.strip()
     if not stripped:
         return "empty"
-    body = re.sub(r"(?m)^#{1,6}\s+.*$", "", stripped).strip()
     # Short is not the same as empty: a terse ADR or a note somebody gave front
-    # matter is structured work, so only unstructured stubs are left behind.
+    # matter is structured work, and a two-line standup note is still a note.
+    # Only headings, placeholders and unfilled template fields are stubs.
     structured = _has_front_matter(text) or _looks_like_decision(name, text)
-    if len(body.split()) < 15 and not structured:
+    if not structured and _content_words(text) < MIN_CONTENT_WORDS:
         return "heading-only"
     if profile == "adr-only" and not _looks_like_decision(name, text):
         return "unsupported"
@@ -156,8 +215,8 @@ def scan(source: Path, *, profile: str = "generic") -> list[Candidate]:
     out: list[Candidate] = []
     # Real files first: a symlink is an alias, so it should be reported as the
     # duplicate of its target, never the other way round.
-    for path in sorted(source.rglob("*.md"), key=lambda p: (p.is_symlink(), p)):
-        if any(part in SKIP_DIRS for part in path.relative_to(source).parts):
+    for path in sorted(iter_markdown(source), key=lambda p: (p.is_symlink(), p)):
+        if not path.is_file() or any(part in SKIP_DIRS for part in path.relative_to(source).parts):
             continue
         if not _within(source, path):
             continue
@@ -203,7 +262,7 @@ def _vault_decision_ids(vault: Path) -> dict[str, str]:
     folder = vault / "06-decisions"
     if folder.is_symlink() or not folder.is_dir():
         return owners
-    for path in sorted(folder.glob("*.md")):
+    for path in sorted(child for child in folder.iterdir() if is_markdown_name(child.name)):
         if path.is_symlink() or not path.is_file():
             continue
         try:
@@ -502,11 +561,11 @@ def main(argv: list[str] | None = None) -> int:
         if path.is_file() and _within(source, path)
         and not any(part in SKIP_DIRS for part in path.relative_to(source).parts)
     ]
-    omitted = sorted(path.relative_to(source).as_posix() for path in visible_files if path.suffix != ".md")
+    omitted = sorted(path.relative_to(source).as_posix() for path in visible_files if not is_markdown_name(path.name))
     scanned = {candidate.relative for candidate in candidates}
     unreadable_markdown = sorted(
         path.relative_to(source).as_posix()
-        for path in visible_files if path.suffix == ".md"
+        for path in visible_files if is_markdown_name(path.name)
         and path.relative_to(source).as_posix() not in scanned
     )
     scope_note = (

@@ -107,3 +107,44 @@ td.decision-id,.timeline-meta .decision-id{white-space:nowrap}
 .doc-loading{margin:0 0 16px}
 @media(max-width:900px){.exposure-wrap{padding:14px 22px 0}}
 @media(max-width:540px){.exposure-wrap{padding:12px 16px 0}}
+
+/* Visual consistency: a section heading keeps the same gap above its content
+   as .section-head does, badges never break inside, dates stay on one line. */
+section>h2{margin-bottom:14px}
+.status,.sensitivity,.canonical{white-space:nowrap}
+td.mono{white-space:nowrap}
+
+/* Print: the record on paper (or saved as PDF), dark ink on white, without
+   the navigation, search and paging controls around it. Colour is kept to
+   thin borders so a monochrome printer loses nothing. */
+@media print{
+:root{color-scheme:light;--bg:#fff;--surface:#fff;--raised:#f4f3f0;--inset:#f7f6f3;--fg:#111;--muted:#3b3a36;--subtle:#504e48;--faint:#bdbab2;--border:#d3d0c8;--border2:#a8a59c;--fact:#4f6f4f;--hyp:#7a5f32;--rec:#4f5f70;--danger:#8c3b33;--ok:#4f6f4f;color:#111;background:#fff}
+html,body{background:#fff;color:#111}
+body{overflow:visible!important}
+header,.sidebar,.scrim,.skip,.overlay,.close-nav,.show-more,.search-field,.filters,.text-button,.button{display:none!important}
+main{margin-left:0;padding-top:0;min-height:0}
+.page,.page.wide{max-width:none;margin:0;padding:0}
+.exposure-wrap{padding:0 0 14px}
+.exposure{max-width:none;color:#111;background:none;border-color:var(--danger)}
+.notice{color:#111;background:none;border-color:var(--hyp)}
+h1{font-size:26pt}
+h2{font-size:17pt}
+.card h3{font-size:13pt}
+.lede{font-size:11pt}
+section{margin-top:22pt}
+.markdown{max-width:none;font-size:10.5pt;line-height:1.5}
+.markdown p,.markdown ul,.markdown ol,.decision-id,.canonical,.markdown code{color:#111}
+.markdown code{background:var(--raised)}
+.markdown a,.lineage a{text-decoration:underline;text-decoration-color:var(--border2)}
+.status,.sensitivity,.canonical{color:#333!important;border-color:var(--border2)!important;background:none!important}
+.chain-card,.card,.lineage,.callout,.notice,.exposure,.metric,.markdown blockquote,.markdown pre,tr,.finding,.doc-list>button,.relation{break-inside:avoid}
+h1,h2,h3,h4,.eyebrow{break-after:avoid}
+.table-wrap,.markdown pre{overflow:visible}
+.markdown pre{white-space:pre-wrap;overflow-wrap:anywhere}
+table{min-width:0}
+.cards.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.chain{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.chain-step.current .chain-card{border-color:#111;background:none}
+.relations{padding-top:18pt}
+}
+@page{margin:16mm 15mm}
