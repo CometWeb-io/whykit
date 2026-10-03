@@ -447,8 +447,13 @@ class InstallHooksTests(unittest.TestCase):
                 cwd=linked, text=True, encoding="utf-8", errors="replace", capture_output=True, check=True, timeout=30,
             ).stdout.strip()
             hook = Path(hooks) / "pre-commit"
-            self.assertTrue(hook.is_symlink())
-            self.assertEqual(hook.resolve(), (linked / "scripts" / "pre-commit").resolve())
+            source = linked / "scripts" / "pre-commit"
+            if hook.is_symlink():
+                self.assertEqual(hook.resolve(), source.resolve())
+            else:
+                # Git Bash on Windows without symlink rights makes `ln -s` copy the file.
+                self.assertEqual(os.name, "nt", "the hook should be a symlink on POSIX")
+                self.assertEqual(hook.read_bytes(), source.read_bytes())
 
 
 class ExplorerAutomationTests(unittest.TestCase):
