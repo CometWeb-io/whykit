@@ -170,7 +170,7 @@ class CompositeActionContractTests(unittest.TestCase):
                 record.unlink(missing_ok=True)
                 return subprocess.run(
                     ["bash", "-c", _action_step_script(step)],
-                    cwd=ROOT, env={**base_env, **env}, text=True, capture_output=True, timeout=30,
+                    cwd=ROOT, env={**base_env, **env}, text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=30,
                 )
 
             lint = "Lint the vault (legacy mode)"
@@ -231,13 +231,13 @@ class InstallHooksTests(unittest.TestCase):
             self.assertTrue((linked / ".git").is_file())
 
             result = subprocess.run(
-                ["sh", "scripts/install-hooks.sh"], cwd=linked, text=True,
+                ["sh", "scripts/install-hooks.sh"], cwd=linked, text=True, encoding="utf-8", errors="replace",
                 capture_output=True, timeout=30,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             hooks = subprocess.run(
                 ["git", "rev-parse", "--path-format=absolute", "--git-path", "hooks"],
-                cwd=linked, text=True, capture_output=True, check=True, timeout=30,
+                cwd=linked, text=True, encoding="utf-8", errors="replace", capture_output=True, check=True, timeout=30,
             ).stdout.strip()
             hook = Path(hooks) / "pre-commit"
             self.assertTrue(hook.is_symlink())

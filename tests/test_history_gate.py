@@ -109,7 +109,7 @@ class Repo:
 
     def git(self, *args: str, cwd: Path | None = None) -> str:
         return subprocess.run(
-            ["git", *args], cwd=cwd or self.top, check=True, capture_output=True, text=True,
+            ["git", *args], cwd=cwd or self.top, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
         ).stdout
 
     def write(self, relative: str, text: str) -> Path:
@@ -535,7 +535,7 @@ class NestedVaultTests(RepoTestCase):
         self.repo.commit()
         proc = subprocess.run(
             [sys.executable, str(SCRIPT), "history", "--base", self.base],
-            cwd=self.repo.vault, capture_output=True, text=True,
+            cwd=self.repo.vault, capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         self.assertIn("d-001-use-git.md", proc.stderr)

@@ -363,7 +363,7 @@ class ErrorObjectTests(unittest.TestCase):
     def test_end_to_end_through_the_console_script(self) -> None:
         result = subprocess.run(
             [sys.executable, str(CLI), "status", "--root", str(self.nowhere), "--json"],
-            text=True, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            text=True, encoding="utf-8", errors="replace", capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         self.assertEqual(result.returncode, 2)
         self.assertEqual(json.loads(result.stdout)["error"]["code"], "vault_not_found")

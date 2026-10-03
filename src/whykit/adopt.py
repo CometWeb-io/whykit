@@ -564,9 +564,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"under {vault}/.import-staging/ and create an ingestion record + MIGRATION.md.")
         return 0
 
-    print(f"\nStaged under {vault}/.import-staging/")
-    print(f"Ingestion record: {record.relative_to(vault) if record else '—'}")
-    print(f"Migration guide: {migration.relative_to(vault) if migration else '—'}")
+    print(f"\nStaged under {vault / '.import-staging'}{os.sep}")
+    print(f"Ingestion record: {record.relative_to(vault).as_posix() if record else '—'}")
+    print(f"Migration guide: {migration.relative_to(vault).as_posix() if migration else '—'}")
     print("Staging is gitignored on purpose. Normalize into a workstream before committing.")
     return 0
 

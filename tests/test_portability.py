@@ -49,7 +49,7 @@ def run(*args: str, env: dict[str, str] | None = None, cwd: Path | None = None) 
 def git(*args: str, cwd: Path) -> str:
     return subprocess.run(
         ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", *args],
-        cwd=cwd, check=True, capture_output=True, text=True, encoding="utf-8",
+        cwd=cwd, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
     ).stdout
 
 
@@ -184,28 +184,48 @@ class ConsoleEncodingTests(VaultCase):
 
     def test_harden_stream_replaces_instead_of_raising(self) -> None:
         raw = io.BytesIO()
-        stream = io.TextIOWrapper(raw, encoding="ascii", errors="strict")
+        stream = io.TextIOWrapper(raw, encoding="ascii", errors="strict", newline="\n")
         harden_stream(stream)
         stream.write("12 files — clean … → Ł\U0001f600\n")
         stream.flush()
         self.assertEqual(raw.getvalue(), b"12 files - clean ... -> \\u0141\\U0001f600\n")
 
     def test_harden_stream_keeps_a_users_explicit_choice(self) -> None:
-        stream = io.TextIOWrapper(io.BytesIO(), encoding="ascii", errors="replace")
+        stream = io.TextIOWrapper(io.BytesIO(), encoding="ascii", errors="replace", newline="\n")
         harden_stream(stream)
         self.assertEqual(stream.errors, "replace")
-        utf8 = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
+        utf8 = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict", newline="\n")
         harden_stream(utf8)
         self.assertEqual(utf8.errors, "strict")
 
-    def test_harden_stream_keeps_undecodable_file_names_byte_exact(self) -> None:
+    def test_harden_stream_escapes_undecodable_file_names(self) -> None:
+        # Not valid UTF-8: an ASCII console still gets ASCII, with the byte spelled out.
         raw = io.BytesIO()
-        stream = io.TextIOWrapper(raw, encoding="ascii", errors="surrogateescape")
+        stream = io.TextIOWrapper(raw, encoding="ascii", errors="surrogateescape", newline="\n")
         harden_stream(stream)
         name = b"caf\xe9.md".decode("ascii", "surrogateescape")
         stream.write(f"{name} — ok\n")
         stream.flush()
-        self.assertEqual(raw.getvalue(), b"caf\xe9.md - ok\n")
+        self.assertEqual(raw.getvalue(), b"caf\\xe9.md - ok\n")
+
+    def test_harden_stream_spells_c_locale_utf8_names_in_ascii(self) -> None:
+        # Under LC_ALL=C on Linux, argv and file names arrive as surrogates of UTF-8 bytes.
+        raw = io.BytesIO()
+        stream = io.TextIOWrapper(raw, encoding="ascii", errors="surrogateescape", newline="\n")
+        harden_stream(stream)
+        name = "nowhere — Łódź".encode().decode("ascii", "surrogateescape")
+        stream.write(f"{name}\n")
+        stream.flush()
+        self.assertEqual(raw.getvalue(), b"nowhere - \\u0141\\xf3d\\u017a\n")
+        raw.getvalue().decode("ascii")
+
+    def test_emit_machine_restores_c_locale_names_to_utf8(self) -> None:
+        raw = io.BytesIO()
+        stream = io.TextIOWrapper(raw, encoding="ascii", errors="surrogateescape", newline="\n")
+        name = "Łódź → vault".encode().decode("ascii", "surrogateescape")
+        emit_machine(json.dumps({"path": name}, ensure_ascii=False), file=stream)
+        stream.flush()
+        self.assertEqual(json.loads(raw.getvalue().decode("utf-8")), {"path": "Łódź → vault"})
 
     def test_emit_machine_writes_utf8_and_restores_the_stream(self) -> None:
         raw = io.BytesIO()

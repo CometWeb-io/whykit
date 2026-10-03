@@ -16,7 +16,7 @@ from whykit.scaffold import create_decision  # noqa: E402
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(CLI), *args], text=True, capture_output=True)
+    return subprocess.run([sys.executable, str(CLI), *args], text=True, encoding="utf-8", errors="replace", capture_output=True)
 
 
 class InitSafetyTests(unittest.TestCase):

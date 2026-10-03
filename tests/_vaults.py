@@ -42,7 +42,7 @@ def fresh_vault(destination: Path, *flags: str) -> dt.date:
         stamped = dt.date.today()
         result = subprocess.run(
             [sys.executable, str(CLI), "init", *flags, str(template)],
-            text=True, capture_output=True, timeout=60,
+            text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=60,
         )
         if result.returncode != 0:
             raise RuntimeError(f"whykit init {' '.join(flags)} failed: {result.stderr}")

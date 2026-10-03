@@ -10,7 +10,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "whykit.py"
 
 
 def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, text=True, capture_output=True)
+    return subprocess.run(args, cwd=cwd, text=True, encoding="utf-8", errors="replace", capture_output=True)
 
 
 class DecisionImmutabilityTests(unittest.TestCase):

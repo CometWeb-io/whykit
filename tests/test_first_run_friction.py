@@ -25,7 +25,7 @@ from whykit.cli import build_parser  # noqa: E402
 
 def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(CLI), *args], cwd=cwd, text=True, capture_output=True,
+        [sys.executable, str(CLI), *args], cwd=cwd, text=True, encoding="utf-8", errors="replace", capture_output=True,
     )
 
 

@@ -24,7 +24,7 @@ from _vaults import fresh_vault  # noqa: E402
 
 
 def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(CLI), *args], cwd=cwd, text=True, capture_output=True, timeout=30)
+    return subprocess.run([sys.executable, str(CLI), *args], cwd=cwd, text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=30)
 
 
 class AdvancedWorkflowTests(unittest.TestCase):
@@ -280,7 +280,7 @@ class AppendOnlyReviewHistoryTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(vault), "config", "user.name", "Test"], check=True)
             subprocess.run(["git", "-C", str(vault), "add", "."], check=True)
             subprocess.run(["git", "-C", str(vault), "commit", "-qm", "base"], check=True)
-            base = subprocess.run(["git", "-C", str(vault), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+            base = subprocess.run(["git", "-C", str(vault), "rev-parse", "HEAD"], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
 
             log = vault / "00-context/review-log.md"
             text = log.read_text(encoding="utf-8")
@@ -291,7 +291,7 @@ class AppendOnlyReviewHistoryTests(unittest.TestCase):
             allowed = run("history", "--root", str(vault), "--base", base, "--head", "HEAD")
             self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
 
-            base2 = subprocess.run(["git", "-C", str(vault), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+            base2 = subprocess.run(["git", "-C", str(vault), "rev-parse", "HEAD"], check=True, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
             log.write_text(log.read_text(encoding="utf-8").replace("confirmed", "archived", 1), encoding="utf-8")
             subprocess.run(["git", "-C", str(vault), "add", "."], check=True)
             subprocess.run(["git", "-C", str(vault), "commit", "-qm", "rewrite"], check=True)

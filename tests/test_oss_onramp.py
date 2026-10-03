@@ -17,7 +17,7 @@ from whykit.init_layout import removed_workstream_mentions  # noqa: E402
 
 
 def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(CLI), *args], cwd=cwd, text=True, capture_output=True, timeout=30)
+    return subprocess.run([sys.executable, str(CLI), *args], cwd=cwd, text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=30)
 
 
 class MinimalInitTests(unittest.TestCase):

@@ -295,7 +295,9 @@ def stage_transaction(root: Path, updates: Mapping[Path, str]) -> Path:
             "staged": staged_name,
             "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
         })
-    atomic_write_text(tx / "manifest.json", json.dumps(manifest, sort_keys=True, ensure_ascii=False))
+    # ASCII JSON: paths decoded under a C locale carry surrogates, which UTF-8
+    # cannot encode; json escapes round-trip them exactly.
+    atomic_write_text(tx / "manifest.json", json.dumps(manifest, sort_keys=True, ensure_ascii=True))
     atomic_write_text(tx / "READY", "1\n")
     return tx
 

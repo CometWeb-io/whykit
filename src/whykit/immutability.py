@@ -32,6 +32,15 @@ STATUS_VALUE_RE = re.compile(
 STATUS_KEY_RE = re.compile(r"(?m)^status\s*:")
 
 
+def _git_arg(value: str) -> str | bytes:
+    # Under a C/ASCII locale the interpreter cannot encode a non-ASCII argument
+    # for exec. Git treats paths as bytes, so hand them over as UTF-8 (argv
+    # surrogates turn back into their original bytes). Windows needs str.
+    if os.name == "nt" or value.isascii():
+        return value
+    return value.encode("utf-8", "surrogateescape")
+
+
 def git(*args: str, root: str | None = None) -> str:
     prefix = ["-C", root] if root else []
     # Decode as UTF-8 regardless of the locale: record names and contents are
@@ -39,7 +48,7 @@ def git(*args: str, root: str | None = None) -> str:
     # surrogateescape keeps invalid bytes distinct, so two different blobs
     # never compare equal after decoding, and paths round-trip back to Git.
     return subprocess.run(
-        ["git", *prefix, *args], check=True, capture_output=True,
+        [_git_arg(arg) for arg in ("git", *prefix, *args)], check=True, capture_output=True,
         text=True, encoding="utf-8", errors="surrogateescape",
     ).stdout
 

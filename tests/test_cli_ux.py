@@ -21,7 +21,7 @@ from whykit import __version__  # noqa: E402
 
 def run(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(CLI), *args], cwd=cwd, text=True, capture_output=True,
+        [sys.executable, str(CLI), *args], cwd=cwd, text=True, encoding="utf-8", errors="replace", capture_output=True,
         env={**os.environ, **(env or {})},
     )
 
@@ -284,7 +284,7 @@ t whykit graph --format d
 t whykit completion ""
 t whykit lint --today 2026 ""
 '''
-        result = subprocess.run(["bash", "-c", probe], text=True, capture_output=True)
+        result = subprocess.run(["bash", "-c", probe], text=True, encoding="utf-8", errors="replace", capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.splitlines()
         self.assertEqual(lines[0], "lint")
@@ -299,7 +299,7 @@ t whykit lint --today 2026 ""
         script = run("completion", "zsh").stdout
         result = subprocess.run(
             ["zsh", "-f", "-c", script + "\nprint -r -- ${_comps[whykit]}"],
-            text=True, capture_output=True,
+            text=True, encoding="utf-8", errors="replace", capture_output=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("_whykit", result.stdout)
@@ -307,7 +307,7 @@ t whykit lint --today 2026 ""
     @unittest.skipUnless(shutil.which("fish"), "fish is required")
     def test_fish_completion_parses(self) -> None:
         script = run("completion", "fish").stdout
-        result = subprocess.run(["fish", "--no-execute", "-c", script], text=True, capture_output=True)
+        result = subprocess.run(["fish", "--no-execute", "-c", script], text=True, encoding="utf-8", errors="replace", capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
 

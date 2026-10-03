@@ -109,7 +109,7 @@ class QuickstartTests(unittest.TestCase):
                 argv = [str(vault) if arg == "../my-ledger" else arg
                         for arg in shlex.split(line.removeprefix("uv run whykit "))]
                 result = subprocess.run([sys.executable, str(CLI), *argv], cwd=ROOT,
-                                        text=True, capture_output=True, timeout=60)
+                                        text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=60)
                 self.assertEqual(result.returncode, 0, f"{line}\n{result.stdout}{result.stderr}")
                 outputs.append(result.stdout)
             combined = "".join(outputs)
@@ -159,13 +159,13 @@ class VaultGitignoreTests(unittest.TestCase):
                                             capture_output=True).returncode, 0)
             created = subprocess.run(
                 [sys.executable, str(CLI), "new", "--root", str(vault), "decision", "Example", "--json"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
             )
             self.assertEqual(created.returncode, 0, created.stderr)
             self.assertTrue((vault / ".whykit" / "mutation.lock").exists())
             subprocess.run(["git", "init", "-q", str(vault)], check=True, capture_output=True)
             tracked = subprocess.run(["git", "-C", str(vault), "status", "--porcelain", "--untracked-files=all"],
-                                     check=True, capture_output=True, text=True).stdout
+                                     check=True, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
             self.assertNotIn(".whykit/", tracked)
             self.assertIn("06-decisions/d-001-example.md", tracked)
 

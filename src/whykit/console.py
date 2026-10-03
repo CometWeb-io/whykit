@@ -57,11 +57,19 @@ def _fallback(exc: UnicodeError) -> tuple[str | bytes, int]:
         raise exc
     chunk = exc.object[exc.start:exc.end]
     if all(0xDC80 <= ord(char) <= 0xDCFF for char in chunk):
-        # A POSIX file name that was not valid in the locale: write back the
-        # original bytes, as the interpreter's own surrogateescape would.
-        return bytes(ord(char) - 0xDC00 for char in chunk), exc.end
+        # A POSIX name that was not valid in the locale (C locale argv or file
+        # name). Usually the bytes are UTF-8: spell them like any other text so
+        # an ASCII console stays ASCII; bytes that are not UTF-8 become \xNN.
+        raw = bytes(ord(char) - 0xDC00 for char in chunk)
+        try:
+            chunk = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return "".join(f"\\x{byte:02x}" for byte in raw), exc.end
     pieces = []
     for char in chunk:
+        if char.isascii():
+            pieces.append(char)
+            continue
         replacement = ASCII_FALLBACKS.get(char)
         if replacement is None:
             code = ord(char)
@@ -137,7 +145,9 @@ def emit_machine(text: str, *, file: TextIO | None = None) -> None:
         return
     encoding, errors = stream.encoding, stream.errors
     stream.flush()
-    reconfigure(encoding="utf-8", errors="strict")
+    # surrogateescape turns C-locale argv/file-name surrogates back into the
+    # original (UTF-8) bytes, so the output matches a UTF-8 console byte for byte.
+    reconfigure(encoding="utf-8", errors="surrogateescape")
     try:
         print(text, file=stream)
         stream.flush()

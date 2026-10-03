@@ -22,7 +22,7 @@ from _vaults import fresh_vault  # noqa: E402
 
 
 def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(CLI), *args], cwd=cwd, text=True, capture_output=True)
+    return subprocess.run([sys.executable, str(CLI), *args], cwd=cwd, text=True, encoding="utf-8", errors="replace", capture_output=True)
 
 
 class InitTests(unittest.TestCase):
@@ -536,7 +536,7 @@ class ContractTests(unittest.TestCase):
 
         def git(vault: Path, *args: str) -> str:
             result = subprocess.run(
-                ["git", *args], cwd=vault, text=True, capture_output=True, check=True
+                ["git", *args], cwd=vault, text=True, encoding="utf-8", errors="replace", capture_output=True, check=True
             )
             return result.stdout.strip()
 
@@ -556,7 +556,7 @@ class ContractTests(unittest.TestCase):
                 PR_BASE_SHA=pr_base,
             )
             return subprocess.run(
-                ["bash", str(script)], cwd=vault, env=env, text=True, capture_output=True
+                ["bash", str(script)], cwd=vault, env=env, text=True, encoding="utf-8", errors="replace", capture_output=True
             )
 
         with tempfile.TemporaryDirectory() as td:
