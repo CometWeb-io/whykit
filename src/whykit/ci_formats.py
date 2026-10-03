@@ -95,8 +95,13 @@ def _fingerprint(code: str, path: str, message: str) -> str:
     return digest.hexdigest()
 
 
+def is_custom(code: str) -> bool:
+    """A team rule from whykit.toml; it has no entry in ``docs/rules.md``."""
+    return code.startswith("custom.")
+
+
 def _sarif_rule(rule: Rule) -> dict[str, Any]:
-    return {
+    entry: dict[str, Any] = {
         "id": rule.code,
         "shortDescription": {"text": rule.summary},
         "fullDescription": {"text": rule.why},
@@ -108,15 +113,62 @@ def _sarif_rule(rule: Rule) -> dict[str, Any]:
         "defaultConfiguration": {"level": rule.default_level},
         "properties": {"tags": ["whykit", rule.code.split(".", 1)[0]]},
     }
+    if is_custom(rule.code):
+        del entry["helpUri"]
+    if rule.security:
+        entry["properties"]["tags"].append("security")
+    return entry
 
 
-def to_sarif(findings: Iterable[Mapping[str, Any]], root: Path, *, files: int) -> dict[str, Any]:
-    """Render lint findings (``asdict(Finding)`` mappings) as one SARIF log."""
+def _custom_catalog(root: Path) -> list[Rule]:
+    """Catalog entries for the vault's own custom rules (none if the policy is invalid)."""
+    from .config import ConfigError, load_config
+    from .rule_policy import policy_from_config
+
+    try:
+        config, _ = load_config(root)
+    except ConfigError:
+        return []
+    return [
+        Rule(rule.code, rule.level, rule.summary, rule.why, rule.fix)
+        for rule in policy_from_config(config).custom
+    ]
+
+
+def to_sarif(
+    findings: Iterable[Mapping[str, Any]],
+    root: Path,
+    *,
+    files: int,
+    overrides: Iterable[Any] = (),
+) -> dict[str, Any]:
+    """Render lint findings (``asdict(Finding)`` mappings) as one SARIF log.
+
+    Findings that a security-relevant override switched off are included as
+    results carrying an external ``suppressions`` entry with the policy's
+    reason, so a code-scanning dashboard shows them as suppressed instead of
+    never learning they existed.
+    """
+    from dataclasses import asdict
+
     base, prefix = source_root(root)
+    findings = list(findings)
+    overrides = list(overrides)
+    suppressed: list[tuple[Mapping[str, Any], str]] = []
+    for entry in overrides:
+        if entry.security:
+            suppressed.extend((asdict(item), entry.reason or "") for item in entry.suppressed)
     rules = list(RULES)
+    codes = {f["code"] for f in findings} | {f["code"] for f, _ in suppressed}
+    if any(is_custom(code) for code in codes):
+        rules.extend(_custom_catalog(root))
     index = {rule.code: position for position, rule in enumerate(rules)}
     results: list[dict[str, Any]] = []
-    ordered = sorted(findings, key=lambda f: (f["path"], f["line"] or 0, f["code"], f["message"]))
+    justification = {id(f): reason for f, reason in suppressed}
+    ordered = sorted(
+        [*findings, *(f for f, _ in suppressed)],
+        key=lambda f: (f["path"], f["line"] or 0, f["code"], f["message"]),
+    )
     for finding in ordered:
         code = finding["code"]
         if code not in index:
@@ -132,16 +184,19 @@ def to_sarif(findings: Iterable[Mapping[str, Any]], root: Path, *, files: int) -
         }
         if finding["line"]:
             location["physicalLocation"]["region"] = {"startLine": int(finding["line"])}
-        results.append({
+        result: dict[str, Any] = {
             "ruleId": code,
             "ruleIndex": index[code],
             "level": _level(finding),
             "message": {"text": finding["message"]},
             "locations": [location],
             "partialFingerprints": {FINGERPRINT_KEY: _fingerprint(code, path, finding["message"])},
-        })
+        }
+        if id(finding) in justification:
+            result["suppressions"] = [{"kind": "external", "justification": justification[id(finding)]}]
+        results.append(result)
     base_uri = base.resolve().as_uri()
-    return {
+    log: dict[str, Any] = {
         "$schema": SARIF_SCHEMA_URI,
         "version": SARIF_VERSION,
         "runs": [{
@@ -159,6 +214,20 @@ def to_sarif(findings: Iterable[Mapping[str, Any]], root: Path, *, files: int) -
             "properties": {"contract_version": 1, "files": files, "vault_prefix": prefix},
         }],
     }
+    # A security rule lowered by policy, or a secret scan switched off, is
+    # part of what the log means: say so as a configuration notification.
+    notices = [
+        {
+            "level": "note",
+            "message": {"text": f"whykit.toml policy: {entry.describe()}" if not entry.skipped_by else entry.describe()},
+            "descriptor": {"id": entry.rule},
+        }
+        for entry in overrides
+        if entry.security
+    ]
+    if notices:
+        log["runs"][0]["invocations"] = [{"executionSuccessful": True, "toolConfigurationNotifications": notices}]
+    return log
 
 
 def _escape_data(value: str) -> str:
@@ -189,10 +258,23 @@ def github_annotations(findings: Iterable[Mapping[str, Any]], root: Path) -> lis
     return [
         workflow_command(
             _level(finding),
-            f"{finding['message']} ({rule_help_uri(finding['code'])})",
+            finding["message"] if is_custom(finding["code"]) else f"{finding['message']} ({rule_help_uri(finding['code'])})",
             file=_source_path(finding["path"], prefix),
             line=finding["line"],
             title=f"WhyKit {finding['code']}",
         )
         for finding in ordered
+    ]
+
+
+def override_notices(overrides: Iterable[Any]) -> list[str]:
+    """One ``::notice`` per security-relevant override, so CI logs show it."""
+    return [
+        workflow_command(
+            "notice",
+            entry.describe() if entry.skipped_by else f"whykit.toml policy: {entry.describe()}",
+            title="WhyKit policy",
+        )
+        for entry in overrides
+        if entry.security
     ]

@@ -323,7 +323,7 @@ class CLocaleArgumentTests(VaultCase):
         title = "Zażółć gęślą jaźń".encode().decode("ascii", "surrogateescape")
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["new", "--root", str(vault), "decision", title]), 0)
-        records = sorted((vault / "06-decisions").glob("d-*-zazoc-gesla-jazn.md"))
+        records = sorted((vault / "06-decisions").glob("d-*-zazolc-gesla-jazn.md"))
         self.assertEqual(len(records), 1, sorted(p.name for p in (vault / "06-decisions").iterdir()))
         self.assertIn("Zażółć gęślą jaźń", records[0].read_text(encoding="utf-8"))
 

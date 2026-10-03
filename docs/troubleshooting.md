@@ -93,7 +93,8 @@ The scanner is heuristic and errs toward flagging. Rewrite the example so it doe
 not look like a credential (use obviously fake values and reserved domains such
 as `example.com`). If a real credential was committed, rotating it matters more
 than removing the line: Git history keeps it. `whykit lint --no-secrets` turns
-the scan off for one run; do not make that your CI default.
+the scan off for one run, and every such run reports that it skipped the scan;
+do not make that your CI default.
 
 ## Decision history
 

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/context-bundle.schema.json",
+  "title": "WhyKit multi-record context bundle",
+  "type": "object",
+  "required": ["format", "contract_version", "resolved", "missing", "contexts", "evidence", "budget"],
+  "properties": {
+    "format": {"const": "whykit.context-bundle/v1"},
+    "contract_version": {"const": 1},
+    "query": {"type": ["string", "null"]},
+    "canonical_only": {"type": "boolean"},
+    "agent": {"enum": ["generic", "cursor", "claude", "codex"]},
+    "preamble": {"type": "string"},
+    "content_trust": {"const": "untrusted_data"},
+    "requested_targets": {"type": "array", "items": {"type": "string"}},
+    "selected": {"type": "array", "items": {"type": "string"}},
+    "resolved": {"type": "integer", "minimum": 0},
+    "missing": {"type": "array", "items": {"type": "object"}},
+    "contexts": {"type": "array", "items": {"type": "object"}},
+    "evidence": {"type": "array", "items": {"type": "object"}},
+    "budget": {
+      "type": "object",
+      "required": ["max_docs", "max_chars", "used_chars", "remaining_chars", "exhausted"]
+    }
+  },
+  "additionalProperties": false
+}

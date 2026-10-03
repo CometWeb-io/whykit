@@ -89,3 +89,35 @@ the test suite fails if it drifts.
 | <a name="wikilink.missing"></a>`wikilink.missing` | error | A wikilink cannot be resolved. | Fix the target or remove the stale link. |
 | <a name="wikilink.outside"></a>`wikilink.outside` | warning | A wikilink tries to traverse outside the vault. | Copy/register the source inside the vault or record an external location as evidence. |
 <!-- rules:end -->
+
+## Team rules and overrides
+
+A vault can add its own rules and retune the built-in ones in `whykit.toml`
+without forking WhyKit; [Configuration](configuration.md#team-rules) has the
+reference. Custom rule codes always start with `custom.`, and their findings
+travel through `lint`, `check`, SARIF and GitHub annotations like any other
+code. `whykit rules --root <vault>` lists them after the built-in catalog, and
+`whykit rules --root <vault> --markdown` appends them (and the overrides) to
+the table above, so a team can publish its own rule page the same way.
+
+These rules are security-relevant: a vault may raise them, but lowering one
+to a warning or switching it off requires a written `reason`, and every such
+override is printed with each `lint` and `check` run, listed in the JSON
+`overrides` array with the findings it suppressed, kept in SARIF as a
+suppressed result, and annotated as a `::notice` in GitHub format:
+
+- `markdown_link.outside`
+- `secret.detected`
+- `secret.scan_non_utf8`
+- `secret.scan_skipped_large_file`
+- `secret.scan_unreadable`
+- `sensitivity.invalid`
+- `wikilink.outside`
+
+Switching the whole secret scan off, with `whykit lint --no-secrets` or a
+profile's `secrets = false`, is reported the same way: an `overrides` entry
+for `secret.*` with a `skipped_by` key, a printed `policy:` line, a SARIF
+configuration notification and a `::notice`.
+
+`config.invalid` cannot be overridden at all: it is how a broken policy is
+reported.

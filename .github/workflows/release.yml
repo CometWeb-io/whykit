@@ -13,90 +13,16 @@ jobs:
     permissions:
       contents: read
 
-  # Build and verify without any publishing credential. The publish job below
-  # holds the OIDC token, and it only ever sees the archives checked here.
+  # Build and verify without any publishing credential, in the same job that
+  # every pull request runs as a dry run. The publish job below holds the OIDC
+  # token, and it only ever sees the archives checked there.
   build:
     needs: quality
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    uses: ./.github/workflows/release-build.yml
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: "0.12.17"
-          python-version: "3.12"
-          # Never restore a cache into the job that builds the published
-          # artifact: a cache written by another ref could poison it.
-          enable-cache: false
-      - run: uv sync --locked --no-dev
-      - name: Verify release provenance
-        run: |
-          set -euo pipefail
-          git fetch origin main --no-tags
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "Release tag does not point to a commit reachable from main" >&2
-            exit 1
-          fi
-      - name: The tag must match the package version
-        run: |
-          set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
-          version=$(uv run python -c "import re,pathlib; print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('src/whykit/__init__.py').read_text()).group(1))")
-          if [ "$tag" != "$version" ]; then
-            echo "tag $tag does not match __version__ $version" >&2
-            exit 1
-          fi
-      - name: Build reproducibly, twice
-        run: |
-          set -euo pipefail
-          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
-          export SOURCE_DATE_EPOCH
-          uv build --out-dir dist
-          uv build --out-dir "$RUNNER_TEMP/dist-rebuild"
-      - name: Check the distributions
-        run: |
-          set -euo pipefail
-          python3 scripts/check_dist.py dist --reproducible-against "$RUNNER_TEMP/dist-rebuild"
-          uv run --locked --only-group dist twine check --strict dist/*
-      - name: Generate the CycloneDX SBOM from a clean wheel install
-        run: |
-          set -euo pipefail
-          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
-          export SOURCE_DATE_EPOCH
-          uv venv --python "3.11" "$RUNNER_TEMP/wheel-venv"
-          uv pip install --python "$RUNNER_TEMP/wheel-venv/bin/python" dist/*.whl
-          "$RUNNER_TEMP/wheel-venv/bin/whykit" --version
-          uv run --locked --only-group dist cyclonedx-py environment \
-            --sv 1.6 --output-reproducible --of JSON \
-            -o "$RUNNER_TEMP/whykit.cdx.json" "$RUNNER_TEMP/wheel-venv/bin/python"
-          python3 scripts/check_dist.py dist --sbom "$RUNNER_TEMP/whykit.cdx.json"
-          mkdir -p sbom
-          cp "$RUNNER_TEMP/whykit.cdx.json" sbom/
-      - name: Record the archive digests in the run summary
-        run: |
-          set -euo pipefail
-          {
-            echo '```'
-            (cd dist && sha256sum -- *)
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-      # Only the wheel and sdist go to PyPI; the SBOM travels separately so the
-      # publish action never sees a file it would reject.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-distributions
-          path: dist/
-          if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-sbom
-          path: sbom/
-          if-no-files-found: error
+    with:
+      release: true
 
   publish:
     needs: build

@@ -1,13 +1,53 @@
+// Write the two files the Explorer bundles:
+//   src/generated/vault.json   the summary, part of the main bundle
+//   src/generated/bodies.json  every note body, a chunk loaded after first paint
+//
+// By default the full index comes from `whykit explorer-index` for
+// $WHYKIT_VAULT_DIR. `--from <file>` splits an index that was already written
+// (the end-to-end build uses it for a synthetic vault).
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { splitIndex } from "../src/lib/split.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = resolve(HERE, "..");
 const REPO = resolve(APP, "../..");
 const VAULT = resolve(process.env.WHYKIT_VAULT_DIR || resolve(REPO, "examples/northline"));
 const OUT = resolve(APP, "src/generated/vault.json");
+const BODIES = resolve(APP, "src/generated/bodies.json");
+const SENSITIVE = new Set(["confidential", "restricted"]);
+
+const fromAt = process.argv.indexOf("--from");
+const FROM = fromAt > 0 ? process.argv[fromAt + 1] : undefined;
+if (fromAt > 0 && !FROM) {
+  console.error("--from needs a file");
+  process.exit(2);
+}
+
+function write(payload, label) {
+  const { summary, bodies } = splitIndex(payload);
+  mkdirSync(dirname(OUT), { recursive: true });
+  writeFileSync(OUT, JSON.stringify(summary) + "\n");
+  writeFileSync(BODIES, JSON.stringify(bodies) + "\n");
+  console.log(
+    `Indexed ${payload.docs.length} docs, ${payload.evidence.length} evidence rows, ` +
+    `${payload.decisions.length} decisions, ${payload.reviews.length} review events from ${label}`,
+  );
+  const sensitive = payload.docs.filter(d => SENSITIVE.has(String(d.sensitivity).toLowerCase()));
+  if (sensitive.length) {
+    console.warn(
+      `warning: this build includes ${sensitive.length} confidential or restricted note(s). ` +
+      "Explorer has no access control; serve the build only behind your own authentication.",
+    );
+  }
+}
+
+if (FROM) {
+  write(JSON.parse(readFileSync(resolve(FROM), "utf8")), FROM);
+  process.exit(0);
+}
 
 if (!existsSync(resolve(VAULT, "Home.md"))) {
   console.error(`Not a WhyKit vault: ${VAULT}`);
@@ -53,10 +93,4 @@ try {
   process.exit(err?.status || 1);
 }
 
-const payload = JSON.parse(raw);
-mkdirSync(dirname(OUT), { recursive: true });
-writeFileSync(OUT, JSON.stringify(payload, null, 2) + "\n");
-console.log(
-  `Indexed ${payload.docs.length} docs, ${payload.evidence.length} evidence rows, ` +
-  `${payload.decisions.length} decisions, ${payload.reviews.length} review events from ${VAULT}`,
-);
+write(JSON.parse(raw), VAULT);

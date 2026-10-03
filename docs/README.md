@@ -57,6 +57,7 @@ Exact behaviour, checked against the code by the test suite.
 |---|---|
 | [Troubleshooting and FAQ](troubleshooting.md) | Error messages, surprising results and quick answers |
 | [Performance](performance.md) | Measured times on large vaults and how to reproduce them |
+| [Migrating to 0.3](migration-0.3.md) | Upgrading a vault, scripts and CI from 0.2.0 or the 0.3.0 preview |
 | [Releasing](releasing.md) | The package release checklist and reproducible builds |
 | [Security policy](../SECURITY.md) | Reporting a vulnerability and keeping a real vault private |
 | [Contributing](../CONTRIBUTING.md) | Repository layout, checks to run and how docs are tested |

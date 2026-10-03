@@ -4,7 +4,8 @@
 //   e2e/.build/synthetic  a 5,000-note synthetic vault (performance, policy)
 // The synthetic vault comes from tests/synthetic_vault.py and deliberately
 // carries lint errors, which `whykit explorer-index` refuses; its index is
-// therefore built by calling the same Python function without the lint gate.
+// therefore built by calling the same Python function without the lint gate,
+// then split into summary and bodies by the same script as every other build.
 // The empty vault is built first so src/generated/vault.json is left holding
 // the example index that `npm run dev` and `npm run build` expect.
 import { execFileSync } from "node:child_process";
@@ -38,9 +39,10 @@ function buildSynthetic(name, vaultDir) {
     "from whykit.explorer_index import build_explorer_index",
     `root = generate(Path(${JSON.stringify(vaultDir)}), ${SYNTHETIC_NOTES}).resolve()`,
     "payload = build_explorer_index(root, today=dt.date.fromisoformat(AS_OF))",
-    `Path(${JSON.stringify(resolve(APP, "src/generated/vault.json"))}).write_text(json.dumps(payload), encoding='utf-8')`,
+    `Path(${JSON.stringify(join(vaultDir, "..", "synthetic-index.json"))}).write_text(json.dumps(payload), encoding='utf-8')`,
   ].join("\n");
   run(PYTHON, ["-c", code]);
+  run(process.execPath, ["scripts/build-vault-index.mjs", "--from", join(vaultDir, "..", "synthetic-index.json")]);
   run(process.execPath, [resolve(APP, "node_modules/vite/bin/vite.js"), "build", "--outDir", join(OUT, name), "--emptyOutDir"]);
 }
 

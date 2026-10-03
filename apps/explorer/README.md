@@ -17,7 +17,7 @@ without it, and the CI job that builds it is non-blocking.
 | Evidence | The register, including retired rows, with a filter |
 | Freshness | Each active source's access age against the `[evidence_access_age_days]` windows in `whykit.toml` (stale, due soon, fresh), and which notes in force still cite retired sources |
 | Reviews | What is due within 30 days and the recorded review events |
-| Graph | Notes grouped by workstream and connected by resolved wikilinks; click a note to select it and inspect its links, press Enter or double-click to open it |
+| Graph | Notes grouped by workstream and connected by resolved wikilinks; click a note to select it and inspect its links, press Enter or double-click to open it. From the keyboard the graph is one Tab stop (a listbox with a roving tabindex): arrow keys move between notes, Home and End jump to the first and last, typing the start of a title moves to it, Space selects and Enter opens |
 | Health | Lint errors and warnings, the status mix, and what the checks cannot tell you |
 
 Press <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd> anywhere to search titles,
@@ -62,9 +62,8 @@ WHYKIT_VAULT_DIR=../../../my-ledger npm run dev   # any other vault
 
 ## The index
 
-Explorer renders `src/generated/vault.json`. `npm run index` writes that file
-by calling the canonical Python implementation, so front matter and tables are
-parsed in only one place:
+`npm run index` builds the index by calling the canonical Python
+implementation, so front matter and tables are parsed in only one place:
 
 ```bash
 uv run whykit explorer-index --root examples/northline --today 2026-09-17
@@ -74,8 +73,20 @@ The command prints the index as JSON. It contains every document's metadata and
 body, the evidence IDs each note cites, the evidence, decision and review rows,
 the freshness policy from `whykit.toml`, and the lint report. If the vault
 has lint errors the command fails, and Explorer will not build from an invalid
-vault. `npm run check:index` also rejects an index that includes an absolute
-path from the build machine.
+vault.
+
+`npm run index` then splits that index in two, because note bodies are most
+of it (about 6.5 MB of 10 MB at 5,000 notes) and only the document view and
+full-text search read them:
+
+| File | Loaded | Contents |
+|---|---|---|
+| `src/generated/vault.json` | bundled, before the first paint | everything except bodies, plus each note's resolved links (computed at build time by the same resolver the browser uses) and its count of review cues |
+| `src/generated/bodies.json` | fetched after the first paint, or at once for a link to a note or an open search | every note body, keyed by note id |
+
+Until the bodies arrive, search matches titles, ids, tags and summaries and
+says so. `npm run check:index` checks that the two files match note for note
+and rejects either one if it includes an absolute path from the build machine.
 
 Set `WHYKIT_VAULT_DIR` to choose the vault and `PYTHON` to choose the
 interpreter (default `python3`).
@@ -87,17 +98,31 @@ cd apps/explorer
 WHYKIT_VAULT_DIR=/path/to/vault npm run build
 ```
 
-`dist/` is then a self-contained static site. Routing uses the URL fragment
-(`#view=decisions`, `#doc=06-decisions%2Fd-010-direct`) and asset URLs are
-relative, so you can serve the folder from a domain root, a sub-path such as a
-GitHub Pages project site, or any static file server, without rewrite rules.
-To preview the production build locally, run `npx vite preview`.
+`dist/` is then a self-contained static site: `index.html` plus an `assets/`
+folder holding the script, the stylesheet and the note bodies. Routing uses the
+URL fragment (`#view=decisions`, `#doc=06-decisions%2Fd-010-direct`) and every
+URL, the note bodies included, is relative, so you can serve the folder from a
+domain root, a sub-path such as a GitHub Pages project site, or any static file
+server, without rewrite rules. Opening `index.html` straight from disk does not
+work, because browsers do not run module scripts from `file://`. To preview the
+production build locally, run `npx vite preview`.
+
+The page carries a Content Security Policy in a `<meta>` tag:
+`default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;
+font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none';
+form-action 'none'`. The build has no inline script or style element and loads
+nothing from another origin. If your host can set response headers, send the
+same policy as a header and add `frame-ancestors 'none'` (or the origins
+allowed to embed it), which a `<meta>` tag cannot carry. The dev server is left
+without the policy because it injects inline scripts.
 
 > [!WARNING]
 > The build contains the full text of every document in the vault,
 > including `internal`, `confidential` and `restricted` notes. Explorer has no
 > access control. Publish a build only when every document in the vault is
 > meant to be public. Otherwise, serve it behind your own authentication.
+> When the vault has `confidential` or `restricted` notes, `npm run index`
+> prints a warning and every page of the build shows a banner with their count.
 
 ## Checks
 
@@ -115,14 +140,18 @@ and covers:
 
 - navigation and focus management
 - the search dialog's keyboard flow
-- keyboard access to the graph
+- keyboard access to the graph: one Tab stop, arrow keys, Home and End,
+  type-ahead, Space to select, Enter to open, also at 5,000 notes
 - the D-009 → D-010 → D-011 supersession chain
 - the timeline and freshness views, including policy windows and retired citations
 - deep links: every filter, selection and search query survives a reload
 - graph labels: wrapped and ellipsized by measured width, never past the node
-- performance on the synthetic vault: time to interactive, search latency,
-  view switches and graph highlight, each against a budget (`e2e/perf.spec.ts`
-  prints the measured numbers)
+- performance on the synthetic vault: time to interactive, time to a
+  deep-linked note's text, search latency, view switches and graph highlight,
+  each against a budget (`e2e/perf.spec.ts` prints the measured numbers)
+- the static build: the CSP holds on every view with no violation, the build
+  works from a sub-path (note bodies included), the note bodies are not in the
+  entry bundle, and the sensitive-content banner appears exactly when it should
 - empty states
 - an axe-core scan that must report zero serious or critical violations
 - a phone viewport

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { open, PAGES, seriousViolations } from "./helpers.ts";
+import { SYNTHETIC_URL } from "./ports.ts";
 
 async function horizontalOverflow(page: Page): Promise<number> {
   return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -29,6 +30,16 @@ test("Escape and the close button both dismiss the drawer", async ({ page }) => 
   await toggle.click();
   await page.locator(".close-nav").click();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
+});
+
+test("the sensitive-content warning fits a phone", async ({ page }) => {
+  await open(page, "", SYNTHETIC_URL);
+  const note = page.getByRole("note", { name: "Sensitive content in this build" });
+  await expect(note).toBeVisible();
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+  const box = await note.boundingBox();
+  expect(box!.x).toBeGreaterThanOrEqual(12);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width - 12);
 });
 
 test("no page scrolls horizontally on a phone", async ({ page }) => {

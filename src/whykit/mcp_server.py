@@ -5,23 +5,36 @@ WhyKit package stays dependency-free; this module imports ``mcp`` only when the
 server is started.
 
 The tool logic lives in :class:`VaultTools`, which has no SDK dependency, so its
-validation and sensitivity rules are tested in every CI job. :func:`build_server`
-is a thin adapter that registers those handlers with the SDK and turns each
-outcome into a ``CallToolResult``.
+validation and sensitivity rules are tested in every CI job. So do the output
+schemas, the page cursors (:class:`CursorCodec`), completions and the change
+watcher (:class:`VaultWatcher`). :func:`build_server` is a thin adapter that
+registers those handlers with the SDK and turns each outcome into a
+``CallToolResult``.
 
 Every tool is read-only. None of them writes to the vault, takes a lock, runs
-Git or reaches the network.
+Git or reaches the network. The server listens on stdio, or with ``--http`` on
+a loopback port (a non-loopback address requires a bearer token).
 """
 # No ``from __future__ import annotations`` here: the SDK builds each tool's
 # input schema from its parameter annotations, and the tool functions are
 # closures whose ``Annotated[..., Field(...)]`` metadata must be real objects.
 
 import argparse
+import base64
+import copy
 import datetime as dt
+import functools
+import hashlib
+import hmac
 import inspect
+import ipaddress
 import json
+import os
 import re
+import secrets
 import sys
+import time
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +59,18 @@ RESOURCE_BODY_CHARS = 20_000
 PROMPT_BODY_CHARS = 12_000
 PROMPT_TRACE_DECISIONS = 50
 
+MAX_CURSOR_CHARS = 128
+RESOURCE_PAGE_SIZE = 100
+MAX_COMPLETIONS = 100
+DEFAULT_WATCH_INTERVAL = 2.0
+DEFAULT_HTTP_HOST = "127.0.0.1"
+DEFAULT_HTTP_PORT = 8000
+TOKEN_ENV = "WHYKIT_MCP_TOKEN"
+MIN_TOKEN_CHARS = 32
+
 TOOL_NAMES = ("query", "context", "impact", "status", "pack", "trace", "backlinks")
+RECORD_TEMPLATE = "whykit://record/{+target}"
+DECISIONS_URI = "whykit://decisions"
 
 SERVER_INSTRUCTIONS = (
     "Read-only access to one WhyKit vault: Markdown evidence (E-NNN), decisions "
@@ -336,6 +360,199 @@ def _missing_impact(target: str, kind: object) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Output schemas
+# ---------------------------------------------------------------------------
+
+# The CLI's JSON contract (``schemas/``) that each tool's structured result
+# extends. The wheel does not ship ``schemas/``, so byte-identical copies live
+# in ``whykit/contract_schemas/``; a test keeps the two in sync.
+TOOL_BASE_SCHEMAS: dict[str, str] = {
+    "query": "query-result.schema.json",
+    "context": "context-pack.schema.json",
+    "impact": "impact-report.schema.json",
+    "status": "status-report.schema.json",
+    "pack": "context-bundle.schema.json",
+    "trace": "trace-report.schema.json",
+    "backlinks": "backlinks-report.schema.json",
+}
+
+_CEILING_SCHEMA = {
+    "description": "The server's sensitivity ceiling; records above it are treated as nonexistent.",
+    "enum": list(SENSITIVITY_LEVEL),
+}
+_NEXT_CURSOR_SCHEMA = {
+    "description": "Opaque cursor for the next page; pass it back as `cursor` with the same "
+    "arguments. Null on the last page.",
+    "type": ["string", "null"],
+}
+_TRUNCATED_SCHEMA = {
+    "description": "Whether more items exist after this page.",
+    "type": "boolean",
+}
+
+
+def _load_contract_schema(name: str) -> dict[str, Any]:
+    path = Path(__file__).with_name("contract_schemas") / name
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _extend(schema: dict[str, Any], title: str, required: Iterable[str] = (), **properties: Any) -> dict[str, Any]:
+    schema["title"] = title
+    schema["description"] = f"Structured result of the `{title.split()[-1]}` MCP tool."
+    schema["properties"].update(properties)
+    schema["required"] = sorted(set(schema["required"]) | set(required), key=list(schema["properties"]).index)
+    return schema
+
+
+@functools.cache
+def _output_schemas() -> dict[str, dict[str, Any]]:
+    schemas: dict[str, dict[str, Any]] = {}
+    for tool, name in TOOL_BASE_SCHEMAS.items():
+        schema = _load_contract_schema(name)
+        # The `$id` names the CLI contract; this is a derived document.
+        schema.pop("$id", None)
+        schemas[tool] = schema
+
+    paged = {"next_cursor": _NEXT_CURSOR_SCHEMA, "max_sensitivity": _CEILING_SCHEMA}
+    _extend(schemas["query"], "WhyKit MCP query", ("max_sensitivity", "next_cursor"), **paged)
+    _extend(schemas["context"], "WhyKit MCP context", content_trust={"const": "untrusted_data"})
+    _extend(schemas["impact"], "WhyKit MCP impact")
+
+    status = schemas["status"]
+    # The server never returns the host path of the vault, and under a public
+    # ceiling it withholds the (internal) evidence-register counts.
+    status["properties"].pop("root")
+    status["required"].remove("root")
+    for key in ("evidence_active", "evidence_retired"):
+        status["properties"][key] = {"anyOf": [status["properties"][key], {"type": "null"}]}
+    _extend(
+        status, "WhyKit MCP status", ("max_sensitivity", "review_due_days"),
+        max_sensitivity=_CEILING_SCHEMA, review_due_days={"type": "integer", "minimum": 0},
+    )
+
+    _extend(schemas["pack"], "WhyKit MCP pack", ("max_sensitivity",), max_sensitivity=_CEILING_SCHEMA)
+
+    trace = schemas["trace"]
+    evidence = trace["properties"]["decisions"]["items"]["properties"]["evidence"]
+    evidence["items"] = {"anyOf": [
+        evidence["items"],
+        {
+            "description": "Under a public ceiling the register row is withheld; only the cited ID remains.",
+            "type": "object",
+            "required": ["id", "state"],
+            "properties": {
+                "id": {"type": "string"},
+                "via": {"type": ["string", "null"]},
+                "state": {"const": "withheld"},
+            },
+            "additionalProperties": False,
+        },
+    ]}
+    _extend(
+        trace, "WhyKit MCP trace", ("matched", "truncated", "max_sensitivity", "next_cursor"),
+        matched={"description": "Decisions that match the filters, across all pages.", "type": "integer", "minimum": 0},
+        truncated=_TRUNCATED_SCHEMA,
+        evidence_details={"const": "withheld"},
+        **paged,
+    )
+    _extend(
+        schemas["backlinks"], "WhyKit MCP backlinks", ("truncated", "max_sensitivity", "next_cursor"),
+        truncated=_TRUNCATED_SCHEMA, **paged,
+    )
+    return schemas
+
+
+def output_schema(tool: str) -> dict[str, Any]:
+    """The JSON Schema a successful ``tool`` result's ``structuredContent`` follows."""
+    return copy.deepcopy(_output_schemas()[tool])
+
+
+# ---------------------------------------------------------------------------
+# Pagination cursors
+# ---------------------------------------------------------------------------
+
+class CursorCodec:
+    """Opaque, tamper-evident page cursors.
+
+    A cursor is an offset into the *visible* result list plus a MAC over that
+    offset, the call it belongs to (scope and arguments), the ceiling and a
+    digest of the full visible ordering. It therefore cannot point into, count
+    or reveal hidden records; it cannot be replayed against other arguments,
+    another tool or a server with a different ceiling or key; and it stops
+    working, instead of skipping or repeating items, when the visible results
+    change between pages. The key is random per process, so cursors do not
+    survive a restart.
+    """
+
+    _MAC_BYTES = 16
+
+    def __init__(self, policy: str, key: bytes | None = None) -> None:
+        self.policy = policy
+        self._key = key if key is not None else secrets.token_bytes(32)
+
+    def _mac(self, scope: str, binding: object, ordering: str, offset: int) -> bytes:
+        message = json.dumps(
+            [scope, self.policy, binding, ordering, offset], ensure_ascii=True, sort_keys=True, default=str
+        ).encode("ascii")
+        return hmac.new(self._key, message, hashlib.sha256).digest()[: self._MAC_BYTES]
+
+    @staticmethod
+    def ordering(keys: Iterable[object]) -> str:
+        digest = hashlib.sha256()
+        for key in keys:
+            digest.update(json.dumps(key, ensure_ascii=True, default=str).encode("ascii"))
+            digest.update(b"\n")
+        return digest.hexdigest()
+
+    def encode(self, scope: str, binding: object, ordering: str, offset: int) -> str:
+        raw = offset.to_bytes(4, "big") + self._mac(scope, binding, ordering, offset)
+        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    def decode(self, cursor: object, scope: str, binding: object, ordering: str, total: int) -> int:
+        """The offset ``cursor`` encodes, or :class:`ToolFailure` ``invalid_cursor``."""
+        failure = ToolFailure(
+            "invalid_cursor",
+            "cursor is not valid for this call or the results changed; repeat the call without a cursor",
+        )
+        if not isinstance(cursor, str) or len(cursor) > MAX_CURSOR_CHARS or _CONTROL_RE.search(cursor):
+            raise failure
+        try:
+            raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
+        except (ValueError, TypeError):
+            raise failure from None
+        if len(raw) != 4 + self._MAC_BYTES:
+            raise failure
+        offset = int.from_bytes(raw[:4], "big")
+        if not hmac.compare_digest(raw[4:], self._mac(scope, binding, ordering, offset)) or offset >= total:
+            raise failure
+        return offset
+
+    def page(
+        self, items: list, *, scope: str, binding: object, keys: Iterable[object], cursor: str | None, limit: int
+    ) -> tuple[list, str | None, bool]:
+        """One page of ``items``, the next page's cursor and whether items follow.
+
+        The cursor is ``None`` on the last page, and also for ``limit=0``,
+        which pages nowhere while ``more`` still reports what was left out.
+        """
+        ordering = self.ordering(keys)
+        offset = 0 if cursor is None else self.decode(cursor, scope, binding, ordering, len(items))
+        end = offset + limit
+        page = items[offset:end]
+        more = end < len(items)
+        next_cursor = self.encode(scope, binding, ordering, end) if limit and more else None
+        return page, next_cursor, more
+
+
+def _validate_cursor(value: object) -> str | None:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ToolFailure("invalid_cursor", "cursor must be a string")
+    return value
+
+
+# ---------------------------------------------------------------------------
 # Tool handlers (SDK-free)
 # ---------------------------------------------------------------------------
 
@@ -360,8 +577,9 @@ class VaultTools:
         # Parsed notes survive between calls while their files are unchanged;
         # everything derived from them is recomputed per call.
         self.notes = NoteCache()
+        self.cursors = CursorCodec(self.policy)
 
-    def _visible_index(self):
+    def visible_index(self):
         """Load the vault as if records above the ceiling did not exist.
 
         Every handler resolves targets, decision IDs, links and graph edges
@@ -393,11 +611,13 @@ class VaultTools:
         tag: str | None = None,
         source_id: str | None = None,
         canonical_only: bool = False,
+        cursor: str | None = None,
     ) -> dict:
         from whykit.query import query_vault
 
         text = _validate_text(text, "text", max_chars=MAX_TEXT_CHARS)
         limit = _validate_int(limit, "limit", minimum=0, maximum=MAX_MCP_RESULTS)
+        cursor = _validate_cursor(cursor)
         doc_type = _validate_text(doc_type, "type", max_chars=MAX_FILTER_CHARS)
         status = _validate_text(status, "status", max_chars=MAX_FILTER_CHARS)
         owner = _validate_text(owner, "owner", max_chars=MAX_FILTER_CHARS)
@@ -416,11 +636,24 @@ class VaultTools:
             tag=tag,
             source_id=source_id,
             canonical_only=canonical_only,
-            limit=limit,
+            # Rank every visible match; the page is cut below.
+            limit=1_000_000_000,
             allowed_sensitivities=self.allowed,
-            vault=self._visible_index(),
+            vault=self.visible_index(),
         )
-        return {**report, "max_sensitivity": self.policy}
+        binding = [text, doc_type, status, owner, tag, source_id, canonical_only, limit]
+        results, next_cursor, _ = self.cursors.page(
+            report["results"], scope="query", binding=binding,
+            keys=(item["path"] for item in report["results"]), cursor=cursor, limit=limit,
+        )
+        return {
+            **report,
+            "query": {**report["query"], "limit": limit},
+            "returned": len(results),
+            "results": results,
+            "next_cursor": next_cursor,
+            "max_sensitivity": self.policy,
+        }
 
     def context(self, target: str, max_chars: int = 4000) -> dict:
         from whykit.context import build_context
@@ -429,7 +662,7 @@ class VaultTools:
         max_chars = _validate_int(max_chars, "max_chars", minimum=0, maximum=MAX_MCP_CONTEXT)
         self._check_vault()
         report = build_context(
-            self.vault, target, max_chars=max_chars, include_body=True, vault=self._visible_index()
+            self.vault, target, max_chars=max_chars, include_body=True, vault=self.visible_index()
         )
         if not report.get("exists"):
             return report
@@ -447,7 +680,7 @@ class VaultTools:
 
         target = validate_target(target)
         self._check_vault()
-        report = analyze_impact(self.vault, target, vault=self._visible_index())
+        report = analyze_impact(self.vault, target, vault=self.visible_index())
         kind = report.get("kind", "document")
         if not report.get("exists"):
             return report
@@ -587,7 +820,7 @@ class VaultTools:
             canonical_only=canonical_only,
             agent=agent.strip().lower(),
             allowed_sensitivities=self.allowed,
-            vault=self._visible_index(),
+            vault=self.visible_index(),
         )
         filtered = _filter_nested(report, self.policy)
         assert isinstance(filtered, dict)
@@ -599,6 +832,7 @@ class VaultTools:
         today: str | None = None,
         gaps_only: bool = False,
         limit: int = 50,
+        cursor: str | None = None,
     ) -> dict:
         from whykit.trace import build_trace
 
@@ -608,28 +842,35 @@ class VaultTools:
         as_of = _validate_today(today)
         gaps_only = _validate_bool(gaps_only, "gaps_only")
         limit = _validate_int(limit, "limit", minimum=0, maximum=MAX_MCP_RESULTS)
+        cursor = _validate_cursor(cursor)
         self._check_vault()
-        report = build_trace(self.vault, today=as_of, decision=decision, vault=self._visible_index())
+        report = build_trace(self.vault, today=as_of, decision=decision, vault=self.visible_index())
         if SENSITIVITY_LEVEL["internal"] > SENSITIVITY_LEVEL[self.policy]:
             report = _withhold_register_details(report)
         records = report["decisions"]
         if gaps_only:
             records = [record for record in records if record["live"] and record["gaps"]]
+        page, next_cursor, more = self.cursors.page(
+            records, scope="trace", binding=[decision, as_of.isoformat(), gaps_only, limit],
+            keys=((record["decision_id"], record["path"]) for record in records), cursor=cursor, limit=limit,
+        )
         filtered = _filter_nested({
             **report,
-            "decisions": records[:limit],
+            "decisions": page,
             "matched": len(records),
-            "truncated": len(records) > limit,
+            "truncated": more,
+            "next_cursor": next_cursor,
             "max_sensitivity": self.policy,
         }, self.policy)
         assert isinstance(filtered, dict)
         return filtered
 
-    def backlinks(self, target: str, limit: int = 100) -> dict:
+    def backlinks(self, target: str, limit: int = 100, cursor: str | None = None) -> dict:
         from whykit.backlinks import build_backlinks
 
         target = validate_target(target)
         limit = _validate_int(limit, "limit", minimum=0, maximum=MAX_MCP_BACKLINKS)
+        cursor = _validate_cursor(cursor)
         self._check_vault()
         if _EVIDENCE_RE.fullmatch(target) and SENSITIVITY_LEVEL["internal"] > SENSITIVITY_LEVEL[self.policy]:
             # Evidence inherits the register's `internal` classification.
@@ -643,12 +884,17 @@ class VaultTools:
                 "count": 0,
             }
         else:
-            report = build_backlinks(self.vault, target, vault=self._visible_index())
+            report = build_backlinks(self.vault, target, vault=self.visible_index())
         links = report["backlinks"]
+        page, next_cursor, more = self.cursors.page(
+            links, scope="backlinks", binding=[report["id"], limit],
+            keys=((link["type"], link["from"], link["to"]) for link in links), cursor=cursor, limit=limit,
+        )
         return {
             **report,
-            "backlinks": links[:limit],
-            "truncated": len(links) > limit,
+            "backlinks": page,
+            "truncated": more,
+            "next_cursor": next_cursor,
             "max_sensitivity": self.policy,
         }
 
@@ -663,10 +909,10 @@ class VaultTools:
         report = self.context(target, max_chars=RESOURCE_BODY_CHARS)
         return report if report.get("exists") else None
 
-    def decision_index(self) -> dict:
+    def decision_index(self, limit: int | None = MAX_RESOURCE_ROWS, *, index: Any = None) -> dict:
         """Body of the ``whykit://decisions`` resource: visible decisions only."""
         self._check_vault()
-        index = self._visible_index()
+        index = index if index is not None else self.visible_index()
         rows = []
         for note in index.notes:
             decision_id = str(note.front.get("decision_id") or "").strip()
@@ -680,13 +926,96 @@ class VaultTools:
                 "uri": f"whykit://record/{decision_id}",
             })
         rows.sort(key=lambda row: (row["decision_id"], row["path"]))
+        shown = rows if limit is None else rows[:limit]
         return {
             "contract_version": 1,
             "max_sensitivity": self.policy,
-            "decisions": rows[:MAX_RESOURCE_ROWS],
+            "decisions": shown,
             "count": len(rows),
-            "truncated": len(rows) > MAX_RESOURCE_ROWS,
+            "truncated": len(shown) < len(rows),
         }
+
+    def resource_page(self, cursor: str | None = None) -> tuple[list[dict], str | None]:
+        """One page of ``resources/list``: the decision index, then each visible decision.
+
+        Paged with the same opaque cursors as the tools, so a page boundary
+        never counts or reveals a hidden decision.
+        """
+        cursor = _validate_cursor(cursor)
+        rows = self.resource_rows()
+        page, next_cursor, _ = self.cursors.page(
+            rows, scope="resources", binding=None,
+            keys=((row["uri"], row["title"], row["description"]) for row in rows),
+            cursor=cursor, limit=RESOURCE_PAGE_SIZE,
+        )
+        return page, next_cursor
+
+    def resource_rows(self, *, index: Any = None) -> list[dict]:
+        """Every row ``resources/list`` pages through, in order."""
+        self._check_vault()
+        rows = [{
+            "uri": DECISIONS_URI,
+            "name": "decisions",
+            "title": "Visible decisions",
+            "description": "Index of decision records within the sensitivity ceiling.",
+        }]
+        seen: set[str] = set()
+        for row in self.decision_index(limit=None, index=index)["decisions"]:
+            if row["decision_id"] in seen:
+                continue
+            seen.add(row["decision_id"])
+            rows.append({
+                "uri": row["uri"],
+                "name": row["decision_id"],
+                "title": f"{row['decision_id']}: {row['title']}",
+                "description": f"Decision record ({row['status'] or 'no status'}), {row['path']}",
+            })
+        return rows
+
+    def complete(self, ref_type: str, ref_name: str, argument: str, value: object) -> dict:
+        """Completion values for a prompt or resource-template argument.
+
+        Candidates come from the confined view only: visible decision IDs,
+        evidence IDs when the register is within the ceiling, and visible
+        vault-relative paths. Anything unrecognised, and any partial value that
+        is not a plausible prefix, completes to nothing rather than failing.
+        """
+        empty = {"values": [], "total": 0, "has_more": False}
+        if not isinstance(value, str) or len(value) > MAX_TARGET_CHARS or _CONTROL_RE.search(value):
+            return empty
+        if ref_type == "ref/prompt" and ref_name == "review_evidence_gaps" and argument == "today":
+            candidates = [dt.date.today().isoformat()]
+        elif ref_type == "ref/prompt" and ref_name == "summarize_decision" and argument == "decision_id":
+            self._check_vault()
+            candidates = self._decision_ids()
+        elif ref_type == "ref/resource" and ref_name == RECORD_TEMPLATE and argument == "target":
+            self._check_vault()
+            candidates = self._decision_ids() + self._evidence_ids() + self._note_paths()
+        else:
+            return empty
+        prefix = value.strip().casefold()
+        matches = [item for item in candidates if item.casefold().startswith(prefix)]
+        return {
+            "values": matches[:MAX_COMPLETIONS],
+            "total": len(matches),
+            "has_more": len(matches) > MAX_COMPLETIONS,
+        }
+
+    def _decision_ids(self) -> list[str]:
+        return sorted({row["decision_id"] for row in self.decision_index(limit=None)["decisions"]})
+
+    def _evidence_ids(self) -> list[str]:
+        from whykit.lint import evidence_register
+
+        # The register is classified `internal`, like everywhere else here.
+        if SENSITIVITY_LEVEL["internal"] > SENSITIVITY_LEVEL[self.policy]:
+            return []
+        active, retired, _ = evidence_register(self.vault)
+        return sorted(set(active) | set(retired))
+
+    def _note_paths(self) -> list[str]:
+        index = self.visible_index()
+        return sorted(index.relative(note.path) for note in index.notes)
 
     def summarize_decision_prompt(self, decision_id: str) -> str:
         """Text of the ``summarize_decision`` prompt for one visible decision."""
@@ -752,19 +1081,135 @@ class VaultTools:
             inspect.signature(handler).bind(**arguments)
         except TypeError:
             return ToolFailure("invalid_argument", f"unexpected arguments for {name}").payload(), True
-        from whykit.lint import path_cache
-        from whykit.vault_index import reuse_notes
-
         try:
-            # One resolve cache per call, never per process: the vault may change
-            # on disk between calls and the next call must see it.  Parsed notes
-            # are reused only after their stat signature is re-checked.
-            with path_cache(), reuse_notes(self.notes):
-                return handler(**arguments), False
+            return self.scoped(handler, **arguments), False
         except ToolFailure as exc:
             return exc.payload(), True
         except Exception:  # noqa: BLE001 - the error boundary of the server
             return ToolFailure("internal_error", f"{name} failed while reading the vault").payload(), True
+
+    def scoped(self, handler: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """Run one request with a fresh resolve cache and the shared note cache."""
+        from whykit.lint import path_cache
+        from whykit.vault_index import reuse_notes
+
+        # One resolve cache per request, never per process: the vault may change
+        # on disk between requests and the next one must see it.  Parsed notes
+        # are reused only after their stat signature is re-checked.
+        with path_cache(), reuse_notes(self.notes):
+            return handler(*args, **kwargs)
+
+
+class VaultWatcher:
+    """Turn changes in the *visible* vault into resource change events.
+
+    Each :meth:`poll` fingerprints what a client can read: every visible
+    note's text under its record URIs, the evidence-register rows when the
+    register is within the ceiling, the decision index and the resource list.
+    It returns ``("updated", uri)`` for every URI whose content changed,
+    appeared or disappeared since the previous poll, and ``("list_changed",
+    None)`` when ``resources/list`` changed. A record above the ceiling is not
+    part of the fingerprint, so editing, adding or removing one produces no
+    event; a record that crosses the ceiling looks exactly like one created or
+    deleted. The first poll only records the baseline.
+    """
+
+    def __init__(self, tools: VaultTools) -> None:
+        from whykit.vault_index import NoteCache
+
+        self.tools = tools
+        self.notes = NoteCache()
+        self._state: dict[str, str] | None = None
+        self._listing: str | None = None
+        self._files: object = None
+
+    def _file_signature(self) -> object:
+        """Stat signature of every file a snapshot reads, or ``None`` if unusable.
+
+        It covers hidden files too, so it is only a gate: an unchanged
+        signature skips the snapshot, while events always come from comparing
+        visible content. A file touched within the last two seconds makes the
+        signature unusable, because a second write in the same timestamp tick
+        with the same size would not change it (the NoteCache rule).
+        """
+        from whykit.lint import CONTENT_SKIP_DIRS
+        from whykit.vault_index import NoteCache
+
+        # The same traversal as `collect_markdown`, without its per-file
+        # realpath confinement check: a superset is fine for a gate.
+        root = self.tools.vault
+        depth = len(root.parts)
+        now = time.time_ns()
+        signature: list[tuple[str, tuple[int, int, int, int] | None]] = []
+        paths = sorted(
+            path for path in root.rglob("*.md")
+            if not any(part in CONTENT_SKIP_DIRS for part in path.parts[depth:])
+        )
+        for path in (*paths, root / "whykit.toml"):
+            try:
+                info = os.stat(path)
+            except OSError:
+                signature.append((os.fspath(path), None))
+                continue
+            if now - max(info.st_mtime_ns, info.st_ctime_ns) < NoteCache.racy_ns:
+                return None
+            signature.append((os.fspath(path), (info.st_mtime_ns, info.st_ctime_ns, info.st_size, info.st_ino)))
+        return signature
+
+    def _snapshot(self) -> tuple[dict[str, str], str]:
+        from whykit.lint import evidence_register, path_cache
+        from whykit.vault_index import reuse_notes
+
+        def digest(value: object) -> str:
+            return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=True).encode("ascii")).hexdigest()
+
+        state: dict[str, list[str]] = {}
+        with path_cache(), reuse_notes(self.notes):
+            if not self.tools.vault.is_dir():
+                return {}, ""
+            index = self.tools.visible_index()
+            for note in index.notes:
+                relative = index.relative(note.path)
+                uris = {f"whykit://record/{relative}"}
+                if relative.endswith(".md"):
+                    uris.add(f"whykit://record/{relative[:-3]}")
+                decision_id = str(note.front.get("decision_id") or "").strip()
+                if _DECISION_RE.fullmatch(decision_id):
+                    uris.add(f"whykit://record/{decision_id}")
+                text_digest = digest([relative, note.text])
+                for uri in uris:
+                    state.setdefault(uri, []).append(text_digest)
+            if SENSITIVITY_LEVEL["internal"] <= SENSITIVITY_LEVEL[self.tools.policy]:
+                active, retired, _ = evidence_register(self.tools.vault)
+                for evidence_id, row in (*active.items(), *retired.items()):
+                    state.setdefault(f"whykit://record/{evidence_id}", []).append(digest(row))
+            state[DECISIONS_URI] = [digest(self.tools.decision_index(index=index))]
+            listing = digest(self.tools.resource_rows(index=index))
+        flat = {uri: digest(sorted(parts)) for uri, parts in state.items()}
+        return flat, listing
+
+    def reset(self) -> None:
+        """Forget the baseline; the next :meth:`poll` records a new one."""
+        self._state = self._listing = self._files = None
+
+    def poll(self) -> list[tuple[str, str | None]]:
+        files = self._file_signature()
+        if files is not None and files == self._files and self._state is not None:
+            return []
+        state, listing = self._snapshot()
+        self._files = files
+        previous, previous_listing = self._state, self._listing
+        self._state, self._listing = state, listing
+        if previous is None:
+            return []
+        events: list[tuple[str, str | None]] = [
+            ("updated", uri)
+            for uri in sorted(set(state) | set(previous))
+            if state.get(uri) != previous.get(uri)
+        ]
+        if listing != previous_listing:
+            events.append(("list_changed", None))
+        return events
 
 
 # ---------------------------------------------------------------------------
@@ -799,16 +1244,60 @@ def _schema_failure(error: Exception) -> ToolFailure:
     return ToolFailure(code, "arguments do not match the input schema")
 
 
-def build_server(vault: Path, *, max_sensitivity: str = DEFAULT_MAX_SENSITIVITY):
+def build_server(
+    vault: Path,
+    *,
+    max_sensitivity: str = DEFAULT_MAX_SENSITIVITY,
+    watch_interval: float = DEFAULT_WATCH_INTERVAL,
+):
+    """The SDK server for one vault.
+
+    ``watch_interval`` is the number of seconds between checks of the visible
+    vault for resource change events; ``0`` turns the watcher off.
+    """
     MCPServer = _require_mcp()
+    import contextlib
     from typing import Annotated
 
+    import anyio
+    import anyio.to_thread
     from mcp.server.mcpserver.exceptions import ResourceError, ResourceNotFoundError, ToolError
+    from mcp.server.subscriptions import InMemorySubscriptionBus, ResourcesListChanged, ResourceUpdated
     from mcp.shared.exceptions import MCPError
-    from mcp_types import INTERNAL_ERROR, INVALID_PARAMS, CallToolResult, TextContent, ToolAnnotations
+    from mcp_types import (
+        INTERNAL_ERROR,
+        INVALID_PARAMS,
+        CallToolResult,
+        Completion,
+        ListResourcesResult,
+        Resource,
+        TextContent,
+        ToolAnnotations,
+    )
     from pydantic import Field, ValidationError
 
     tools = VaultTools(vault, max_sensitivity=max_sensitivity)
+    class ListenerCountingBus(InMemorySubscriptionBus):  # type: ignore[misc, valid-type]
+        """The SDK's in-process bus, plus how many listen streams are open."""
+
+        listeners = 0
+
+        def subscribe(self, listener):  # type: ignore[no-untyped-def]
+            unsubscribe = super().subscribe(listener)
+            self.listeners += 1
+            done = False
+
+            def release() -> None:
+                nonlocal done
+                if not done:
+                    done = True
+                    self.listeners -= 1
+                unsubscribe()
+
+            return release
+
+    bus = ListenerCountingBus()
+    watcher = VaultWatcher(tools) if watch_interval > 0 else None
     read_only = ToolAnnotations(
         read_only_hint=True,
         destructive_hint=False,
@@ -835,6 +1324,33 @@ def build_server(vault: Path, *, max_sensitivity: str = DEFAULT_MAX_SENSITIVITY)
         here keeps one error contract for every failure a client can cause.
         """
 
+        async def list_tools(self):  # type: ignore[no-untyped-def]
+            # Every tool declares the schema its successful structured result
+            # follows; error results keep the shared `{"error": ...}` body.
+            listed = await super().list_tools()
+            return [
+                tool.model_copy(update={"output_schema": output_schema(tool.name)})
+                if tool.name in TOOL_NAMES else tool
+                for tool in listed
+            ]
+
+        async def _handle_list_resources(self, ctx, params):  # type: ignore[no-untyped-def]
+            # The SDK lists registered resources without paging. WhyKit lists
+            # the decision index plus one resource per visible decision, paged
+            # with the same opaque cursors as the tools.
+            cursor = params.cursor if params is not None else None
+            try:
+                rows, next_cursor = await anyio.to_thread.run_sync(tools.scoped, tools.resource_page, cursor)
+            except ToolFailure as exc:
+                code = INVALID_PARAMS if exc.code == "invalid_cursor" else INTERNAL_ERROR
+                raise MCPError(code=code, message=exc.message) from None
+            except Exception:  # noqa: BLE001 - never leak exception text
+                raise MCPError(code=INTERNAL_ERROR, message="the vault could not be read") from None
+            return ListResourcesResult(
+                resources=[Resource(mime_type="application/json", **row) for row in rows],
+                next_cursor=next_cursor,
+            )
+
         async def call_tool(self, name, arguments, context=None):  # type: ignore[no-untyped-def]
             if name not in TOOL_NAMES:
                 return result(ToolFailure("unknown_tool", "no such tool").payload(), True)
@@ -854,9 +1370,50 @@ def build_server(vault: Path, *, max_sensitivity: str = DEFAULT_MAX_SENSITIVITY)
         max_length=MAX_TARGET_CHARS,
     )]
 
+    Cursor = Annotated[str, Field(
+        description="`next_cursor` from the previous page of this call; empty starts at the first page. "
+        "A cursor is only valid for the same arguments and stops working if the results change.",
+        max_length=MAX_CURSOR_CHARS,
+    )]
+
     from whykit import __version__
 
-    mcp = WhyKitServer("whykit", version=__version__, instructions=SERVER_INSTRUCTIONS)
+    def poll() -> list[tuple[str, str | None]]:
+        assert watcher is not None
+        try:
+            return watcher.poll()
+        except Exception:  # noqa: BLE001 - a failed check is retried at the next interval
+            return []
+
+    async def watch() -> None:
+        assert watcher is not None
+        while True:
+            if not bus.listeners:
+                # Nobody is listening: do no work, and start from a fresh
+                # baseline when the next listen stream opens.
+                watcher.reset()
+            else:
+                for kind, uri in await anyio.to_thread.run_sync(poll):
+                    await bus.publish(
+                        ResourceUpdated(uri=uri) if kind == "updated" and uri else ResourcesListChanged()
+                    )
+            await anyio.sleep(watch_interval)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_server):  # type: ignore[no-untyped-def]
+        if watcher is None:
+            yield {}
+            return
+        async with anyio.create_task_group() as group:
+            group.start_soon(watch)
+            try:
+                yield {}
+            finally:
+                group.cancel_scope.cancel()
+
+    mcp = WhyKitServer(
+        "whykit", version=__version__, instructions=SERVER_INSTRUCTIONS, subscriptions=bus, lifespan=lifespan,
+    )
 
     @mcp.tool(title="Search the vault", annotations=read_only)
     def query(
@@ -873,6 +1430,7 @@ def build_server(vault: Path, *, max_sensitivity: str = DEFAULT_MAX_SENSITIVITY)
         tag: Annotated[str, Field(description="Exact tag (case-insensitive).", max_length=MAX_FILTER_CHARS)] = "",
         source_id: Annotated[str, Field(description="Only documents citing this E-NNN.", max_length=MAX_FILTER_CHARS)] = "",
         canonical_only: Annotated[bool, Field(description="Only `source_of_truth: true` documents.")] = False,
+        cursor: Cursor = "",
     ):
         """Ranked metadata and text search over documents within the sensitivity ceiling.
 
@@ -882,7 +1440,7 @@ def build_server(vault: Path, *, max_sensitivity: str = DEFAULT_MAX_SENSITIVITY)
         return respond(
             "query", text=text, limit=limit, doc_type=type or None, status=status or None,
             owner=owner or None, tag=tag or None, source_id=source_id or None,
-            canonical_only=canonical_only,
+            canonical_only=canonical_only, cursor=cursor or None,
         )
 
     @mcp.tool(title="Read one record with its evidence", annotations=read_only)
@@ -956,6 +1514,7 @@ def build_server(vault: Path, *, max_sensitivity: str = DEFAULT_MAX_SENSITIVITY)
             description=f"Maximum decisions returned; values above {MAX_MCP_RESULTS} are clamped. The summary always covers every visible decision.",
             ge=0,
         )] = 50,
+        cursor: Cursor = "",
     ):
         """Decision-to-evidence traceability with gaps.
 
@@ -965,7 +1524,10 @@ def build_server(vault: Path, *, max_sensitivity: str = DEFAULT_MAX_SENSITIVITY)
         and `stale_evidence`. Under a `public` ceiling register details are
         withheld and only `no_evidence` is reported.
         """
-        return respond("trace", decision=decision or None, today=today or None, gaps_only=gaps_only, limit=limit)
+        return respond(
+            "trace", decision=decision or None, today=today or None, gaps_only=gaps_only, limit=limit,
+            cursor=cursor or None,
+        )
 
     @mcp.tool(title="List inbound links to a record", annotations=read_only)
     def backlinks(
@@ -974,6 +1536,7 @@ def build_server(vault: Path, *, max_sensitivity: str = DEFAULT_MAX_SENSITIVITY)
             description=f"Maximum backlinks returned; values above {MAX_MCP_BACKLINKS} are clamped. `count` is the full total.",
             ge=0,
         )] = 100,
+        cursor: Cursor = "",
     ):
         """Typed inbound edges (wikilink, evidence, supersedes) to a note, decision or evidence ID.
 
@@ -981,7 +1544,7 @@ def build_server(vault: Path, *, max_sensitivity: str = DEFAULT_MAX_SENSITIVITY)
         listed; a hidden target returns the same `exists: false` shape as a
         missing one.
         """
-        return respond("backlinks", target=target, limit=limit)
+        return respond("backlinks", target=target, limit=limit, cursor=cursor or None)
 
     # -- resources ------------------------------------------------------------
 
@@ -1055,7 +1618,74 @@ def build_server(vault: Path, *, max_sensitivity: str = DEFAULT_MAX_SENSITIVITY)
         """Propose the smallest fix for each live decision whose evidence is missing, retired or stale."""
         return prompt_text(tools.evidence_gaps_prompt, today or None)
 
+    # -- completions -----------------------------------------------------------
+
+    @mcp.completion()
+    async def complete(ref, argument, context):  # type: ignore[no-untyped-def]
+        name = getattr(ref, "name", None) or getattr(ref, "uri", "")
+        try:
+            values = await anyio.to_thread.run_sync(
+                tools.scoped, tools.complete, ref.type, name, argument.name, argument.value
+            )
+        except Exception:  # noqa: BLE001 - an unreadable vault completes to nothing
+            values = {"values": [], "total": 0, "has_more": False}
+        return Completion(**values)
+
     return mcp
+
+
+def is_loopback_host(host: str) -> bool:
+    """Whether ``host`` names only this machine (``localhost`` or a loopback address)."""
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def read_token(token_file: str | None) -> str | None:
+    """The bearer token from ``--token-file`` or ``$WHYKIT_MCP_TOKEN``, if either is set.
+
+    Raises ``ValueError`` (never echoing the token) for an unreadable file or a weak token.
+    """
+    if token_file:
+        try:
+            token = Path(token_file).expanduser().read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            raise ValueError("cannot read --token-file") from None
+    else:
+        token = os.environ.get(TOKEN_ENV, "").strip()
+    if not token:
+        return None
+    if len(token) < MIN_TOKEN_CHARS or _CONTROL_RE.search(token) or not token.isascii():
+        raise ValueError(f"the bearer token must be at least {MIN_TOKEN_CHARS} printable ASCII characters")
+    return token
+
+
+def require_bearer(app: Callable[..., Any], token: str) -> Callable[..., Any]:
+    """Wrap an ASGI app so every HTTP request needs ``Authorization: Bearer <token>``."""
+    expected = f"Bearer {token}".encode("ascii")
+    body = json.dumps(ToolFailure("unauthorized", "missing or wrong bearer token").payload()).encode("ascii")
+
+    async def guarded(scope: dict[str, Any], receive: Callable[..., Any], send: Callable[..., Any]) -> None:
+        if scope.get("type") == "http":
+            supplied = [value for name, value in scope.get("headers") or () if name.lower() == b"authorization"]
+            if len(supplied) != 1 or not hmac.compare_digest(supplied[0], expected):
+                await send({
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(body)).encode("ascii")),
+                        (b"www-authenticate", b'Bearer realm="whykit"'),
+                    ],
+                })
+                await send({"type": "http.response.body", "body": body})
+                return
+        await app(scope, receive, send)
+
+    return guarded
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1067,6 +1697,23 @@ def build_parser() -> argparse.ArgumentParser:
         choices=tuple(SENSITIVITY_LEVEL),
         help="highest sensitivity documents MCP may return (default: internal)",
     )
+    parser.add_argument(
+        "--watch-interval",
+        type=float,
+        default=DEFAULT_WATCH_INTERVAL,
+        metavar="SECONDS",
+        help=f"seconds between checks for resource change notifications; 0 disables them (default: {DEFAULT_WATCH_INTERVAL:g})",
+    )
+    http = parser.add_argument_group("streamable HTTP transport (default transport: stdio)")
+    http.add_argument("--http", action="store_true", help="serve streamable HTTP at /mcp instead of stdio")
+    http.add_argument("--host", default=None, help=f"address to bind (default: {DEFAULT_HTTP_HOST})")
+    http.add_argument("--port", type=int, default=None, help=f"port to bind (default: {DEFAULT_HTTP_PORT})")
+    http.add_argument(
+        "--token-file",
+        default=None,
+        help=f"file holding a bearer token every request must send; required for a non-loopback --host "
+        f"(or set ${TOKEN_ENV})",
+    )
     return parser
 
 
@@ -1077,10 +1724,40 @@ def main(argv: list[str] | None = None) -> int:
     # help, usage errors and log lines on stderr degrade instead of raising.
     # The MCP transport writes its own UTF-8 stream, so the protocol is unchanged.
     harden_stdio()
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not 0 <= args.watch_interval <= 3600:
+        parser.error("--watch-interval must be between 0 and 3600 seconds")
+    if not args.http and (args.host is not None or args.port is not None or args.token_file is not None):
+        parser.error("--host, --port and --token-file need --http")
+    host = args.host if args.host is not None else DEFAULT_HTTP_HOST
+    port = args.port if args.port is not None else DEFAULT_HTTP_PORT
+    if not 0 < port < 65536:
+        parser.error("--port must be between 1 and 65535")
+    try:
+        token = read_token(args.token_file) if args.http else None
+    except ValueError as exc:
+        parser.error(str(exc))
+    if args.http and token is None and not is_loopback_host(host):
+        parser.error(
+            f"--host {host} is reachable from other machines; set a bearer token with --token-file or ${TOKEN_ENV}"
+        )
     vault = Path(args.root).expanduser().resolve()
-    server = build_server(vault, max_sensitivity=args.max_sensitivity)
-    server.run()
+    server = build_server(vault, max_sensitivity=args.max_sensitivity, watch_interval=args.watch_interval)
+    if not args.http:
+        server.run()
+        return 0
+
+    import anyio
+    import uvicorn
+
+    app = server.streamable_http_app(host=host)
+    if token is not None:
+        app = require_bearer(app, token)
+    shown = f"[{host}]" if ":" in host else host
+    print(f"whykit-mcp: serving streamable HTTP at http://{shown}:{port}/mcp", file=sys.stderr, flush=True)
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    anyio.run(uvicorn.Server(config).serve)
     return 0
 
 

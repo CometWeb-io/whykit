@@ -11,6 +11,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .rule_policy import PolicyError, build_policy
+
 CONFIG_FILE = "whykit.toml"
 FORMAT_VERSION = 1
 
@@ -65,6 +67,7 @@ _TOP_LEVEL_KEYS = {
     "evidence_access_age_days",
     "defaults",
     "profiles",
+    "rules",
 }
 _DEFAULT_KEYS = {
     "owner",
@@ -147,6 +150,14 @@ def _validate(config: dict[str, Any]) -> None:
                 raise ConfigError(f"profiles.{name}.{key} must be true or false")
         if profile.get("history") not in _ALLOWED_HISTORY:
             raise ConfigError(f"profiles.{name}.history must be off, optional or required")
+
+    # Team policy: [[rules.custom]] and [rules.overrides."<code>"]. Absent in
+    # the built-in defaults, so a vault without it reports exactly as before.
+    if "rules" in config:
+        try:
+            build_policy(config["rules"])
+        except PolicyError as exc:
+            raise ConfigError(str(exc)) from exc
 
 
 def load_config(root: Path) -> tuple[dict[str, Any], Path | None]:

@@ -68,6 +68,98 @@
         },
         "additionalProperties": true
       }
+    },
+    "overrides": {
+      "type": "array",
+      "description": "Present only when whykit.toml declares [rules.overrides] or the secret scan was switched off (--no-secrets).",
+      "items": {
+        "type": "object",
+        "description": "One whykit.toml override and what it did in this run.",
+        "required": [
+          "rule",
+          "level",
+          "paths",
+          "reason",
+          "security",
+          "matched"
+        ],
+        "properties": {
+          "rule": {
+            "type": "string",
+            "minLength": 1
+          },
+          "level": {
+            "enum": [
+              "error",
+              "warning",
+              "off"
+            ]
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "security": {
+            "type": "boolean"
+          },
+          "matched": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skipped_by": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Set on the entry with rule `secret.*` when the whole secret scan was switched off; names what switched it off. `matched` is then 0 because nothing was scanned."
+          },
+          "suppressed": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "line",
+                "level",
+                "code",
+                "message"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "level": {
+                  "enum": [
+                    "error",
+                    "warning"
+                  ]
+                },
+                "code": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
     }
   },
   "additionalProperties": true

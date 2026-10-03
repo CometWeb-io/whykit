@@ -16,12 +16,12 @@ import random
 import shutil
 import sys
 import tempfile
-import tracemalloc
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
+SRC = ROOT / "src"
+sys.path.insert(0, str(SRC))
 sys.path.insert(0, str(ROOT / "tests"))
 
 from synthetic_vault import generate  # noqa: E402
@@ -359,12 +359,46 @@ class ImpactViewTest(unittest.TestCase):
 class PeakMemoryTest(unittest.TestCase):
     """Peak traced allocation of one request stays well below where it was.
 
-    Measured in-process at 1,000 notes: lint 4.7-5.2 MB (6.7-8.0 MB before
-    this work), pack 6.2-6.4 MB (10.8-12.4 MB before), across CPython 3.11,
-    3.12 and 3.14. Each budget sits between the two ranges, so it fails on a
-    return of the whole-graph copy in `pack` or of a second copy of every
-    path, but not on a Python version's object sizes.
+    Measured in a fresh interpreter at 1,000 notes: lint 5.2-5.5 MB (6.7-8.0
+    MB before the streaming work), pack 7.1-7.4 MB (10.8-12.4 MB before),
+    across CPython 3.11, 3.12 and 3.14. Each budget sits between the two
+    ranges, so it fails on a return of the whole-graph copy in `pack` or of a
+    second copy of every path, but not on a Python version's object sizes.
+
+    The measurement runs in its own interpreter. Inside the full suite the
+    peak drifted with whatever earlier tests had left behind: a full `re`
+    cache recompiles patterns inside the traced window, and a large
+    long-lived heap delays cyclic collection, which pushed lint to 6.5 MB on
+    a loaded machine without any change to WhyKit. The best of three runs is
+    taken, since noise can only add to a peak.
     """
+
+    PROBE = (
+        "import datetime as dt, gc, json, sys, tracemalloc\n"
+        "from pathlib import Path\n"
+        "from whykit import lint\n"
+        "from whykit.pack import build_pack\n"
+        "vault = Path(sys.argv[1])\n"
+        "runs = {\n"
+        "    'lint': lambda: lint.lint(vault, today=dt.date(2026, 9, 17)),\n"
+        "    'pack': lambda: build_pack(vault, targets=['D-010'], query='pipeline'),\n"
+        "}\n"
+        "peaks = {}\n"
+        "for name, run in runs.items():\n"
+        "    run()  # imports and process-wide caches are not the request's cost\n"
+        "    best = None\n"
+        "    for _ in range(3):\n"
+        "        gc.collect()\n"
+        "        tracemalloc.start()\n"
+        "        try:\n"
+        "            run()\n"
+        "            peak = tracemalloc.get_traced_memory()[1] / 2**20\n"
+        "        finally:\n"
+        "            tracemalloc.stop()\n"
+        "        best = peak if best is None else min(best, peak)\n"
+        "    peaks[name] = best\n"
+        "print(json.dumps(peaks))\n"
+    )
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -375,22 +409,19 @@ class PeakMemoryTest(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls._tmp.cleanup()
 
-    def peak(self, run) -> float:  # type: ignore[no-untyped-def]
-        run()  # imports and process-wide caches are not the request's cost
-        tracemalloc.start()
-        try:
-            run()
-            return tracemalloc.get_traced_memory()[1] / 2**20
-        finally:
-            tracemalloc.stop()
-
     def test_lint_and_pack_peaks(self) -> None:
-        from whykit.pack import build_pack
+        import json
+        import subprocess
 
-        lint_peak = self.peak(lambda: lint_mod.lint(self.vault, today=TODAY))
-        pack_peak = self.peak(lambda: build_pack(self.vault, targets=["D-010"], query="pipeline"))
-        self.assertLess(lint_peak, 6.0, f"lint peaked at {lint_peak:.1f} MB on 1,000 notes")
-        self.assertLess(pack_peak, 8.5, f"pack peaked at {pack_peak:.1f} MB on 1,000 notes")
+        env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [str(SRC), os.environ.get("PYTHONPATH")]))}
+        result = subprocess.run(
+            [sys.executable, "-c", self.PROBE, str(self.vault)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        peaks = json.loads(result.stdout)
+        self.assertLess(peaks["lint"], 6.0, f"lint peaked at {peaks['lint']:.1f} MB on 1,000 notes")
+        self.assertLess(peaks["pack"], 8.5, f"pack peaked at {peaks['pack']:.1f} MB on 1,000 notes")
 
 
 # ---------------------------------------------------------------------------

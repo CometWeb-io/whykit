@@ -27,7 +27,12 @@ Every pull request and every push to `main` runs the `package` job in
 
 The [release workflow](../.github/workflows/release.yml) reruns all CI gates on
 the tagged commit, then a `build` job with no publishing credential repeats the
-reproducible build, the checks and the SBOM, and uploads them. Only the
+reproducible build, the checks and the SBOM, and uploads them. That job lives
+in [`release-build.yml`](../.github/workflows/release-build.yml), and every pull
+request runs it as a dry run, so a broken release step fails in review rather
+than on tag day. Only a tag run adds the two release-only checks (the tag is on
+`main`, the tag matches `__version__`); a dry run cannot publish, because the
+publish job exists only in the release workflow. Only the
 `publish` job, gated by the `pypi` environment, holds the OIDC token. It
 downloads the checked archives, never rebuilds them, and uploads them with
 [PEP 740](https://peps.python.org/pep-0740/) attestations through PyPI trusted
@@ -65,24 +70,35 @@ publishing. No API token exists anywhere.
    ```bash
    uv sync --locked
    uv run python -m unittest discover -s tests
-   uv run whykit lint examples/northline --strict --today 2026-09-17
-   export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
-   uv build --out-dir dist
-   uv build --out-dir dist-rebuild
-   python3 scripts/check_dist.py dist --reproducible-against dist-rebuild
-   uv run --locked --only-group dist twine check --strict dist/*
+   python3 scripts/release_rehearsal.py
    ```
 
-   `check_dist.py` prints one SHA-256 per archive. Keep them; step 7 compares
-   against them. Delete `dist/` and `dist-rebuild/` afterwards, so they are not
-   committed.
+   [`scripts/release_rehearsal.py`](../scripts/release_rehearsal.py) checks
+   that the tree is clean at the commit, computes the version from the
+   changelog and compares it with `__version__`, builds the wheel and sdist
+   twice with `SOURCE_DATE_EPOCH` from the commit, runs `check_dist.py` and
+   `twine check --strict`, installs the wheel into a fresh environment for
+   every supported Python installed on your machine (and the sdist once), runs
+   `init`, `lint`, a strict `lint` and `trace` of the Northline example and an
+   MCP client that lists the tools, writes release notes from the changelog,
+   and prints the tag commands for step 6. It never tags, pushes or uploads.
+   `uv` runs offline; pass `--online` once if the cache is cold. Use
+   `--skip-build` to check only the version, notes and commands, and
+   `--python 3.11` to limit the smoke to one interpreter.
+
+   It prints one SHA-256 per archive. Keep them; step 7 compares against them.
+   The archives stay in the work directory it names, outside the checkout.
+   Before the version bump the rehearsal reports PENDING steps (a `.dev`
+   version, an undated changelog section) and still exits 0; only a run that
+   says READY TO TAG is the one whose digests step 7 must match.
 4. **Merge the pull request** once every required check is green. Then confirm
    that CI on the resulting `main` commit is green too; the release reruns the
    same gates and will fail if they do not pass there.
 5. **Download the `distributions` artifact** from that `main` run and read the
    SBOM. It must list `whykit` at the release version and no other component.
 6. **Tag the merged commit and push the tag.** This is the irreversible step:
-   a version uploaded to PyPI can be yanked but never replaced.
+   a version uploaded to PyPI can be yanked but never replaced. The rehearsal
+   prints these commands with the commit filled in.
 
    ```bash
    git switch main

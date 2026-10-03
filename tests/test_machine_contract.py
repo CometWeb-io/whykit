@@ -146,6 +146,7 @@ class SuccessPayloadTests(unittest.TestCase):
             ("trace", ["trace", *root, "--decision", "D-999", "--json", "--today", TODAY], (1,)),
             ("query", ["query", "pricing", *root, "--json"], (0,)),
             ("context", ["context", "D-001", *root, "--json"], (0,)),
+            ("context", ["context", "E-001", *root, "--json"], (0,)),
             ("pack", ["pack", "D-001", *root, "--json"], (0,)),
             ("review list", ["review", *root, "list", "--json", "--today", TODAY], (0,)),
             ("snapshot", ["snapshot", *root, "--today", TODAY], (0,)),
@@ -153,6 +154,8 @@ class SuccessPayloadTests(unittest.TestCase):
             ("policy", ["policy", *root, "--json"], (0,)),
             ("evidence list", ["evidence", *root, "list", "--json"], (0,)),
             ("history", ["history", *root, "--base", "HEAD", "--json"], (0,)),
+            ("diff", ["diff", *root, "--base", "HEAD", "--json", "--today", TODAY], (0,)),
+            ("diff", ["diff", *root, "--base", "HEAD", "--format", "json", "--today", TODAY], (0,)),
             ("rules", ["rules", "--json"], (0,)),
             ("rules <code>", ["rules", "evidence.missing", "--json"], (0,)),
             ("doctor", ["doctor", *root, "--json"], (0, 1)),
@@ -343,6 +346,7 @@ class ErrorObjectTests(unittest.TestCase):
             repo = Path(raw)
             git("init", "-q", cwd=repo)
             self.assertJsonError(["history", "--root", str(repo), "--base", "no-such-ref", "--json"], "git_error")
+            self.assertJsonError(["diff", "--root", str(repo), "--base", "no-such-ref", "--json"], "git_error")
         with mock.patch("whykit.immutability.changed_records", side_effect=FileNotFoundError("git")):
             payload = self.assertJsonError(["history", "--base", "HEAD", "--json"], "missing_dependency")
             self.assertIn("Git", payload["error"]["hint"])

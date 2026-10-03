@@ -80,8 +80,10 @@ directory, for example `root: knowledge`.
 | `today` | empty | Evaluate review dates as of this `YYYY-MM-DD` instead of the runner clock. Useful for example or archived vaults. |
 | `annotations` | `"false"` | Print findings as GitHub annotations (`--format github`), so they show up inline on the pull request diff. |
 | `sarif` | `"false"` | Also export every lint finding as SARIF and upload it to code scanning. See [Code scanning](#code-scanning-sarif). |
+| `comment` | `"false"` | On pull requests, post the decision diff as one comment and update it on every push. Needs `pull-requests: write` and `fetch-depth: 0`. See [Decision diff comment](#decision-diff-comment). |
+| `github-token` | the job's `GITHUB_TOKEN` | Token used only by `comment` to write the pull request comment. |
 
-`history`, `strict`, `annotations` and `sarif` accept only the strings `"true"`
+`history`, `strict`, `annotations`, `sarif` and `comment` accept only the strings `"true"`
 and `"false"`, and `today` must be a real `YYYY-MM-DD` date. Anything else exits with code 2 so a
 typo cannot silently turn a check off.
 
@@ -147,6 +149,68 @@ upload; leave `sarif` off for them, for example with
 uploads under its own category (`whykit:<root>`), so two vaults in one
 repository do not overwrite each other's alerts.
 
+### Decision diff comment
+
+With `comment: "true"` the Action runs
+`whykit diff --base <PR base> --head HEAD --format markdown` and keeps one
+comment on the pull request up to date with it: new, superseded and archived
+decisions with their supersession chain, status and review-date moves, evidence
+added, retired or re-sourced, the decisions that cite changed evidence, and the
+lint findings the change introduces or fixes. Reviewers see what the change
+does to the reasoning without reading the Markdown diff line by line. The same
+report is appended to the job summary.
+
+Grant the write permission to this one job only, never at the workflow level:
+
+```yaml
+jobs:
+  decision-diff:
+    runs-on: ubuntu-latest
+    # Forks get a read-only token; the Action skips the comment for them anyway.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: CometWeb-io/whykit@<reviewed-40-character-commit-sha>
+        with:
+          root: knowledge
+          profile: ci
+          comment: "true"
+```
+
+How it behaves:
+
+- It runs only on `pull_request` events. Do not trigger it from
+  `pull_request_target`: that event runs with a write token, and the diff reads
+  the pull request's own content.
+- For a pull request from a fork it never posts. The report still goes to the
+  job summary.
+- It edits only a comment that starts with the vault's marker line
+  (`<!-- whykit-diff root=knowledge -->`) and was written by a bot account, so
+  each vault in a repository gets its own comment and a person's comment is
+  never overwritten.
+- Text from the vault is escaped before it reaches the comment, so a decision
+  title cannot add HTML, links or `@`-mentions.
+- If the API refuses the write (a missing `pull-requests: write`, a read-only
+  Dependabot token), the step prints a warning and the job carries on. The
+  comment is informational; the gate is the `profile` or lint step.
+- `base` and `today` apply to the diff as well. The diff needs full history
+  (`fetch-depth: 0`) and fails with exit code 2 in a shallow clone.
+
+To produce the same report locally or in another CI system:
+
+```bash
+whykit diff --root knowledge --base origin/main --format markdown
+```
+
 ### Release gate
 
 The `release` profile also requires a Git work tree, a clean working tree, a
@@ -200,6 +264,11 @@ describes both.
 whykit lint --root . --format sarif > whykit.sarif
 whykit check --root . --profile ci --format github
 ```
+
+`whykit diff --base origin/main` summarizes what a change does to the
+decisions and evidence, in `text`, `json`, `markdown` or `github` format. It is
+a report rather than a gate and exits `0` whenever it could compare the two
+revisions; see [Decision diff comment](#decision-diff-comment).
 
 ## Exit codes
 
@@ -265,6 +334,10 @@ whykit history --staged --root knowledge
 `whykit install-hooks` writes a Git `pre-commit` hook that runs
 `whykit check --profile local` before every commit. The `local` profile reports
 warnings without blocking, so the hook only stops commits that introduce errors.
+The vault does not have to be the repository root: for a vault in a
+subdirectory such as `knowledge/`, run `whykit install-hooks --root knowledge`
+and the hook checks that directory. Git decides where the hook goes, so linked
+worktrees and `core.hooksPath` are respected.
 
 The hook calls the `whykit` executable on `PATH`. If you run WhyKit from a source
 checkout with `uv run`, `whykit` is not on `PATH` and the hook prints a notice

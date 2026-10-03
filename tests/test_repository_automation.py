@@ -119,6 +119,32 @@ class PinnedAndLeastPrivilegeTests(unittest.TestCase):
                     self.assertNotRegex(text, r"(?m)^\s*id-token:\s*write")
                     self.assertNotIn("pypi-publish", text)
 
+    def test_release_build_is_shared_with_a_pull_request_dry_run(self) -> None:
+        # The build half of the release must run on pull requests, so a broken
+        # release step shows up before a tag does, and it must be the same job
+        # the tag run uses: release.yml calls it instead of keeping a copy.
+        build = (ROOT / ".github" / "workflows" / "release-build.yml").read_text(encoding="utf-8")
+        triggers = _children(_block(build, "on"), 2)
+        self.assertEqual(set(triggers), {"pull_request", "workflow_call"})
+        self.assertRegex("\n".join(triggers["workflow_call"]), r"release:\n\s+description: .+\n\s+type: boolean\n\s+required: true")
+        for forbidden in ("id-token", "environment:", "pypi-publish", "enable-cache: true", "secrets"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, build)
+        for step in ("Verify release provenance", "The tag must match the package version"):
+            with self.subTest(step=step):
+                self.assertRegex(build, rf"- name: {step}\n\s+if: \$\{{\{{ inputs\.release \}}\}}\n")
+        for needle in ("uv build", "scripts/check_dist.py", "twine check --strict", "cyclonedx-py", "name: release-distributions", "name: release-sbom"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, build)
+
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        jobs = _children(_block(release, "jobs"), 2)
+        self.assertEqual(set(jobs), {"quality", "build", "publish"})
+        self.assertIn("    uses: ./.github/workflows/release-build.yml", jobs["build"])
+        self.assertIn("      release: true", jobs["build"])
+        self.assertIn("    needs: quality", jobs["build"])
+        self.assertNotIn("uv build", release, "the release must not keep its own copy of the build steps")
+
     def test_dependabot_covers_every_ecosystem_with_a_cooldown(self) -> None:
         text = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
         entries = text.split("- package-ecosystem: ")[1:]
@@ -137,7 +163,8 @@ class CompositeActionContractTests(unittest.TestCase):
         inputs = _children(_block(self.text, "inputs"), 2)
         outputs = _children(_block(self.text, "outputs"), 2)
         self.assertEqual(
-            set(inputs), {"root", "profile", "strict", "base", "history", "today", "annotations", "sarif"}
+            set(inputs),
+            {"root", "profile", "strict", "base", "history", "today", "annotations", "sarif", "comment", "github-token"},
         )
         self.assertEqual(set(outputs), {"version", "sarif-file"})
         for name, body in [*inputs.items(), *outputs.items()]:
@@ -281,6 +308,113 @@ class CompositeActionContractTests(unittest.TestCase):
 
 
 @unittest.skipIf(shutil.which("git") is None or os.name == "nt", "needs git and symlinks")
+class DecisionDiffCommentTests(unittest.TestCase):
+    """`comment: "true"`: one sticky comment, pull_request only, never for forks."""
+
+    STEP = "Decision diff comment"
+
+    def test_step_is_opt_in_and_reads_the_token_from_an_input(self) -> None:
+        text = ACTION.read_text(encoding="utf-8")
+        step = text.split(f"    - name: {self.STEP}\n", 1)[1].split("\n    - name: ", 1)[0]
+        self.assertIn("if: inputs.comment != 'false'", step)
+        self.assertIn("GITHUB_TOKEN: ${{ inputs.github-token }}", step)
+        self.assertIn("default: ${{ github.token }}", text)
+        # The step must come before the gates, so a failing gate still leaves the comment.
+        self.assertLess(text.index(self.STEP), text.index("Repository policy gate"))
+        self.assertLess(text.index(self.STEP), text.index("Lint the vault (legacy mode)"))
+
+    def test_ci_grants_pull_request_write_to_one_same_repository_job(self) -> None:
+        text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        jobs = _children(_block(text, "jobs"), 2)
+        writers = [name for name, body in jobs.items() if any("pull-requests: write" in line for line in body)]
+        self.assertEqual(writers, ["decision-diff"])
+        job = "\n".join(jobs["decision-diff"])
+        permissions = job.split("permissions:", 1)[1].split("steps:", 1)[0]
+        self.assertEqual(
+            [line.strip() for line in permissions.splitlines() if line.strip()],
+            ["contents: read", "pull-requests: write"],
+        )
+        self.assertIn("github.event_name == 'pull_request'", job)
+        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", job)
+        self.assertIn('comment: "true"', job)
+        for path in WORKFLOWS:
+            if path.name != "ci.yml":
+                with self.subTest(file=path.name):
+                    self.assertNotIn("pull-requests: write", path.read_text(encoding="utf-8"))
+
+    @unittest.skipIf(os.name == "nt" or shutil.which("bash") is None, "needs a POSIX bash")
+    def test_comment_step_validates_inputs_and_skips_forks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            calls = Path(tmp) / "whykit-argv"
+            posted = Path(tmp) / "python-argv"
+            summary = Path(tmp) / "summary.md"
+            fake = Path(tmp) / "whykit"
+            fake.write_text(
+                f'#!/bin/sh\nprintf "%s\\n" "$@" > "{calls}"\n'
+                'printf "<!-- whykit-diff root=vault -->\\nreport\\n"\n',
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            python = Path(tmp) / "python"
+            python.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{posted}"\n', encoding="utf-8")
+            python.chmod(0o755)
+
+            def run(**env: str) -> subprocess.CompletedProcess[str]:
+                for path in (calls, posted, summary):
+                    path.unlink(missing_ok=True)
+                values = {
+                    "WHYKIT": str(fake), "WHYKIT_PYTHON": str(python), "WHYKIT_ACTION_PATH": "/action",
+                    "WHYKIT_ROOT": "vault", "WHYKIT_COMMENT": "true", "WHYKIT_BASE": "", "WHYKIT_TODAY": "",
+                    "WHYKIT_BASE_SHA": "abc123", "WHYKIT_PR_NUMBER": "7", "WHYKIT_EVENT": "pull_request",
+                    "WHYKIT_REPOSITORY": "example/vault", "WHYKIT_HEAD_REPO": "example/vault",
+                    "RUNNER_TEMP": tmp, "GITHUB_STEP_SUMMARY": str(summary), **env,
+                }
+                return subprocess.run(
+                    ["bash", "-c", _action_step_script(self.STEP)],
+                    cwd=ROOT, text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=30,
+                    env={**os.environ, **values},
+                )
+
+            ok = run(WHYKIT_TODAY="2026-09-17")
+            self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+            self.assertEqual(
+                calls.read_text(encoding="utf-8").split(),
+                ["diff", "--root", "vault", "--head", "HEAD", "--format", "markdown",
+                 "--base", "abc123", "--today", "2026-09-17"],
+            )
+            self.assertIn("<!-- whykit-diff root=vault -->", summary.read_text(encoding="utf-8"))
+            argv = posted.read_text(encoding="utf-8").split("\n")
+            self.assertEqual(argv[0], "/action/scripts/pr_comment.py")
+            self.assertEqual(argv[3:7], ["--repository", "example/vault", "--pull", "7"])
+
+            explicit = run(WHYKIT_BASE="origin/main")
+            self.assertEqual(explicit.returncode, 0, explicit.stdout + explicit.stderr)
+            self.assertIn("origin/main", calls.read_text(encoding="utf-8").split())
+
+            fork = run(WHYKIT_HEAD_REPO="someone/fork")
+            self.assertEqual(fork.returncode, 0, fork.stdout + fork.stderr)
+            self.assertTrue(calls.exists())
+            self.assertTrue(summary.exists())
+            self.assertFalse(posted.exists(), "a fork must never get a comment")
+
+            push = run(WHYKIT_EVENT="push")
+            self.assertEqual(push.returncode, 0)
+            self.assertFalse(calls.exists())
+            self.assertFalse(posted.exists())
+
+            target = run(WHYKIT_EVENT="pull_request_target")
+            self.assertEqual(target.returncode, 0)
+            self.assertFalse(posted.exists())
+
+            for env, message in (({"WHYKIT_COMMENT": "yes"}, "comment must be"),
+                                 ({"WHYKIT_TODAY": "2026-09-17; id"}, "today must be")):
+                bad = run(**env)
+                with self.subTest(env=env):
+                    self.assertEqual(bad.returncode, 2)
+                    self.assertIn(message, bad.stdout)
+                    self.assertFalse(posted.exists())
+
+
 class InstallHooksTests(unittest.TestCase):
     def _git(self, *args: str, cwd: Path) -> None:
         subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, timeout=30)

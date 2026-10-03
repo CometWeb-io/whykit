@@ -20,7 +20,20 @@ export interface VaultDoc {
   decisionId: string | null;
   supersedes: string | null;
   summary: string;
-  body: string;
+  /**
+   * The Markdown body. A full index from `whykit explorer-index` carries it;
+   * the summary the Explorer bundles leaves it out and loads the bodies as a
+   * separate chunk (see lib/split.ts).
+   */
+  body?: string;
+  /**
+   * Resolved outgoing links as positions in `docs`, precomputed when the body
+   * is split off (positions rather than ids keep a large index about a
+   * megabyte smaller).
+   */
+  links?: number[];
+  /** Open-question headings and "Needs verification" markers in the body. */
+  cues?: number;
 }
 export interface EvidenceRow {
   id: string;

@@ -41,6 +41,7 @@ class McpRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 server_info = client.server_info
 
         from whykit import __version__
+        from whykit.mcp_server import output_schema
 
         self.assertIsNotNone(server_info)
         self.assertEqual((server_info.name, server_info.version), ("whykit", __version__))
@@ -58,6 +59,7 @@ class McpRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(tool.annotations.open_world_hint)
                 for name, schema in tool.input_schema["properties"].items():
                     self.assertTrue(schema.get("description"), f"{tool.name}.{name} has no description")
+                self.assertEqual(tool.output_schema, output_schema(tool.name))
 
     async def test_in_process_errors_are_structured_tool_results(self) -> None:
         from whykit.mcp_server import build_server
@@ -281,16 +283,16 @@ class McpStdioConformanceTests(unittest.IsolatedAsyncioTestCase):
             for path in sorted(self.vault.rglob("*")) if path.is_file()
         }
 
-    async def connected(self, check) -> None:
+    async def connected(self, check, *extra: str, mode: str = "auto") -> None:
         # The SDK client's task group must be entered and left in one task, so
         # each test opens its own stdio session instead of sharing one from
         # asyncSetUp.
         parameters = StdioServerParameters(
             command=sys.executable,
-            args=["-m", "whykit.mcp_server", "--root", str(self.vault)],
+            args=["-m", "whykit.mcp_server", "--root", str(self.vault), *extra],
         )
         async with asyncio.timeout(60):
-            async with Client(parameters, read_timeout_seconds=10) as client:
+            async with Client(parameters, read_timeout_seconds=10, mode=mode) as client:
                 self.client = client
                 await check()
 
@@ -405,7 +407,11 @@ class McpStdioConformanceTests(unittest.IsolatedAsyncioTestCase):
 
     async def _check_resources_are_read_only_and_ceiling_filtered(self) -> None:
         listed = await self.client.list_resources()
-        self.assertEqual({str(item.uri) for item in listed.resources}, {"whykit://decisions"})
+        self.assertEqual([str(item.uri) for item in listed.resources], ["whykit://decisions", "whykit://record/D-002"])
+        self.assertIsNone(listed.next_cursor)
+        with self.assertRaises(MCPError) as caught:
+            await self.client.list_resources(cursor="not-a-cursor", cache_mode="bypass")
+        self.assertEqual(caught.exception.error.code, -32602)
         templates = await self.client.list_resource_templates()
         self.assertEqual([item.uri_template for item in templates.resource_templates], ["whykit://record/{+target}"])
 
@@ -456,6 +462,111 @@ class McpStdioConformanceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(MCPError):
             await self.client.get_prompt("summarize_decision", {"decision_id": "../../etc/passwd"})
 
+    async def _check_structured_results_follow_the_declared_output_schemas(self) -> None:
+        from whykit.mcp_server import TOOL_NAMES, output_schema
+
+        listed = await self.client.list_tools()
+        self.assertEqual({tool.name: tool.output_schema for tool in listed.tools},
+                         {name: output_schema(name) for name in TOOL_NAMES})
+        # The SDK client validates every successful structuredContent against
+        # the declared schema and raises on a mismatch.
+        for name, arguments in (
+            ("query", {"limit": 1}),
+            ("context", {"target": "E-001"}),
+            ("context", {"target": "archive/classified"}),
+            ("impact", {"target": "E-001"}),
+            ("status", {}),
+            ("pack", {"query": "visible"}),
+            ("trace", {"limit": 1}),
+            ("backlinks", {"target": "notes/hub", "limit": 1}),
+        ):
+            with self.subTest(tool=name, arguments=arguments):
+                result = await self.client.call_tool(name, arguments)
+                self.assertFalse(result.is_error, result.structured_content)
+
+    async def _check_tool_pages_follow_cursors(self) -> None:
+        seen, cursor = [], ""
+        for _ in range(200):
+            payload, is_error = await self.call("query", {"limit": 1, "cursor": cursor})
+            self.assertFalse(is_error, payload)
+            seen += [item["path"] for item in payload["results"]]
+            cursor = payload["next_cursor"]
+            if cursor is None:
+                break
+        whole, _ = await self.call("query", {"limit": 100})
+        self.assertEqual(seen, [item["path"] for item in whole["results"]])
+        self.assertFalse([path for path in seen if path.startswith("archive/")])
+        payload, is_error = await self.call("trace", {"limit": 1, "cursor": "AAAA"})
+        self.assertTrue(is_error)
+        self.assertEqual(payload["error"]["code"], "invalid_cursor")
+
+    async def _check_completions_offer_only_visible_records(self) -> None:
+        from mcp_types import PromptReference, ResourceTemplateReference
+
+        self.assertIsNotNone(self.client.server_capabilities.completions)
+        template = ResourceTemplateReference(uri="whykit://record/{+target}")
+        decisions = await self.client.complete(template, {"name": "target", "value": "D-"})
+        self.assertEqual(decisions.completion.values, ["D-002"])
+        paths = await self.client.complete(template, {"name": "target", "value": ""})
+        self.assertIn("notes/shared.md", paths.completion.values)
+        self.assertFalse([value for value in paths.completion.values if value.startswith("archive/")])
+        prompt = await self.client.complete(PromptReference(name="summarize_decision"),
+                                            {"name": "decision_id", "value": ""})
+        self.assertEqual(prompt.completion.values, ["D-002"])
+        hidden = await self.client.complete(template, {"name": "target", "value": "archive/"})
+        self.assertEqual((hidden.completion.values, hidden.completion.total), ([], 0))
+
+    async def _check_change_events_cover_visible_records_only(self) -> None:
+        hidden = self.vault / "06-decisions" / "d-001-hidden.md"
+        visible = self.vault / "06-decisions" / "d-002-visible.md"
+        uris = ["whykit://decisions", "whykit://record/D-001", "whykit://record/D-002"]
+        async with self.client.listen(resources_list_changed=True, resource_subscriptions=uris) as subscription:
+            await asyncio.sleep(1.0)  # let the watcher record its baseline
+            events: list = []
+
+            async def collect() -> None:
+                async for event in subscription:
+                    events.append(event)
+
+            async with asyncio.TaskGroup() as group:
+                task = group.create_task(collect())
+                try:
+                    hidden.write_text(hidden.read_text(encoding="utf-8") + "\nhidden edit\n", encoding="utf-8")
+                    await asyncio.sleep(1.5)
+                    self.assertEqual(events, [], "a hidden edit produced a change event")
+                    visible.write_text(visible.read_text(encoding="utf-8") + "\nvisible edit\n", encoding="utf-8")
+                    for _ in range(50):
+                        if events:
+                            break
+                        await asyncio.sleep(0.1)
+                finally:
+                    task.cancel()
+                    hidden.write_bytes(self.before["06-decisions/d-001-hidden.md"])
+                    visible.write_bytes(self.before["06-decisions/d-002-visible.md"])
+        self.assertEqual([getattr(event, "uri", None) for event in events], ["whykit://record/D-002"])
+
+    async def _check_handshake_clients_are_not_promised_subscriptions(self) -> None:
+        capabilities = self.client.server_capabilities
+        self.assertFalse(capabilities.resources.subscribe)
+        self.assertIsNotNone(capabilities.completions)
+        listed = await self.client.list_resources()
+        self.assertEqual(len(listed.resources), 2)
+
+    async def test_structured_results_follow_the_declared_output_schemas(self) -> None:
+        await self.connected(self._check_structured_results_follow_the_declared_output_schemas)
+
+    async def test_tool_pages_follow_cursors(self) -> None:
+        await self.connected(self._check_tool_pages_follow_cursors)
+
+    async def test_completions_offer_only_visible_records(self) -> None:
+        await self.connected(self._check_completions_offer_only_visible_records)
+
+    async def test_change_events_cover_visible_records_only(self) -> None:
+        await self.connected(self._check_change_events_cover_visible_records_only, "--watch-interval", "0.2")
+
+    async def test_handshake_clients_are_not_promised_subscriptions(self) -> None:
+        await self.connected(self._check_handshake_clients_are_not_promised_subscriptions, mode="legacy")
+
     async def test_every_tool_answers_a_valid_call(self) -> None:
         await self.connected(self._check_every_tool_answers_a_valid_call)
 
@@ -473,6 +584,53 @@ class McpStdioConformanceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_prompts_embed_only_visible_data(self) -> None:
         await self.connected(self._check_prompts_embed_only_visible_data)
+
+
+@unittest.skipIf(Client is None, "install the optional whykit[mcp] extra")
+class McpHttpTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_http_transport_requires_the_bearer_token(self) -> None:
+        import socket
+
+        import httpx2
+        from mcp.client.streamable_http import streamable_http_client
+
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            token = "t0ken-" + "x" * 40
+            token_file = Path(tmp) / "token"
+            token_file.write_text(token + "\n", encoding="utf-8")
+            server = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "whykit.mcp_server", "--root", str(ROOT / "examples" / "tiny"),
+                "--http", "--port", str(port), "--token-file", str(token_file),
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+            )
+            url = f"http://127.0.0.1:{port}/mcp"
+            try:
+                async with asyncio.timeout(60), httpx2.AsyncClient() as http:
+                    while True:
+                        try:
+                            denied = await http.post(url, json={})
+                            break
+                        except httpx2.TransportError:
+                            await asyncio.sleep(0.1)
+                    self.assertEqual(denied.status_code, 401)
+                    self.assertEqual(denied.json()["error"]["code"], "unauthorized")
+                    wrong = await http.post(url, json={}, headers={"Authorization": "Bearer " + "y" * 46})
+                    self.assertEqual(wrong.status_code, 401)
+                    async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"}) as authorized:
+                        async with Client(streamable_http_client(url, http_client=authorized)) as client:
+                            listed = await client.list_tools()
+                            self.assertEqual(len(listed.tools), 7)
+                            result = await client.call_tool("status", {})
+                            self.assertFalse(result.is_error)
+                            self.assertNotIn(tmp, result.content[0].text)
+            finally:
+                server.terminate()
+                _, stderr = await server.communicate()
+            self.assertIn(f"http://127.0.0.1:{port}/mcp", stderr.decode("utf-8"))
+            self.assertNotIn(token, stderr.decode("utf-8"))
 
 
 if __name__ == "__main__":

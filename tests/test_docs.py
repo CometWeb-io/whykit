@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from whykit import config as whykit_config  # noqa: E402
 from whykit import mcp_server  # noqa: E402
+from whykit import rule_policy  # noqa: E402
 from whykit.cli import build_parser  # noqa: E402
 from whykit.contract import ERROR_CODES, ERROR_EXIT_CODES  # noqa: E402
 from whykit.rules import RULE_BY_CODE  # noqa: E402
@@ -359,6 +360,26 @@ class ReferencePageTests(unittest.TestCase):
             self.assertRegex(doc, rf"`(?:profiles\.<name>)?\.{key}`")
         for key in whykit_config._TOP_LEVEL_KEYS:
             self.assertIn(key, doc)
+
+    def test_configuration_reference_covers_every_team_rule_key(self) -> None:
+        doc = (DOCS / "configuration.md").read_text(encoding="utf-8")
+
+        def keys(section: str) -> set[str]:
+            return {key for row in _table_rows(_section(doc, section)) for key in re.findall(r"`([a-z_.]+)`", row[0])}
+
+        expected = (rule_policy.CUSTOM_KEYS - {"applies_to"}) | {f"applies_to.{key}" for key in rule_policy.APPLIES_TO_KEYS}
+        self.assertEqual(keys("Custom rules"), set(expected))
+        self.assertEqual(keys("Overrides"), set(rule_policy.OVERRIDE_KEYS))
+
+    def test_every_repository_script_is_documented(self) -> None:
+        readme = (ROOT / "scripts" / "README.md").read_text(encoding="utf-8")
+        for script in sorted((ROOT / "scripts").iterdir()):
+            if script.name == "README.md":
+                continue
+            with self.subTest(script=script.name):
+                self.assertRegex(readme, rf"`(?:scripts/)?{re.escape(script.name)}`")
+        releasing = (DOCS / "releasing.md").read_text(encoding="utf-8")
+        self.assertIn("scripts/release_rehearsal.py", releasing)
 
     def test_policy_keys_mentioned_anywhere_exist(self) -> None:
         for path in DOC_FILES:
