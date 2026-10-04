@@ -19,7 +19,7 @@
     "e2e": "npm run e2e:build && playwright test"
   },
   "dependencies": {
-    "lucide-react": "^0.510.0",
+    "lucide-react": "^1.48.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
