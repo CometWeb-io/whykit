@@ -129,9 +129,10 @@ WhyKit creates `D-002`, marks `D-001` as `superseded` with
 stays exactly as written. That is the point: six months later, the record shows
 what was believed at the time *and* what replaced it.
 
-The only edit allowed on an accepted record is that transition: `status` to
-`superseded`, `last_updated`, and optionally `superseded_by`. Everything else is
-rejected by the history check.
+Two edits are allowed on an accepted record. The lifecycle transition changes
+`status` to `superseded` or `archived`, with `last_updated` and optionally
+`superseded_by`. A confirmed review (`whykit review record`) moves only
+`review_by` and `last_updated`. Everything else is rejected by the history check.
 
 ## The review cycle
 

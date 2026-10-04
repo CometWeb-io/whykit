@@ -12,9 +12,17 @@ import cost the way a user or CI job pays it.
     python3 scripts/bench.py --notes 5000 --src /old/src   # time another checkout's code
     python3 scripts/bench.py --notes 5000 --mcp            # MCP tool latency, cold and repeated
     python3 scripts/bench.py --notes 5000 --memory         # peak traced memory per command
+    python3 scripts/bench.py --notes 5000 --cache warm     # with the parse cache primed
 
 A synthetic vault is written by ``tests/synthetic_vault.py`` into a temporary
 directory (or ``--work``) and is byte-identical for the same ``--notes``.
+
+``--cache`` selects the parse cache in ``.whykit/cache/``: ``off`` (the
+default) runs every command with ``WHYKIT_NO_CACHE=1``; ``cold`` deletes the
+cache before each command, so the command parses everything and writes a new
+one; ``warm`` primes the cache once and leaves it in place.  Timings are wall
+clock and CPU time (user + system) of the command's process; on a busy machine
+the CPU time is the steadier of the two.
 """
 from __future__ import annotations
 
@@ -22,6 +30,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -119,22 +128,53 @@ profiler.dump_stats({out!r})
 """
 
 
-def run(src: Path, vault: Path, name: str, argv: list[str], profile_dir: Path | None) -> tuple[float, int, bytes]:
+CACHE_MODES = ("off", "cold", "warm")
+
+
+def cache_env(mode: str) -> dict[str, str]:
+    env = {**os.environ, "PYTHONHASHSEED": "0"}
+    env.pop("WHYKIT_NO_CACHE", None)
+    if mode == "off":
+        env["WHYKIT_NO_CACHE"] = "1"
+    return env
+
+
+def drop_cache(vault: Path) -> None:
+    shutil.rmtree(vault / ".whykit" / "cache", ignore_errors=True)
+
+
+def _children_cpu() -> float:
+    try:
+        import resource
+    except ImportError:  # Windows: no rusage, report wall clock only
+        return 0.0
+    usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return usage.ru_utime + usage.ru_stime
+
+
+def run(
+    src: Path, vault: Path, name: str, argv: list[str], profile_dir: Path | None, cache: str = "off",
+) -> tuple[float, int, bytes, float]:
     # `--root` belongs to the top-level command (for `review`, before the action).
     full = [argv[0], "--root", str(vault), *argv[1:]]
     template = _PROFILER if profile_dir else _RUNNER
     code = template.format(src=str(src), argv=full, out=str(profile_dir / f"{name}.prof") if profile_dir else "")
+    if cache == "cold":
+        drop_cache(vault)
+    cpu = _children_cpu()
     started = time.perf_counter()
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, cwd=vault, env={**os.environ, "PYTHONHASHSEED": "0"})
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, cwd=vault, env=cache_env(cache))
     elapsed = time.perf_counter() - started
-    return elapsed, result.returncode, result.stdout
+    return elapsed, result.returncode, result.stdout, _children_cpu() - cpu
 
 
-def run_memory(src: Path, vault: Path, argv: list[str]) -> int:
+def run_memory(src: Path, vault: Path, argv: list[str], cache: str = "off") -> int:
     full = [argv[0], "--root", str(vault), *argv[1:]]
+    if cache == "cold":
+        drop_cache(vault)
     result = subprocess.run(
         [sys.executable, "-c", _MEMORY.format(src=str(src), argv=full)], capture_output=True, text=True, cwd=vault,
-        env={**os.environ, "PYTHONHASHSEED": "0"},
+        env=cache_env(cache),
     )
     if result.returncode != 0:
         raise SystemExit(result.stderr or result.stdout)
@@ -167,6 +207,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mcp", action="store_true", help="time each MCP tool in-process instead of the CLI")
     parser.add_argument("--repeat", type=int, default=5, help="calls per MCP tool, the first one cold (default: 5)")
     parser.add_argument("--memory", action="store_true", help="report each command's peak traced memory instead of time")
+    parser.add_argument("--cache", choices=CACHE_MODES, default="off", help="parse cache: off (default), cold or warm")
+    parser.add_argument("--runs", type=int, default=1, help="run each command N times and keep the best (default: 1)")
     args = parser.parse_args(argv)
     if args.mcp and args.repeat < 2:
         parser.error("--repeat must be at least 2")
@@ -189,12 +231,18 @@ def main(argv: list[str] | None = None) -> int:
             record.mkdir(parents=True, exist_ok=True)
         compare = Path(args.compare).resolve() if args.compare else None
 
+        if args.cache == "warm":
+            drop_cache(vault)
+            run(Path(args.src).resolve(), vault, "prime", list(COMMANDS[0][1]), None, "warm")
+
         if args.memory:
             peaks: dict[str, float] = {}
             for name, command in COMMANDS:
                 if args.only and name not in args.only:
                     continue
-                peaks[name] = round(run_memory(Path(args.src).resolve(), vault, command) / 2**20, 1)
+                peaks[name] = round(min(
+                    run_memory(Path(args.src).resolve(), vault, command, args.cache) for _ in range(max(1, args.runs))
+                ) / 2**20, 1)
                 if not args.json:
                     print(f"{name:<16}{peaks[name]:8.1f} MB", flush=True)
             if args.json:
@@ -212,12 +260,20 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         timings: dict[str, float] = {}
+        cpu_times: dict[str, float] = {}
         mismatches: list[str] = []
         for name, command in COMMANDS:
             if args.only and name not in args.only:
                 continue
-            elapsed, code, stdout = run(Path(args.src).resolve(), vault, name, command, profile_dir)
+            best: tuple[float, int, bytes, float] | None = None
+            for _ in range(max(1, args.runs)):
+                attempt = run(Path(args.src).resolve(), vault, name, command, profile_dir, args.cache)
+                if best is None or attempt[3] < best[3]:
+                    best = attempt
+            assert best is not None
+            elapsed, code, stdout, cpu = best
             timings[name] = round(elapsed, 3)
+            cpu_times[name] = round(cpu, 3)
             blob = f"exit={code}\n".encode() + stdout
             if record:
                 (record / f"{name}.out").write_bytes(blob)
@@ -227,9 +283,12 @@ def main(argv: list[str] | None = None) -> int:
                     mismatches.append(name)
             if not args.json:
                 flag = "  DIFF" if name in mismatches else ""
-                print(f"{name:<16}{elapsed:8.2f}s  exit={code}{flag}", flush=True)
+                print(f"{name:<16}{elapsed:8.2f}s{cpu:8.2f}s cpu  exit={code}{flag}", flush=True)
         if args.json:
-            print(json.dumps({"vault": str(vault), "timings": timings, "mismatches": mismatches}, indent=2))
+            print(json.dumps(
+                {"vault": str(vault), "cache": args.cache, "timings": timings, "cpu": cpu_times, "mismatches": mismatches},
+                indent=2,
+            ))
         if mismatches:
             print(f"output differs for: {', '.join(mismatches)}", file=sys.stderr)
             return 1

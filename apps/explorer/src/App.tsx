@@ -6,7 +6,7 @@ import {
   BookOpen, CheckCircle2, ChevronRight, FileText, GitBranch, HeartPulse, History, Hourglass,
   Menu, Network, Scale, Search, Shield, X, AlertTriangle, Copy, Terminal,
 } from "lucide-react";
-import { vault, docs, resolveDoc, linksFor, backlinksFor, canonicalDocs, searchDocs, evidenceFor, docsForEvidence, decisionChain, bodyOf, openCues, useBodies } from "./lib/vault.ts";
+import { vault, docs, resolveDoc, linksFor, backlinksFor, canonicalDocs, searchDocs, evidenceFor, docsForEvidence, decisionChain, bodyOf, openCues, useBodies, findings as lintFindings, useFindings } from "./lib/vault.ts";
 import { createSlugger, inlineText, parseMarkdown, type MdBlock, type MdInline } from "./lib/markdown.ts";
 import { hrefFor, type Params, type Route, type View } from "./lib/route.ts";
 import { describeDue, reviewQueue } from "./lib/reviews.ts";
@@ -180,20 +180,31 @@ function ReviewsPage() {
 
 const FINDINGS_STEP = 200;
 
+/** Lint findings, from their own chunk: only this page reads them. */
+function Findings() {
+  const state = useFindings();
+  const all = lintFindings();
+  const [limit, more] = useIncremental("", FINDINGS_STEP);
+  if (vault.lint.errors + vault.lint.warnings === 0) return <Empty tone="ok">No mechanical findings in this vault.</Empty>;
+  if (!all) return state === "failed"
+    ? <Empty>The findings could not be loaded. Reload the page to try again.</Empty>
+    : <p className="muted findings-loading" role="status">Loading {vault.lint.errors + vault.lint.warnings} findings…</p>;
+  return <><ul className="findings">{all.slice(0, limit).map((f, i) => {
+    const d = resolveDoc(f.path.replace(/\.md$/, ""));
+    const body = <><span>{f.level}</span><code>{f.code}</code><p>{f.message}</p><small>{f.path}{f.line ? `:${f.line}` : ""}</small></>;
+    return <li key={i}>{d ? <a href={hrefFor("doc", d.id)} className={`finding ${f.level}`}>{body}</a> : <div className={`finding ${f.level}`}>{body}</div>}</li>;
+  })}</ul><ShowMore shown={Math.min(limit, all.length)} total={all.length} step={FINDINGS_STEP} onMore={more} noun="findings"/></>;
+}
+
 function HealthPage() {
   const counts = docs.reduce<Record<string, number>>((a, d) => { a[d.status] = (a[d.status] || 0) + 1; return a; }, {});
   const reviews = reviewQueue(docs, new Date(), 30);
   const overdue = reviews.filter(x => x.days < 0);
-  const [limit, more] = useIncremental("", FINDINGS_STEP);
   return <div className="page"><div className="eyebrow">Deterministic checks</div><h1>Health</h1><p className="lede">Shape, provenance and integrity — never meaning. A clean linter does not certify that a claim is true.</p>
     <div className="metrics three"><Metric label="Errors" value={vault.lint.errors}/><Metric label="Warnings" value={vault.lint.warnings}/><Metric label="Reviews ≤30d" value={reviews.length} detail={overdue.length ? `${overdue.length} overdue` : "none overdue"}/></div>
     {reviews.length ? <section><h2>Review queue</h2><DueList items={reviews} limit={10}/></section> : null}
     <section><h2>Status mix</h2><div className="status-grid">{Object.entries(counts).sort().map(([s, n]) => <div key={s}><StatusBadge status={s}/><strong>{n}</strong></div>)}</div></section>
-    <section><h2>Findings</h2>{vault.lint.findings.length === 0 ? <Empty tone="ok">No mechanical findings in this vault.</Empty> : <><ul className="findings">{vault.lint.findings.slice(0, limit).map((f, i) => {
-      const d = resolveDoc(f.path.replace(/\.md$/, ""));
-      const body = <><span>{f.level}</span><code>{f.code}</code><p>{f.message}</p><small>{f.path}{f.line ? `:${f.line}` : ""}</small></>;
-      return <li key={i}>{d ? <a href={hrefFor("doc", d.id)} className={`finding ${f.level}`}>{body}</a> : <div className={`finding ${f.level}`}>{body}</div>}</li>;
-    })}</ul><ShowMore shown={Math.min(limit, vault.lint.findings.length)} total={vault.lint.findings.length} step={FINDINGS_STEP} onMore={more} noun="findings"/></>}</section>
+    <section><h2>Findings</h2><Findings/></section>
     <section><h2>What Health deliberately cannot tell you</h2><div className="card"><ul><li>whether evidence is reliable or cherry-picked;</li><li>whether a hypothesis is commercially sensible;</li><li>whether an accepted decision was a good one;</li><li>whether sensitive data should have been imported at all.</li></ul></div></section>
   </div>;
 }

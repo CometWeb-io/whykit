@@ -317,7 +317,12 @@ class DecisionDiffCommentTests(unittest.TestCase):
         text = ACTION.read_text(encoding="utf-8")
         step = text.split(f"    - name: {self.STEP}\n", 1)[1].split("\n    - name: ", 1)[0]
         self.assertIn("if: inputs.comment != 'false'", step)
-        self.assertIn("GITHUB_TOKEN: ${{ inputs.github-token }}", step)
+        self.assertIn("WHYKIT_GITHUB_TOKEN: ${{ inputs.github-token }}", step)
+        self.assertNotIn("\n        GITHUB_TOKEN:", step)
+        # Only the comment poster sees the token; `whykit diff` reads the
+        # change under review and never needs it.
+        self.assertIn('env -u WHYKIT_GITHUB_TOKEN "${args[@]}"', step)
+        self.assertIn('GITHUB_TOKEN="${WHYKIT_GITHUB_TOKEN:-}" "$WHYKIT_PYTHON"', step)
         self.assertIn("default: ${{ github.token }}", text)
         # The step must come before the gates, so a failing gate still leaves the comment.
         self.assertLess(text.index(self.STEP), text.index("Repository policy gate"))

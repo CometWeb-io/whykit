@@ -107,6 +107,38 @@ class OfflineTests(unittest.TestCase):
                 with self.subTest(command=argv[0]):
                     self.assertEqual(self._run(*argv), 0, argv)
 
+    def test_language_server_session_runs_without_network(self) -> None:
+        import json
+
+        from whykit import lsp
+
+        with tempfile.TemporaryDirectory() as td:
+            vault = Path(td) / "vault"
+            self.assertEqual(self._run("init", str(vault)), 0)
+            home = vault.resolve() / "Home.md"
+            uri = lsp.path_to_uri(home)
+            messages = [
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                 "params": {"rootUri": lsp.path_to_uri(vault.resolve()), "capabilities": {}}},
+                {"jsonrpc": "2.0", "method": "initialized", "params": {}},
+                {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+                    "uri": uri, "languageId": "markdown", "version": 1,
+                    "text": home.read_text(encoding="utf-8") + "\n[[missing]] E-001\n"}}},
+                {"jsonrpc": "2.0", "id": 2, "method": "textDocument/completion",
+                 "params": {"textDocument": {"uri": uri}, "position": {"line": 0, "character": 0}}},
+                {"jsonrpc": "2.0", "id": 3, "method": "shutdown"},
+                {"jsonrpc": "2.0", "method": "exit"},
+            ]
+            stdin = io.BytesIO(b"".join(
+                b"Content-Length: %d\r\n\r\n%s" % (len(body), body)
+                for body in (json.dumps(m).encode() for m in messages)
+            ))
+            stdout = io.BytesIO()
+            with _no_network():
+                code = lsp.serve(stdin, stdout, debounce=0)
+            self.assertEqual(code, 0)
+            self.assertIn(b"publishDiagnostics", stdout.getvalue())
+
     def test_the_command_list_covers_the_cli(self) -> None:
         # A new subcommand must be added to the offline run, or excluded here
         # with a reason.
@@ -116,7 +148,7 @@ class OfflineTests(unittest.TestCase):
             "init", "new", "lint", "status", "graph", "backlinks", "impact", "query", "context",
             "pack", "review", "evidence", "snapshot", "verify-snapshot", "policy", "rules",
             "adopt", "explorer-index", "history", "check", "install-hooks", "doctor",
-            "trace", "completion", "diff",
+            "trace", "completion", "diff", "lsp",
         }
         excluded = {"serve"}  # starts the optional Explorer dev server
         self.assertEqual(set(subparsers.choices), covered | excluded)

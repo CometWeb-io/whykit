@@ -69,7 +69,11 @@ export interface VaultIndex {
   evidence: EvidenceRow[];
   decisions: DecisionRow[];
   reviews: ReviewRow[];
-  lint: { files: number; errors: number; warnings: number; findings: Finding[] };
+  /**
+   * `findings` is absent from the summary the Explorer bundles: like the note
+   * bodies, the findings are a separate chunk loaded when Health needs them.
+   */
+  lint: { files: number; errors: number; warnings: number; findings?: Finding[] };
   /** Freshness thresholds from whykit.toml; absent in indexes built by older releases. */
   policy?: VaultPolicy;
 }

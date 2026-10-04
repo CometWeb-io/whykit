@@ -10,7 +10,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .lint import Note, _build_index, _link_key, _real, _resolve, _within, collect_markdown, load_note, path_cache, rel
+from .lint import Note, _build_index, _link_key, _real, _resolve, _within, collect_markdown, load_note, path_cache, rel, strip_markdown_suffix
 
 
 class NoteCache:
@@ -111,7 +111,13 @@ class VaultIndex:
         root = Path(root).resolve()
         paths = collect_markdown(root, [])
         cache = _NOTE_CACHE.get()
-        notes = cache.load_all(paths) if cache is not None else [load_note(path) for path in paths]
+        if cache is not None:
+            notes = cache.load_all(paths)
+        else:
+            from .parse_cache import current
+
+            disk = current(root)
+            notes = disk.load_all(paths) if disk is not None else [load_note(path) for path in paths]
         return cls(
             root=root,
             notes=notes,
@@ -163,7 +169,7 @@ class VaultIndex:
         # index's notes.  Ignore it and fall back to the stem/alias lookup, which
         # only ever sees this index's notes.
         normalized = target.strip().replace("\\", "/").lstrip("/")
-        stem = _link_key(normalized.rstrip("/").split("/")[-1].removesuffix(".md"))
+        stem = _link_key(strip_markdown_suffix(normalized.rstrip("/").split("/")[-1]))
         hits = {item for item in self.link_index.get(stem, set()) if _within(self.root, item)}
         if len(hits) == 1:
             return next(iter(hits)), False

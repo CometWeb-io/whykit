@@ -11,7 +11,7 @@ from typing import Any
 from .contract import emit_error, vault_not_found
 from .graph import build_graph
 from .io import atomic_write_text, safe_vault_target
-from .lint import collect_markdown, find_vault_root, is_vault_root, load_note, rel, path_cache
+from .lint import collect_markdown, find_vault_root, is_markdown_name, is_vault_root, load_note, rel, path_cache
 from .status import build_status
 from .vault_index import VaultIndex
 from .console import emit_machine
@@ -77,7 +77,7 @@ def _file_entry(
         "sha256": sha256,
         "bytes": size,
     }
-    if path.suffix.lower() == ".md":
+    if is_markdown_name(path.name):
         note = (vault.note_for(path) if vault is not None else None) or load_note(path)
         entry.update({
             "title": str(note.front.get("title") or path.stem),

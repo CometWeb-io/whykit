@@ -148,7 +148,7 @@ runs:
         WHYKIT_ACTION_PATH: ${{ github.action_path }}
         WHYKIT_PYTHON: ${{ steps.install.outputs.python }}
         WHYKIT: ${{ steps.install.outputs.whykit }}
-        GITHUB_TOKEN: ${{ inputs.github-token }}
+        WHYKIT_GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
         set -euo pipefail
         if [ "$WHYKIT_COMMENT" != "true" ]; then
@@ -179,7 +179,8 @@ runs:
           exit 2
         fi
         report="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/whykit-diff.XXXXXX")"
-        "${args[@]}" > "$report"
+        # The diff reads the change under review; it never sees the token.
+        env -u WHYKIT_GITHUB_TOKEN "${args[@]}" > "$report"
         if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
         fi
@@ -187,7 +188,7 @@ runs:
           echo "WhyKit decision diff: pull request from a fork; written to the job summary, no comment"
           exit 0
         fi
-        "$WHYKIT_PYTHON" "$WHYKIT_ACTION_PATH/scripts/pr_comment.py" \
+        GITHUB_TOKEN="${WHYKIT_GITHUB_TOKEN:-}" "$WHYKIT_PYTHON" "$WHYKIT_ACTION_PATH/scripts/pr_comment.py" \
           --body "$report" \
           --repository "$WHYKIT_REPOSITORY" \
           --pull "$WHYKIT_PR_NUMBER"

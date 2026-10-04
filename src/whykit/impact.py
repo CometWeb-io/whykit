@@ -10,6 +10,7 @@ from .contract import vault_not_found
 from .graph import build_graph, document_node, wikilink_resolutions
 from .lint import (
     path_cache,
+    strip_markdown_suffix,
     DECISION_ID_RE,
     EVIDENCE_ID_RE,
     evidence_register,
@@ -59,7 +60,7 @@ class _WikilinkView:
         def node_id(path: Path) -> str:
             value = ids.get(path)
             if value is None:
-                value = ids[path] = vault_index.relative(path).removesuffix(".md")
+                value = ids[path] = strip_markdown_suffix(vault_index.relative(path))
             return value
 
         self.notes_by_id: dict[str, object] = {}
@@ -158,7 +159,7 @@ def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) 
                 "references": [],
                 "reference_count": 0,
             }
-        node_id = vault_index.relative(note.path).removesuffix(".md")
+        node_id = strip_markdown_suffix(vault_index.relative(note.path))
         view = _wikilink_view(root, vault_index)
         incoming = view.neighbours(sorted(view.incoming.get(node_id, ())))
         outgoing = view.neighbours(sorted(view.outgoing.get(node_id, ())))
@@ -194,7 +195,7 @@ def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) 
             "reference_count": 0,
         }
     note = vault_index.note_for(resolved)
-    node_id = vault_index.relative(resolved).removesuffix(".md")
+    node_id = strip_markdown_suffix(vault_index.relative(resolved))
     view = _wikilink_view(root, vault_index)
     incoming_ids = sorted(view.incoming.get(node_id, ()))
     outgoing_ids = sorted(view.outgoing.get(node_id, ()))

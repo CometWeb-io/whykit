@@ -8,6 +8,8 @@ const raw = readFileSync(file, "utf8");
 const data = JSON.parse(raw);
 const bodiesRaw = readFileSync(resolve(HERE, "../src/generated/bodies.json"), "utf8");
 const bodies = JSON.parse(bodiesRaw);
+const findingsRaw = readFileSync(resolve(HERE, "../src/generated/findings.json"), "utf8");
+const findings = JSON.parse(findingsRaw);
 
 function fail(message) {
   console.error(`index check failed: ${message}`);
@@ -38,8 +40,13 @@ for (const d of data.docs) {
   if (typeof bodies[d.id] !== "string") fail(`no body for ${d.id} in bodies.json`);
 }
 if (Object.keys(bodies).length !== data.docs.length) fail("bodies.json does not match the summary note for note");
+// Findings are a chunk of their own too; the summary keeps only the counts.
+if (Object.prototype.hasOwnProperty.call(data.lint ?? {}, "findings")) fail("summary still carries the lint findings");
+if (!Array.isArray(findings) || findings.length !== (data.lint?.errors ?? 0) + (data.lint?.warnings ?? 0)) {
+  fail("findings.json does not match the summary's error and warning counts");
+}
 if (data.lint?.errors !== 0) fail(`vault index contains ${data.lint?.errors} lint errors`);
-for (const text of [raw, bodiesRaw]) {
+for (const text of [raw, bodiesRaw, findingsRaw]) {
   if (text.includes("/mnt/data/") || text.includes("\\Users\\") || text.includes("/Users/")) {
     fail("generated index contains an absolute build-machine path");
   }

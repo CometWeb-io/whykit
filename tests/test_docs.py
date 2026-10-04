@@ -111,8 +111,15 @@ def _resolve(tokens: list[str]) -> tuple[list[str], set[str]]:
     parser = build_parser()
     path: list[str] = []
     valid = _options(parser)
+    # `whykit --root DIR <command>` hands --root to the command.
+    if tokens[:1] == ["--root"]:
+        tokens = tokens[2:]
+    elif tokens and tokens[0].startswith("--root="):
+        tokens = tokens[1:]
     for token in tokens:
         subs = _subparsers(parser)
+        if not path and token.startswith("--") and token in valid:
+            continue  # a global option before the command, such as `--no-cache`
         if token in subs:
             parser = subs[token]
             path.append(token)

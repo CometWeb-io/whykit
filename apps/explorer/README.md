@@ -75,18 +75,21 @@ the freshness policy from `whykit.toml`, and the lint report. If the vault
 has lint errors the command fails, and Explorer will not build from an invalid
 vault.
 
-`npm run index` then splits that index in two, because note bodies are most
+`npm run index` then splits that index in three, because note bodies are most
 of it (about 6.5 MB of 10 MB at 5,000 notes) and only the document view and
-full-text search read them:
+full-text search read them, and the lint findings (about 0.5 MB at 5,000
+notes) are read only by Health:
 
 | File | Loaded | Contents |
 |---|---|---|
-| `src/generated/vault.json` | bundled, before the first paint | everything except bodies, plus each note's resolved links (computed at build time by the same resolver the browser uses) and its count of review cues |
+| `src/generated/vault.json` | bundled, before the first paint | everything except bodies and lint findings, plus each note's resolved links (computed at build time by the same resolver the browser uses), its count of review cues, and the lint error and warning counts |
 | `src/generated/bodies.json` | fetched after the first paint, or at once for a link to a note or an open search | every note body, keyed by note id |
+| `src/generated/findings.json` | fetched when Health opens | every lint finding |
 
 Until the bodies arrive, search matches titles, ids, tags and summaries and
-says so. `npm run check:index` checks that the two files match note for note
-and rejects either one if it includes an absolute path from the build machine.
+says so. `npm run check:index` checks that the files match the summary (note
+for note, and finding for counted finding) and rejects any of them that
+includes an absolute path from the build machine.
 
 Set `WHYKIT_VAULT_DIR` to choose the vault and `PYTHON` to choose the
 interpreter (default `python3`).
@@ -99,25 +102,104 @@ WHYKIT_VAULT_DIR=/path/to/vault npm run build
 ```
 
 `dist/` is then a self-contained static site: `index.html` plus an `assets/`
-folder holding the script, the stylesheet and the note bodies. Routing uses the
-URL fragment (`#view=decisions`, `#doc=06-decisions%2Fd-010-direct`) and every
-URL, the note bodies included, is relative, so you can serve the folder from a
-domain root, a sub-path such as a GitHub Pages project site, or any static file
-server, without rewrite rules. Opening `index.html` straight from disk does not
-work, because browsers do not run module scripts from `file://`. To preview the
-production build locally, run `npx vite preview`.
+folder holding the script, the stylesheet, the note bodies and the lint
+findings. Routing uses the URL fragment (`#view=decisions`,
+`#doc=06-decisions%2Fd-010-direct`) and every URL, the chunks included, is
+relative, so you can serve the folder from a domain root, a sub-path such as a
+GitHub Pages project site, or any static file server, without rewrite rules.
+To preview the production build locally, run `npx vite preview`.
+
+Opening `dist/index.html` straight from disk does not work: browsers do not
+run module scripts loaded from `file://` and do not let such a page fetch its
+note bodies. For that, build the single file described below.
 
 The page carries a Content Security Policy in a `<meta>` tag:
-`default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;
-font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none';
-form-action 'none'`. The build has no inline script or style element and loads
-nothing from another origin. If your host can set response headers, send the
-same policy as a header and add `frame-ancestors 'none'` (or the origins
-allowed to embed it), which a `<meta>` tag cannot carry. The dev server is left
-without the policy because it injects inline scripts.
+
+```text
+default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'
+```
+
+The build has no inline script or style element and loads nothing from
+another origin. The dev server is left without the policy because it injects
+inline scripts.
+
+### Security headers
+
+A `<meta>` policy cannot say who may embed the page in a frame
+(`frame-ancestors`), so any site could show your Explorer inside its own page.
+Explorer is read-only, which limits what that framing could trick someone into
+doing, but if your host can set response headers, send the same policy as a
+header with `frame-ancestors 'none'` added, plus two headers that stop content
+sniffing and referrer leaks. If the vault is not public, put your
+authentication in front of the same location.
+
+**GitHub Pages** cannot set response headers. The `<meta>` policy still
+applies; framing cannot be forbidden. If that matters, put a proxy or CDN that
+can add headers in front of it, or use one of the hosts below.
+
+**Netlify** and **Cloudflare Pages** read a `_headers` file from the published
+folder. Create `dist/_headers` after each build (`vite build` empties `dist/`):
+
+```text
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+```
+
+On Netlify the same can live in `netlify.toml` instead, which survives
+rebuilds:
+
+```toml
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    X-Frame-Options = "DENY"
+```
+
+**nginx**, in the `server` or `location` block that serves `dist/`. A
+`location` block with any `add_header` of its own drops every header inherited
+from `server`, so keep all four together:
+
+```nginx
+add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "no-referrer" always;
+add_header X-Frame-Options "DENY" always;
+```
+
+`X-Frame-Options` covers browsers too old for `frame-ancestors`. Check the
+result with `curl -sI https://explorer.example.com/ | grep -i -E 'content-security|x-frame|nosniff|referrer'`.
+
+### One file that opens from disk
+
+```bash
+cd apps/explorer
+WHYKIT_VAULT_DIR=/path/to/vault npm run build:single
+```
+
+`dist-single/index.html` is the whole Explorer in one file: open it from disk
+(`file://`), attach it to a ticket, or keep it next to an archived vault. The
+script and stylesheet are inlined, and the summary, note bodies and lint
+findings are embedded as gzip-compressed, base64-encoded data blocks that the
+page decompresses in the browser, so nothing else is loaded and nothing is
+fetched. The 5,000-note synthetic vault comes to about 2.5 MB. The build
+refuses to write a file larger than 64 MB; set `WHYKIT_SINGLE_MAX_MB` to change
+that limit.
+
+Its policy differs from the static site's because the code is inline: it
+allows exactly the inlined script and stylesheet by their SHA-256 hashes,
+`connect-src 'none'`, and nothing else (`default-src 'none'`). Do not serve
+this file behind the static-site header above: both policies would apply, and
+`script-src 'self'` blocks the inline script. Serve `dist/` instead.
 
 > [!WARNING]
-> The build contains the full text of every document in the vault,
+> The build contains the full text of every document in the vault (the single
+> file too, and a file is easy to forward),
 > including `internal`, `confidential` and `restricted` notes. Explorer has no
 > access control. Publish a build only when every document in the vault is
 > meant to be public. Otherwise, serve it behind your own authentication.
@@ -135,8 +217,8 @@ npm run e2e     # Playwright end-to-end suite
 The end-to-end suite builds three static sites: one from `examples/northline`,
 one from a fresh `whykit init --minimal` vault for the empty states, and one from
 the 5,000-note synthetic vault in `tests/synthetic_vault.py` (set
-`WHYKIT_SYNTHETIC_NOTES` to change the size). It serves them with `vite preview`
-and covers:
+`WHYKIT_SYNTHETIC_NOTES` to change the size). It serves them with `vite preview`,
+opens a single-file build of `examples/northline` from disk, and covers:
 
 - navigation and focus management
 - the search dialog's keyboard flow
@@ -150,8 +232,14 @@ and covers:
   deep-linked note's text, search latency, view switches and graph highlight,
   each against a budget (`e2e/perf.spec.ts` prints the measured numbers)
 - the static build: the CSP holds on every view with no violation, the build
-  works from a sub-path (note bodies included), the note bodies are not in the
-  entry bundle, and the sensitive-content banner appears exactly when it should
+  works from a sub-path (note bodies included), the note bodies and the lint
+  findings are not in the entry bundle and the findings load only for Health,
+  and the sensitive-content banner appears exactly when it should
+- the single-file build opened from `file://`: one file, a hash-based policy
+  with no violation on any view, no request for anything else, note text and
+  search from the embedded data, and no serious axe violation
+- printing a decision record: the supersession chain, the text and the
+  registered evidence print in dark ink on white, without navigation
 - empty states
 - an axe-core scan that must report zero serious or critical violations
 - a phone viewport

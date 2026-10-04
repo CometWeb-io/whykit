@@ -119,3 +119,32 @@ test("a build without them shows no warning", async ({ page }) => {
   await open(page, "", EMPTY_URL);
   await expect(page.getByRole("note", { name: "Sensitive content in this build" })).toHaveCount(0);
 });
+
+test("the lint findings are a separate file, loaded only by Health", async ({ page }) => {
+  const build = resolve(import.meta.dirname, ".build/synthetic");
+  const entry = readFileSync(join(build, "index.html"), "utf8").match(/<script[^>]+src="\.\/(assets\/[^"]+\.js)"/i)?.[1];
+  expect(entry).toBeTruthy();
+  const chunk = readdirSync(join(build, "assets")).find(f => /^findings-.*\.json$/.test(f));
+  expect(chunk, "no findings chunk").toBeTruthy();
+  const findings = JSON.parse(readFileSync(join(build, "assets", chunk!), "utf8")) as { path: string; message: string }[];
+  expect(findings.length).toBeGreaterThan(1000);
+  const code = readFileSync(join(build, entry!), "utf8");
+  expect(code).not.toContain(findings[0]!.message);
+  expect(code).not.toContain('"findings":[');
+
+  const fetched: string[] = [];
+  page.on("request", req => { if (/findings-[^/]*\.json$/.test(req.url())) fetched.push(req.url()); });
+  await page.goto(`${SYNTHETIC_URL}#view=decisions`);
+  await expect(page.locator("main h1")).toHaveText("Decisions");
+  await page.waitForTimeout(300);
+  expect(fetched, "findings fetched before Health asked for them").toEqual([]);
+  await page.locator("#sidebar nav").getByRole("button", { name: "Health", exact: true }).click();
+  await expect(page.locator(".findings .finding").first()).toBeVisible();
+  await expect(page.locator(".show-more")).toContainText(`Showing 200 of ${findings.length} findings`);
+  expect(fetched).toHaveLength(1);
+});
+
+test("a deep link to Health shows the findings", async ({ page }) => {
+  await page.goto(`${SYNTHETIC_URL}#view=health`);
+  await expect(page.locator(".findings .finding").first()).toBeVisible();
+});

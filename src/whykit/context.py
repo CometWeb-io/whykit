@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from dataclasses import asdict
 from pathlib import Path
 
 from .contract import emit_error, vault_not_found
 from .impact import analyze_impact
 from .lint import (
+    Note,
     path_cache,
     DECISION_ID_RE,
     EVIDENCE_ID_RE,
@@ -46,6 +48,32 @@ def _evidence_details(root: Path, ids: list[str]) -> list[dict]:
             "record": row,
         })
     return out
+
+
+FRONT_MATTER_RE = re.compile(r"\A\ufeff?---[ \t]*\r?\n.*?^---[ \t]*\r?$\n?", re.S | re.M)
+SUMMARY_KEYS = ("summary", "description")
+
+
+def _budgeted(note: Note, max_chars: int) -> tuple[str, bool]:
+    """The most useful *max_chars* of a note that does not fit whole.
+
+    Front matter goes first, because the pack already carries it as
+    structured fields (``record``): a 200-character budget spent on
+    ``aliases:`` and ``tags:`` would say nothing about the note. What is left
+    is the ``summary`` (or ``description``) front-matter value when the note
+    has one, then the body from its first line.
+    """
+    match = FRONT_MATTER_RE.match(note.text)
+    if not match:
+        return note.text[:max_chars], False
+    body = note.text[match.end():].lstrip("\r\n")
+    summary = next(
+        (str(note.front.get(key)).strip() for key in SUMMARY_KEYS if str(note.front.get(key) or "").strip()),
+        "",
+    )
+    if summary and summary not in body:
+        body = f"{summary}\n\n{body}"
+    return body[:max_chars], True
 
 
 @path_cache()
@@ -93,8 +121,9 @@ def build_context(
 
     content = note.text
     truncated = False
+    front_matter_omitted = False
     if include_body and len(content) > max_chars:
-        content = content[:max_chars]
+        content, front_matter_omitted = _budgeted(note, max_chars)
         truncated = True
     if not include_body:
         content = ""
@@ -111,6 +140,7 @@ def build_context(
         "record": impact.get("record"),
         "content": content,
         "content_truncated": truncated,
+        **({"front_matter_omitted": True} if front_matter_omitted else {}),
         "content_chars": len(note.text),
         "evidence": _evidence_details(root, source_ids),
         "incoming": impact.get("incoming", []),

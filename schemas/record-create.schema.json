@@ -10,7 +10,40 @@
     "id": { "type": "string", "pattern": "^[DE]-[0-9]{3,}$" },
     "path": { "type": "string", "minLength": 1 },
     "linked_from": { "type": ["string", "null"] },
-    "strict_linked": { "type": "boolean" }
+    "strict_linked": { "type": "boolean" },
+    "write": {
+      "type": "boolean",
+      "description": "`new decision --from` only: false for the dry run, whose `id` and `path` are what --write would allocate now."
+    },
+    "title": { "type": "string" },
+    "status": { "type": "string" },
+    "source": {
+      "type": "object",
+      "description": "`new decision --from` only: the promoted file.",
+      "required": ["path", "sha256", "format"],
+      "properties": {
+        "path": { "type": "string", "description": "Vault-relative path, or the file name for a file outside the vault." },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "format": { "enum": ["madr", "nygard", "y-statement", "polish-adr", "unstructured"] },
+        "title": { "type": "string" },
+        "status": { "type": ["string", "null"] },
+        "date": { "type": ["string", "null"] },
+        "original_id": { "type": ["string", "null"] },
+        "batch": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "mapping": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["section", "from"],
+        "properties": { "section": { "type": "string" }, "from": { "type": "string" } }
+      }
+    },
+    "unmapped": { "type": "array", "items": { "type": "string" } },
+    "evidence_candidates": { "type": "array", "items": { "type": "string" } },
+    "warnings": { "type": "array", "items": { "type": "string" } }
   },
   "additionalProperties": true
 }

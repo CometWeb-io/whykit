@@ -1,6 +1,6 @@
 # Migrating to WhyKit 0.3
 
-WhyKit 0.3.0 is the first public package release. If you ran WhyKit from a
+WhyKit 0.3.0 will be the first public package release. If you ran WhyKit from a
 source checkout of the internal 0.2.0 milestone, or from the `0.3.0.dev0`
 source preview, this page lists what changes for your vault, your scripts and
 your CI, and what to do about each. The full list of changes is in the
@@ -146,7 +146,7 @@ New lint findings (see [Lint rules](rules.md) for each one's fix):
 | `embed.missing` | error | an Obsidian embed `![[…]]` that does not resolve |
 | `secret.scan_non_utf8` | error | a file the secret scan cannot decode as UTF-8 |
 | `secret.scan_unreadable` | error | a file the secret scan cannot read |
-| `secret.scan_skipped_large_file` | error | a text asset over 5 MiB, which used to be skipped silently |
+| `secret.scan_skipped_large_file` | error | a text asset over 5,000,000 bytes (5 MB), which used to be skipped silently |
 
 Front matter with the same key twice is reported as `frontmatter.invalid`
 instead of keeping one of the values. An unknown key in `whykit.toml`, at the
@@ -201,6 +201,15 @@ that passes it keeps working. Existing vaults are not touched by any of this.
   `next_cursor`. A host that wants more than `limit` items passes it back as
   `cursor`; a cursor from an earlier server process is refused with
   `invalid_cursor`, so start again from the first page.
+- A note whose front matter does not parse, or that spells the key
+  differently (`Sensitivity:`), is treated as above every ceiling and hidden.
+  Evidence register rows are shown only when the register itself is within
+  the ceiling. Fix the front matter (`whykit lint` reports it) to make such a
+  note visible again.
+- `whykit-mcp --http` without a token rejects a request whose `Host` or
+  `Origin` header does not name the machine itself, however the loopback
+  address was spelt. A client behind a proxy that rewrites `Host` needs a
+  token (`--token-file` or `WHYKIT_MCP_TOKEN`).
 
 ## Pre-commit hooks
 
@@ -236,3 +245,16 @@ repository now ships `whykit-lint` and `whykit-history` hooks; see
   `--quiet`) and an `overrides` entry in JSON.
 - In the Explorer graph, Space selects a note and Enter opens it; Tab moves
   past the graph in one step, and arrow keys move between notes.
+- Markdown files are recognised by a `.md` suffix in any letter case, so a
+  file such as `notes/Old.MD`, which Linux and macOS used to skip, is now
+  linted, indexed, adopted and snapshotted like any other note. A snapshot
+  baseline taken before the upgrade reports it as a change.
+- Decision and evidence IDs use ASCII digits only. `E-００１` (fullwidth digits)
+  is no longer read as an ID; write `E-001`.
+- A file that is not valid UTF-8 is reported as `frontmatter.invalid` and read
+  with the bad bytes replaced, instead of stopping the command.
+- Commands that read every note keep a parse cache in `.whykit/cache/`, which
+  carries its own `.gitignore`. Turn it off with `--no-cache` or
+  `WHYKIT_NO_CACHE=1`; output is identical either way.
+- The top-level `whykit -h` lists commands grouped by job, and `--root DIR`
+  may come before the command (`whykit --root vault lint`).

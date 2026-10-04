@@ -27,12 +27,12 @@ import unicodedata
 from urllib.parse import unquote
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePath
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Iterable
 
 from .config import CONFIG_FILE, ConfigError, load_config
 from .rule_policy import EMPTY_POLICY, Override, check_custom_rules, policy_from_config, secret_scan_skipped
-from .console import emit_machine
+from .console import emit_machine, one_line
 from .placeholders import (
     PROSE_SECTIONS as PLACEHOLDER_PROSE_SECTIONS,
     SCAFFOLD_EVIDENCE_TODO,
@@ -109,6 +109,54 @@ def _real(path: Path) -> Path:
     return hit
 
 
+# Characters the Win32 namespace rejects in a file name before any file system
+# is asked. NUL is impossible on every platform.
+_WINDOWS_FORBIDDEN = frozenset('<>:"|?*') | frozenset(chr(code) for code in range(32))
+# Device names: on Windows ``notes/CON.md`` or ``nul`` opens a device, not a file.
+_WINDOWS_DEVICES = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"{kind}{digit}" for kind in ("com", "lpt") for digit in "123456789\u00b9\u00b2\u00b3"}
+)
+
+
+def _impossible_name(name: str, windows: bool = not _POSIX) -> bool:
+    """Whether no file or directory can be called *name* on this platform.
+
+    A pure string test, so a link target such as ``a<b`` or one holding a NUL
+    is answered without a system call (which on Windows can raise, or be slow).
+    """
+    if "\x00" in name:
+        return True
+    if not windows:
+        return False
+    if not _WINDOWS_FORBIDDEN.isdisjoint(name):
+        return True
+    return name.split(".", 1)[0].rstrip(" ").casefold() in _WINDOWS_DEVICES
+
+
+def _first_impossible_part(path: PurePath, windows: bool = not _POSIX) -> int | None:
+    """Index into ``path.parts`` of the first component that cannot exist."""
+    parts = path.parts
+    start = 1 if (path.drive or path.root) else 0  # the anchor (``C:\``) is not a name
+    for index in range(start, len(parts)):
+        if _impossible_name(parts[index], windows):
+            return index
+    return None
+
+
+def _foreign_anchor(root: PurePath, path: PurePath) -> bool:
+    """True when *path* is absolute on another drive, share or root than *root*.
+
+    ``\\\\host\\share\\x`` in a note is a UNC path on Windows: resolving
+    it asks the network for ``host``, which takes seconds and can offer the
+    user's network credentials to whoever answers. Such a path can never be inside
+    the vault, so containment is decided from the strings alone.
+    """
+    if not (path.anchor and root.anchor):
+        return False
+    return path.anchor.casefold() != root.anchor.casefold()
+
+
 def _real_uncached(path: Path) -> Path:
     # On POSIX, realpath(dir/name) is realpath(dir)/name whenever `name` is a
     # plain component that is not itself a symlink.  Reusing the cached parent
@@ -119,6 +167,15 @@ def _real_uncached(path: Path) -> Path:
         parent = path.parent
         if name not in ("", ".", "..") and parent != path and not os.path.islink(path):
             return _real(parent) / name
+    if not _POSIX and path.is_absolute():
+        # Windows normalises `..` lexically, so after normpath nothing at or
+        # below a component that cannot exist touches the file system: resolve
+        # the part above it and keep the rest as written.
+        normal = type(path)(os.path.normpath(path))
+        index = _first_impossible_part(normal)
+        if index is not None:
+            parts = normal.parts
+            return _real(type(path)(*parts[:index])).joinpath(*parts[index:])
     return path.resolve()
 
 
@@ -154,13 +211,73 @@ def _within(root: Path, path: Path) -> bool:
         hit = cache.within.get(key)
         if hit is not None:
             return hit
-    try:
-        inside = _relative_text(_real(path), _real(root)) is not None
-    except OSError:
+    if _foreign_anchor(root, path):
         inside = False
+    else:
+        try:
+            inside = _relative_text(_real(path), _real(root)) is not None
+        except (OSError, ValueError):
+            # A name the operating system rejects (an embedded NUL) is a link
+            # that does not resolve, never a crash.
+            inside = False
     if cache is not None:
         cache.within[key] = inside
     return inside
+
+
+def path_exists(path: Path) -> bool:
+    """``path.exists()`` that answers False instead of raising.
+
+    A link target comes from the note, so it can name a path the operating
+    system rejects outright (a component longer than the filesystem allows,
+    an embedded NUL). That is a link that does not resolve, not a crash.
+    """
+    if _first_impossible_part(path) is not None:
+        return False
+    try:
+        return path.exists()
+    except (OSError, ValueError):
+        return False
+
+
+def path_is_file(path: Path) -> bool:
+    """``path.is_file()`` with the same tolerance as :func:`path_exists`."""
+    if _first_impossible_part(path) is not None:
+        return False
+    try:
+        return path.is_file()
+    except (OSError, ValueError):
+        return False
+
+
+MARKDOWN_SUFFIX = ".md"
+
+
+def is_markdown_name(name: str) -> bool:
+    """Whether a file name is Markdown: ``.md`` in any letter case.
+
+    One rule for every command. ``notes/old.MD`` is the same kind of file as
+    ``notes/old.md`` on every filesystem, so lint, adopt, the index and the
+    snapshot must not see it on one platform and miss it on another.
+    """
+    return name.lower().endswith(MARKDOWN_SUFFIX)
+
+
+def strip_markdown_suffix(value: str) -> str:
+    """``value`` without a trailing ``.md`` in any letter case (a node ID from a path)."""
+    return value[: -len(MARKDOWN_SUFFIX)] if is_markdown_name(value) else value
+
+
+def iter_markdown(root: Path) -> Iterator[Path]:
+    """Every path under *root* whose name is Markdown, in any letter case.
+
+    ``Path.rglob("*.md")`` matches case-sensitively on POSIX, so it would skip
+    ``old.MD`` on Linux and macOS alike. Callers still check ``is_file`` and
+    confinement, exactly as they did for the glob.
+    """
+    for path in root.rglob("*"):
+        if is_markdown_name(path.name):
+            yield path
 
 
 def is_vault_root(path: Path) -> bool:
@@ -222,11 +339,20 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DATED_FILENAME_RE = re.compile(r"-(\d{4}-\d{2}-\d{2})(?:-[A-Za-z]{2,4})?$")
 # Inside a Markdown table Obsidian writes the alias pipe as `\|`; the optional
 # backslash keeps it out of the target so `[[a/b\|alias]]` resolves as `a/b`.
-WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)\\?(?:#[^\]|]+)?(?:\|[^\]]*)?\]\]")
-MARKDOWN_LINK_RE = re.compile(r"(!?)\[[^\]]*\]\(([^)]+)\)")
-EVIDENCE_ID_RE = re.compile(r"\bE-\d{3,}\b")
-DECISION_ID_RE = re.compile(r"\bD-\d{3,}\b")
-DECISION_FILE_RE = re.compile(r"^d-(\d{3,})-")
+# No part of a wikilink may hold `[` or a line break (Obsidian forbids both in
+# link targets). Besides matching what Obsidian reads, that keeps every scan
+# short: an unclosed `[[` stops at the next `[` or line end instead of
+# reading to the end of the file once per opener, which made a note of
+# repeated `[` characters quadratic.
+WIKILINK_RE = re.compile(r"\[\[([^\[\]|#\n]+?)\\?(?:#[^\[\]|\n]+)?(?:\|[^\[\]\n]*)?\]\]")
+# Link text may not hold `[` and a destination may not hold `[` or a line
+# break, for the same reason: each scan then ends at the next opener.
+MARKDOWN_LINK_RE = re.compile(r"(!?)\[[^\[\]]*\]\(([^)\[\n]+)\)")
+# ASCII digits only: `\d` also matches fullwidth and other Unicode digits, so
+# `E-００１` would be a second ID that looks exactly like `E-001`.
+EVIDENCE_ID_RE = re.compile(r"\bE-[0-9]{3,}\b")
+DECISION_ID_RE = re.compile(r"\bD-[0-9]{3,}\b")
+DECISION_FILE_RE = re.compile(r"^d-([0-9]{3,})-")
 TEXT_SECRET_EXTENSIONS = {
     ".md", ".txt", ".csv", ".tsv", ".json", ".jsonl", ".yaml", ".yml",
     ".xml", ".html", ".log", ".env", ".toml", ".ini", ".conf",
@@ -314,6 +440,92 @@ class Note:
         ignore it; lint's fact-callout check reads the same masked text.
         """
         return tuple(sorted(set(EVIDENCE_ID_RE.findall(self.masked))))
+
+    # The views below are pure functions of ``text``.  Each is computed at most
+    # once per note, and the persistent parse cache (``whykit.parse_cache``)
+    # stores them so an unchanged note is not read again on the next run.
+    # NOTE_FACTS lists them; a new one must be added there too.
+
+    @functools.cached_property
+    def wikilink_hits(self) -> tuple[tuple[str, int, bool], ...]:
+        """``(target, line, is_embed)`` for every wikilink outside code.
+
+        *target* is stripped but otherwise unfiltered: callers decide whether
+        an empty or ``http`` target counts.
+        """
+        text = self.text
+        lines = _LineNumbers(text)
+        hits = []
+        for match in WIKILINK_RE.finditer(self.masked):
+            start = match.start()
+            # A vault links the same few targets from many notes; share them.
+            hits.append((_shared_target(match.group(1).strip()), lines.at(start), start > 0 and text[start - 1] == "!"))
+        return tuple(hits)
+
+    @functools.cached_property
+    def markdown_link_hits(self) -> tuple[tuple[str, str, int], ...]:
+        """``(kind, target, line)`` for each local Markdown link or image outside code."""
+        lines = _LineNumbers(self.text)
+        hits = []
+        for match in MARKDOWN_LINK_RE.finditer(self.masked):
+            kind = "image" if match.group(1) else "link"
+            raw = match.group(2).strip()
+            # Markdown permits <path with spaces>; optional titles are intentionally
+            # ignored here rather than pretending to implement a full CommonMark parser.
+            if raw.startswith("<") and ">" in raw:
+                target = raw[1:raw.index(">")].strip()
+            else:
+                target = raw.split(None, 1)[0].strip() if raw else ""
+            if not target or target.startswith("#") or URL_SCHEME_RE.match(target):
+                continue
+            target = unquote(target.split("#", 1)[0].split("?", 1)[0])
+            if not target:
+                continue
+            hits.append((kind, target, lines.at(match.start())))
+        return tuple(hits)
+
+    @functools.cached_property
+    def fact_callouts(self) -> tuple[tuple[int, tuple[str, ...]], ...]:
+        """``(line, cited IDs in first-seen order)`` for each ``[!fact]`` callout."""
+        lines = self.masked.splitlines()
+        callouts = []
+        i = 0
+        while i < len(lines):
+            if FACT_CALLOUT_RE.match(lines[i]):
+                start = i
+                block = [lines[i]]
+                i += 1
+                while i < len(lines) and lines[i].startswith(">"):
+                    block.append(lines[i])
+                    i += 1
+                callouts.append((start + 1, tuple(dict.fromkeys(EVIDENCE_ID_RE.findall("\n".join(block))))))
+                continue
+            i += 1
+        return tuple(callouts)
+
+    @functools.cached_property
+    def section_decision_id(self) -> str | None:
+        """The ID under a ``## Decision ID`` heading, if the note has one."""
+        m = DECISION_ID_SECTION_RE.search(self.text)
+        return m.group(1) if m else None
+
+    @functools.cached_property
+    def secret_hits(self) -> tuple[tuple[int, str], ...]:
+        """``(line, label)`` for each credential-shaped match, in report order."""
+        text = self.text
+        hits = []
+        for (label, pattern), prefilter in zip(SECRET_PATTERNS, SECRET_PREFILTERS, strict=True):
+            if not prefilter(text):
+                continue
+            numbers = _LineNumbers(text)
+            for match in pattern.finditer(text):
+                hits.append((numbers.at(match.start()), label))
+        return tuple(hits)
+
+    @functools.cached_property
+    def decision_placeholders(self) -> tuple[tuple[int, str], ...]:
+        """``(line, section)`` for each section still holding template placeholders."""
+        return tuple(_decision_placeholders(self))
 
     @property
     def body(self) -> str:
@@ -405,6 +617,24 @@ def _shared(value: str) -> str:
     return value
 
 
+# Link targets get a pool of their own: a large vault has more distinct
+# targets than the front-matter pool holds, and filling that pool with them
+# would stop front-matter values from being shared.
+_SHARED_TARGETS: dict[str, str] = {}
+_SHARED_TARGETS_MAX_ENTRIES = 65536
+
+
+def _shared_target(value: str) -> str:
+    if len(value) > _SHARED_MAX_CHARS:
+        return value
+    hit = _SHARED_TARGETS.get(value)
+    if hit is not None:
+        return hit
+    if len(_SHARED_TARGETS) < _SHARED_TARGETS_MAX_ENTRIES:
+        _SHARED_TARGETS[value] = value
+    return value
+
+
 def _yaml_scalar(value: str) -> object:
     result = _yaml_scalar_raw(value)
     return _shared(result) if type(result) is str else result
@@ -418,7 +648,13 @@ def _yaml_scalar_raw(value: str) -> object:
         return []
     if value.startswith("[") and value.endswith("]"):
         inner = value[1:-1].strip()
-        return [_yaml_scalar(item) for item in _split_inline_list(inner)] if inner else []
+        items = _split_inline_list(inner) if inner else []
+        # One level only, like block lists. Recursing let a line of brackets
+        # cost quadratic time and then a RecursionError.
+        for item in items:
+            if item.startswith("[") and item.endswith("]"):
+                raise ValueError("nested lists are not supported in front matter")
+        return [_yaml_scalar(item) for item in items]
     if value.lower() in ("true", "false"):
         return value.lower() == "true"
     if value in ("null", "~"):
@@ -553,24 +789,56 @@ def _parse_front_matter(raw: str) -> dict:
     return out
 
 
+def read_vault_text(path: Path) -> tuple[str, str | None]:
+    """Read a vault file for checking: (text, problem).
+
+    A file that is not valid UTF-8 is read with U+FFFD for the bad bytes and
+    the problem names the first one, so one damaged or hostile file becomes a
+    finding instead of stopping every command that reads the vault.
+    """
+    data = path.read_bytes()
+    problem: str | None = None
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        text = data.decode("utf-8", "replace")
+        problem = f"file is not valid UTF-8 (byte {exc.start}); WhyKit read it with the bad bytes replaced"
+    # The same newline handling as Path.read_text().
+    return text.replace("\r\n", "\n").replace("\r", "\n"), problem
+
+
+def read_vault_lines(path: Path) -> list[str]:
+    """The lines of a vault file, with any bytes that are not UTF-8 replaced."""
+    return read_vault_text(path)[0].splitlines()
+
+
+def _normalise(text: str) -> str:
+    """Decoded file text as every parser sees it.
+
+    Path.read_text() uses universal newlines; callers with decoded bytes
+    (notably adopt's hash-preserving scan) must see the same parser input.
+    Editors on Windows commonly save UTF-8 with a byte-order mark; it is not
+    content, and leaving it in place hides the front matter fence.
+    """
+    return text.replace("\r\n", "\n").replace("\r", "\n").removeprefix("\ufeff")
+
+
 def load_note(path: Path, *, text: str | None = None) -> Note:
+    encoding_problem = None
     if text is None:
-        text = path.read_text(encoding="utf-8")
+        text, encoding_problem = read_vault_text(path)
+        text = text.removeprefix("\ufeff")
     else:
-        # Path.read_text() uses universal newlines; callers with decoded bytes
-        # (notably adopt's hash-preserving scan) must see the same parser input.
-        text = text.replace("\r\n", "\n").replace("\r", "\n")
-    # Editors on Windows commonly save UTF-8 with a byte-order mark; it is not
-    # content, and leaving it in place hides the front matter fence.
-    text = text.removeprefix("\ufeff")
+        text = _normalise(text)
     note = Note(path=path, text=text)
     if not (text.startswith("---\n") or text == "---"):
+        note.front_error = encoding_problem
         return note
     # The closing fence may be the very next line (empty front matter) or the
     # last line of a file with no trailing newline.
     close = FRONT_CLOSE_RE.search(text, 4)
     if close is None:
-        note.front_error = "front matter opened with --- but never closed"
+        note.front_error = encoding_problem or "front matter opened with --- but never closed"
         return note
     note.has_front = True
     note.body_offset = text[: close.end()].count("\n") + 1
@@ -578,6 +846,8 @@ def load_note(path: Path, *, text: str | None = None) -> Note:
         note.front = _parse_front_matter(text[4:close.start()])
     except Exception as exc:  # noqa: BLE001
         note.front_error = f"front matter is not valid YAML: {exc}"
+    if encoding_problem is not None:
+        note.front_error = encoding_problem
     return note
 
 
@@ -739,7 +1009,7 @@ class _LineNumbers:
 
 URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 FACT_CALLOUT_RE = re.compile(r"^> \[!fact\]", re.I)
-DECISION_ID_SECTION_RE = re.compile(r"^## Decision ID\s*$\n+\s*(D-\d{3,})\s*$", re.MULTILINE)
+DECISION_ID_SECTION_RE = re.compile(r"^## Decision ID\s*$\n+\s*(D-[0-9]{3,})\s*$", re.MULTILINE)
 FENCE_RE = re.compile(r"^(```|~~~).*?^\1", re.MULTILINE | re.DOTALL)
 INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 
@@ -764,6 +1034,14 @@ def _relative_key(root: Path, path: Path) -> str | None:
 def _relative_key_of(root: str, path: str) -> str | None:
     # A pure string function (no filesystem access), so a process-wide cache
     # cannot go stale; link resolution asks for the same few paths repeatedly.
+    if _POSIX and path.startswith("/") and root.startswith("/"):
+        # Both are spellings of already-normalised absolute paths (``os.fspath``
+        # of a ``Path``), so ``relative_to`` reduces to a prefix test on the
+        # strings, without building and comparing a list of parts.
+        prefix = root if root.endswith("/") else root + "/"
+        if path == root:
+            return _link_key(".")
+        return _link_key(path[len(prefix):]) if path.startswith(prefix) else None
     try:
         return _link_key(PurePath(path).relative_to(root).as_posix())
     except ValueError:
@@ -791,8 +1069,8 @@ def _resolve(root: Path, target: str, index: dict[str, set[Path]]) -> tuple[Path
     normalized = target.strip().replace("\\", "/").lstrip("/")
     if _leaves_vault(normalized):
         return None, False
-    relative_target = normalized if normalized.endswith(".md") else normalized + ".md"
-    stem = _link_key(normalized.rstrip("/").split("/")[-1].removesuffix(".md"))
+    relative_target = normalized if is_markdown_name(normalized) else normalized + ".md"
+    stem = _link_key(strip_markdown_suffix(normalized.rstrip("/").split("/")[-1]))
     hits = {path for path in index.get(stem, set()) if _within(root, path)}
     # Match the typed path against real note paths case- and NFC-insensitively,
     # as Obsidian does. `exists()` alone answers differently per filesystem:
@@ -803,7 +1081,9 @@ def _resolve(root: Path, target: str, index: dict[str, set[Path]]) -> tuple[Path
     if len(spelled) == 1:
         return spelled[0], False
     candidate = root / relative_target
-    if candidate.exists() and _within(root, candidate):
+    # Containment first: it rejects another drive or a UNC share from the
+    # strings alone, before anything asks the file system about the path.
+    if _within(root, candidate) and path_exists(candidate):
         return candidate, False
     if len(hits) == 1:
         return next(iter(hits)), False
@@ -830,7 +1110,7 @@ class AttachmentIndex:
             # same as relative_to() without re-parsing every path.
             depth = len(self.root.parts)
             for path in self.root.rglob("*"):
-                if path.suffix.lower() == ".md" or not path.is_file() or not _within(self.root, path):
+                if is_markdown_name(path.name) or not path.is_file() or not _within(self.root, path):
                     continue
                 if any(part in ATTACHMENT_SKIP_DIRS for part in path.parts[depth:-1]):
                     continue
@@ -843,7 +1123,7 @@ class AttachmentIndex:
         if not suffix or suffix == ".md":
             return False
         for candidate in (self.root / normalized.lstrip("/"), note_dir / normalized):
-            if candidate.is_file() and _within(self.root, candidate):
+            if _within(self.root, candidate) and path_is_file(candidate):
                 return True
         # Obsidian resolves attachments by file name anywhere in the vault and
         # picks the nearest copy, so several matches are not an ambiguity here.
@@ -858,14 +1138,9 @@ def check_wikilinks(
     attachments: AttachmentIndex | None = None,
     resolve: Resolver | None = None,
 ) -> None:
-    masked = note.masked
-    lines = _LineNumbers(note.text)
-    for match in WIKILINK_RE.finditer(masked):
-        target = match.group(1).strip()
+    for target, line, is_embed in note.wikilink_hits:
         if not target or target.startswith(("http://", "https://")):
             continue
-        line = lines.at(match.start())
-        is_embed = match.start() > 0 and note.text[match.start() - 1] == "!"
         if _leaves_vault(target.replace("\\", "/")):
             add(findings, root, note.path, line, "warning", "wikilink.outside", f"wikilink tries to leave the vault: [[{target}]]")
             continue
@@ -898,27 +1173,11 @@ def check_markdown_links(
     *exists* overrides the on-disk check, so a confined view of the vault can
     treat notes it does not contain exactly like files that do not exist.
     """
-    masked = note.masked
-    lines = _LineNumbers(note.text)
-    for match in MARKDOWN_LINK_RE.finditer(masked):
-        kind = "image" if match.group(1) else "link"
-        raw = match.group(2).strip()
-        # Markdown permits <path with spaces>; optional titles are intentionally
-        # ignored here rather than pretending to implement a full CommonMark parser.
-        if raw.startswith("<") and ">" in raw:
-            target = raw[1:raw.index(">")].strip()
-        else:
-            target = raw.split(None, 1)[0].strip() if raw else ""
-        if not target or target.startswith("#") or URL_SCHEME_RE.match(target):
-            continue
-        target = unquote(target.split("#", 1)[0].split("?", 1)[0])
-        if not target:
-            continue
+    for kind, target, line in note.markdown_link_hits:
         candidate = (root / target.lstrip("/")) if target.startswith("/") else (note.path.parent / target)
-        line = lines.at(match.start())
         if not _within(root, candidate):
             add(findings, root, note.path, line, "warning", "markdown_link.outside", f"Markdown {kind} leaves the vault: ({target})")
-        elif not (exists(candidate) if exists else candidate.exists()):
+        elif not (exists(candidate) if exists else path_exists(candidate)):
             add(findings, root, note.path, line, "warning", "markdown_link.missing", f"local Markdown {kind} does not exist: ({target})")
 
 
@@ -931,6 +1190,9 @@ def _split_table_row(line: str) -> list[str]:
     cells: list[str] = []
     buf: list[str] = []
     wiki_depth = 0
+    # Searching for a closer after every opener made a row of `[[` quadratic;
+    # a closer exists later on the line exactly when the last one is further on.
+    last_close = text.rfind("]]")
     i = 0
     while i < len(text):
         ch = text[i]
@@ -941,7 +1203,7 @@ def _split_table_row(line: str) -> list[str]:
             continue
         # Only a `[[` that is closed later on the line opens a wikilink. A stray
         # `[[` in free text must not swallow every following cell separator.
-        if ch == "[" and nxt == "[" and text.find("]]", i + 2) != -1:
+        if ch == "[" and nxt == "[" and last_close >= i + 2:
             wiki_depth += 1
             buf.extend((ch, nxt))
             i += 2
@@ -986,11 +1248,16 @@ def evidence_register(root: Path) -> tuple[dict[str, dict[str, str]], dict[str, 
 
 
 def _parse_evidence_register(path: Path) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]], list[tuple[str, int]]]:
+    return _parse_evidence_register_text(read_vault_text(path)[0])
+
+
+def _parse_evidence_register_text(text: str) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]], list[tuple[str, int]]]:
+    """Parse register Markdown; also used for an unsaved editor buffer."""
     active: dict[str, dict[str, str]] = {}
     retired: dict[str, dict[str, str]] = {}
     occurrences: list[tuple[str, int]] = []
     mode = "active"
-    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for lineno, line in enumerate(text.splitlines(), 1):
         if line.strip().lower().startswith("## retired sources"):
             mode = "retired"
             continue
@@ -1105,8 +1372,7 @@ def _decision_own_id(note: Note) -> str | None:
     m = DECISION_ID_RE.search(title)
     if m:
         return m.group(0)
-    m = DECISION_ID_SECTION_RE.search(note.text)
-    return m.group(1) if m else None
+    return note.section_decision_id
 
 
 def check_decision_ids(root: Path, notes: list[Note], findings: list[Finding]) -> None:
@@ -1135,7 +1401,7 @@ def decision_log_rows(root: Path) -> list[dict[str, str | int]]:
     if not path.exists():
         return []
     rows: list[dict[str, str | int]] = []
-    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for lineno, line in enumerate(read_vault_lines(path), 1):
         if not line.lstrip().startswith("|"):
             continue
         cells = _split_table_row(line)
@@ -1280,28 +1546,16 @@ def check_fact_evidence(
     `known_evidence` is every active or retired register ID; None skips the
     existence check (callers without a register view).
     """
-    lines = note.masked.splitlines()
-    i = 0
-    while i < len(lines):
-        if FACT_CALLOUT_RE.match(lines[i]):
-            start = i
-            block = [lines[i]]
-            i += 1
-            while i < len(lines) and lines[i].startswith(">"):
-                block.append(lines[i])
-                i += 1
-            cited = EVIDENCE_ID_RE.findall("\n".join(block))
-            if not cited:
-                add(findings, root, note.path, start + 1, "warning", "fact.inline_evidence", "verified fact callout has no inline E-NNN citation")
-            elif known_evidence is not None:
-                for eid in dict.fromkeys(cited):
-                    if eid not in known_evidence:
-                        add(
-                            findings, root, note.path, start + 1, "warning", "fact.evidence_missing",
-                            f"fact callout cites {eid}, but the evidence register has no populated row for it",
-                        )
-            continue
-        i += 1
+    for line, cited in note.fact_callouts:
+        if not cited:
+            add(findings, root, note.path, line, "warning", "fact.inline_evidence", "verified fact callout has no inline E-NNN citation")
+        elif known_evidence is not None:
+            for eid in cited:
+                if eid not in known_evidence:
+                    add(
+                        findings, root, note.path, line, "warning", "fact.evidence_missing",
+                        f"fact callout cites {eid}, but the evidence register has no populated row for it",
+                    )
 
 
 AGENTS_TODO_RE = re.compile(r"(?m)^\s*(?:[-*]\s*|\d+[.)]\s*|#{1,6}\s*)?TODO\b[ :\u2014-]")
@@ -1339,7 +1593,7 @@ def check_agents_configured(root: Path, findings: list[Finding]) -> None:
         add(findings, root, root / "AGENTS.md", None, "warning", "agents.absent",
             "no AGENTS.md — agents working here have no written contract")
         return
-    text = path.read_text(encoding="utf-8")
+    text = read_vault_text(path)[0]
     numbers = _LineNumbers(text)
     for match in AGENTS_TODO_RE.finditer(_mask_code(text)):
         line = numbers.at(match.start())
@@ -1429,7 +1683,7 @@ def check_decision_placeholders(root: Path, notes: list[Note], findings: list[Fi
         level = PLACEHOLDER_LEVELS.get(status)
         if level is None:
             continue
-        leftovers = _decision_placeholders(note)
+        leftovers = note.decision_placeholders
         if not leftovers:
             continue
         sections = ", ".join(f"`## {heading}`" for _, heading in leftovers)
@@ -1504,8 +1758,8 @@ def check_orphans(root: Path, notes: list[Note], findings: list[Finding], resolv
     if resolve is None:
         resolve = functools.partial(_resolve, root, index=_build_index(notes))
     for note in notes:
-        for match in WIKILINK_RE.finditer(note.masked):
-            resolved, ambiguous = resolve(match.group(1).strip())
+        for target, _line, _embed in note.wikilink_hits:
+            resolved, ambiguous = resolve(target)
             if resolved and not ambiguous:
                 linked.add(_real(resolved))
     for note in notes:
@@ -1573,13 +1827,21 @@ def _text_files_for_secret_scan(root: Path) -> Iterable[tuple[Path, int]]:
             yield p, info.st_size
 
 
-def check_secrets(root: Path, findings: list[Finding], loaded: dict[Path, str] | None = None) -> None:
+def check_secrets(
+    root: Path,
+    findings: list[Finding],
+    loaded: dict[Path, str] | None = None,
+    *,
+    notes: dict[Path, Note] | None = None,
+) -> None:
     """Scan every text file under *root* for credential-shaped strings.
 
     *loaded* maps a note's path to the text the vault index already read, so a
     Markdown note is not read from disk a second time.  The index stripped a
     leading byte-order mark; no pattern can match one or depends on it, so the
     findings (including line numbers) are the same as for the raw file.
+    *notes* maps a path to its parsed note instead, whose ``secret_hits`` are
+    the same matches computed from the same text.
     """
     max_bytes = 5_000_000
     for path, size in _text_files_for_secret_scan(root):
@@ -1597,6 +1859,11 @@ def check_secrets(root: Path, findings: list[Finding], loaded: dict[Path, str] |
                         "large files must be scanned externally or excluded explicitly"
                     ),
                 )
+                continue
+            note = notes.get(path) if notes else None
+            if note is not None:
+                for line, label in note.secret_hits:
+                    add(findings, root, path, line, "error", "secret.detected", f"looks like a {label} — keep locations, never secret values")
                 continue
             text = loaded.get(path) if loaded else None
             if text is None:
@@ -1645,10 +1912,10 @@ def collect_markdown(root: Path, paths: list[str]) -> list[Path]:
                 raise VaultPathError(f"path escapes vault root: {raw}")
             if p.is_dir():
                 out.extend(sorted(
-                    child for child in p.rglob("*.md")
+                    child for child in iter_markdown(p)
                     if child.is_file() and _within(root, child)
                 ))
-            elif p.suffix.lower() == ".md" and p.is_file():
+            elif is_markdown_name(p.name) and p.is_file():
                 out.append(p)
             elif not p.exists():
                 # A typo in a CI path list must not turn into "0 files — clean".
@@ -1659,7 +1926,7 @@ def collect_markdown(root: Path, paths: list[str]) -> list[Path]:
     depth = len(root.parts)
     return sorted(
         (
-            p for p in root.rglob("*.md")
+            p for p in iter_markdown(root)
             if p.is_file()
             and _within(root, p)
             and not any(part in CONTENT_SKIP_DIRS for part in p.parts[depth:])
@@ -1724,7 +1991,7 @@ def lint(
             # same as a link to a file that does not exist.
             if candidate.suffix.lower() == ".md":
                 return index_model.note_for(candidate) is not None
-            return candidate.exists()
+            return path_exists(candidate)
 
         link_exists = _confined_exists
 
@@ -1760,7 +2027,7 @@ def lint(
     if hub_links and not paths:
         check_hub_links(root, all_notes, findings)
     if secrets and not paths:
-        check_secrets(root, findings, {note.path: note.text for note in all_notes})
+        check_secrets(root, findings, notes={note.path: note for note in all_notes})
     findings = policy.apply_overrides(findings)
     if overrides is not None:
         overrides.extend(policy.overrides)
@@ -1886,10 +2153,10 @@ def main(argv: list[str] | None = None) -> int:
             for f in findings:
                 by_path.setdefault(f.path, []).append(f)
             for path in sorted(by_path):
-                print(f"\n{path}")
+                print(f"\n{one_line(path)}")
                 for f in sorted(by_path[path], key=lambda x: (x.line or 0, x.code)):
                     where = f"line {f.line}" if f.line else ""
-                    print(f"  {f.level:<7}  {where:<10} [{f.code}] {f.message}")
+                    print(f"  {f.level:<7}  {where:<10} [{f.code}] {one_line(f.message)}")
         print(f"\n{len(files)} files — {len(errors)} error(s), {len(warnings)} warning(s)" if findings else f"\n{len(files)} files — clean")
         # Printed even with --quiet: a security rule turned down by policy is
         # part of what this result means, not detail.

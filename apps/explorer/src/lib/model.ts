@@ -1,4 +1,4 @@
-import type { DecisionRow, EvidenceRow, VaultDoc, VaultIndex } from "../types.ts";
+import type { DecisionRow, EvidenceRow, Finding, VaultDoc, VaultIndex } from "../types.ts";
 import { extractWikilinks } from "./markdown.ts";
 
 export type VaultModel = ReturnType<typeof createVaultModel>;
@@ -89,6 +89,17 @@ export function createVaultModel(vault: VaultIndex) {
     searchIndex = null;
   }
 
+  // Findings arrive with the index (tests, older builds) or later as a chunk.
+  let findings: readonly Finding[] | undefined = vault.lint.findings;
+  /** Add the findings chunk. It must belong to this index: one row per counted finding. */
+  function attachFindings(chunk: readonly Finding[]): void {
+    const expected = vault.lint.errors + vault.lint.warnings;
+    if (!Array.isArray(chunk) || chunk.length !== expected) {
+      throw new Error(`findings chunk does not match this index (${Array.isArray(chunk) ? chunk.length : "no"} findings, ${expected} counted)`);
+    }
+    findings = chunk;
+  }
+
   const evidenceByKey = new Map(vault.evidence.map(row => [row.id, row]));
   const evidenceUsage = new Map<string, VaultDoc[]>();
   for (const doc of docs) {
@@ -171,6 +182,9 @@ export function createVaultModel(vault: VaultIndex) {
     resolveDoc,
     searchDocs,
     attachBodies,
+    attachFindings,
+    /** Lint findings, or undefined until their chunk is attached. */
+    findings: (): readonly Finding[] | undefined => findings,
     /** Build the search index now (e.g. while idle) instead of on the next query. */
     prepareSearch: (): void => { entries(); },
     /** True once every note's body is available (search covers note text). */

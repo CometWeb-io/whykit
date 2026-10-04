@@ -9,7 +9,10 @@ from pathlib import Path
 from .contract import vault_not_found
 from .graph import build_graph
 from .lint import (
+    _within,
+    path_is_file,
     path_cache,
+    strip_markdown_suffix,
     DECISION_ID_RE,
     EVIDENCE_ID_RE,
     find_vault_root,
@@ -31,17 +34,22 @@ def _normalize_target(root: Path, target: str, vault: VaultIndex) -> tuple[str, 
     if DECISION_ID_RE.fullmatch(raw):
         for note in vault.notes:
             if str(note.front.get("decision_id") or "").strip() == raw:
-                return "decision", vault.relative(note.path).removesuffix(".md")
+                return "decision", strip_markdown_suffix(vault.relative(note.path))
         return "decision", raw
-    path = Path(raw).expanduser()
+    try:
+        path = Path(raw).expanduser()
+    except RuntimeError:  # `~name` for a user that does not exist
+        path = Path(raw)
     if path.is_absolute():
-        if path.suffix.lower() == ".md" and path.is_file() and vault.note_for(path) is not None:
-            return "document", vault.relative(path).removesuffix(".md")
-        return "document", raw.removesuffix(".md")
+        # Containment before any file system call: another drive or a UNC share
+        # is answered from the strings alone.
+        if path.suffix.lower() == ".md" and _within(root, path) and path_is_file(path) and vault.note_for(path) is not None:
+            return "document", strip_markdown_suffix(vault.relative(path))
+        return "document", strip_markdown_suffix(raw)
     resolved, ambiguous = vault.resolve_link(raw)
     if resolved is not None and not ambiguous:
-        return "document", vault.relative(resolved).removesuffix(".md")
-    return "document", raw.removesuffix(".md")
+        return "document", strip_markdown_suffix(vault.relative(resolved))
+    return "document", strip_markdown_suffix(raw)
 
 
 @path_cache()

@@ -110,16 +110,17 @@ whykit new decision "New title" --owner Platform --status approved \
 ```
 
 That marks the old record `superseded`, sets `superseded_by`, and updates the
-decision log, which is the only change the history check accepts on an accepted
-record. A typo fix counts as a rewrite too; if it really matters, record it in a
+decision log. Apart from a confirmed review moving `review_by`, that lifecycle
+change is the only edit the history check accepts on an accepted record. A typo fix counts as a rewrite too; if it really matters, record it in a
 superseding decision.
 
 ### `History check requires actions/checkout with fetch-depth: 0`, `unknown Git revision` or `cannot find the merge base`
 
 The history check needs the pull request's base commit and the history between
 it and `HEAD`. Set `fetch-depth: 0` on `actions/checkout`, or run
-`git fetch --unshallow` (or `git fetch origin main`) in a shallow clone. These
-exit 2 with the error code `git_error`. See [Running WhyKit in CI](ci.md).
+`git fetch --unshallow` (or `git fetch origin main`) in a shallow clone.
+`whykit history` and `whykit diff` exit 2 with the error code `git_error`;
+`whykit check` reports a failed `history` line and exits 1. See [Running WhyKit in CI](ci.md).
 
 ### `warning: no decision records or review log under … in either revision`
 
@@ -146,7 +147,20 @@ lines to its `.gitignore`:
 ```gitignore
 .whykit/mutation.lock
 .whykit/transactions/
+.whykit/cache/
 ```
+
+`.whykit/cache/` is the parse cache read commands keep (see
+[Performance](performance.md#parse-cache)). It carries its own `.gitignore`,
+so it stays out of `git status` even before you add the line.
+
+### `ignoring unreadable parse cache`
+
+The parse cache in `.whykit/cache/` was truncated or written by something
+else. WhyKit ignored it, produced the same result it would have without it,
+and wrote a fresh one. No action is needed; deleting the directory is always
+safe. To run without the cache, put `--no-cache` before the command
+(`whykit --no-cache status`) or set `WHYKIT_NO_CACHE=1`.
 
 ### `file is read-only; make it writable before WhyKit updates it`
 

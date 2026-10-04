@@ -19,11 +19,11 @@ import re
 import subprocess
 import sys
 
-from .console import emit_machine
+from .console import emit_machine, one_line
 
 from .contract import emit_error
 
-RECORD_RE = re.compile(r"(?:^|/)06-decisions/d-\d{3,}-.+\.md$")
+RECORD_RE = re.compile(r"(?:^|/)06-decisions/d-[0-9]{3,}-.+\.[mM][dD]$")
 RECORD_SUFFIX = "06-decisions/"
 REVIEW_LOG_SUFFIX = "00-context/review-log.md"
 STATUS_VALUE_RE = re.compile(
@@ -428,5 +428,5 @@ def _report(json_mode: bool, base: str, head: str, blocked: list[tuple[str, str]
         return 0
     print("Historical decision reasoning is append-only. Supersede; do not rewrite:", file=sys.stderr)
     for status, path in blocked:
-        print(f"  {status}\t{path}", file=sys.stderr)
+        print(f"  {status}\t{one_line(path)}", file=sys.stderr)
     return 1
