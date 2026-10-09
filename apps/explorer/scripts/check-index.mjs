@@ -23,7 +23,7 @@ function unique(items, label) {
   }
 }
 
-if (!Array.isArray(data.docs) || !data.docs.length) fail("no documents indexed");
+if (!Array.isArray(data.docs)) fail("no document array indexed");
 unique(data.docs.map(d => d.id), "doc id");
 unique(data.evidence.map(e => e.id), "evidence id");
 unique(data.decisions.map(d => d.id), "decision id");

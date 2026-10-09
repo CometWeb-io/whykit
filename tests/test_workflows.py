@@ -16,8 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from whykit.graph import build_graph  # noqa: E402
 from whykit.impact import analyze_impact  # noqa: E402
+from whykit.scaffold import create_evidence  # noqa: E402
 from whykit.status import build_status  # noqa: E402
-from _vaults import fresh_vault  # noqa: E402
+from _vaults import approved_decision, fresh_vault  # noqa: E402
 
 
 def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -71,19 +72,15 @@ class RecordWorkflowTests(unittest.TestCase):
         lint = run("lint", "--root", str(self.vault))
         self.assertEqual(lint.returncode, 0, lint.stdout + lint.stderr)
 
-    def test_approved_decision_gets_policy_review_date_when_not_supplied(self) -> None:
+    def test_approval_gets_policy_review_date_when_not_supplied(self) -> None:
         before = dt.date.today()
-        result = run(
-            "new", "--root", str(self.vault), "decision", "Ship the policy",
-            "--status", "approved", "--owner", "Test owner",
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        record = next((self.vault / "06-decisions").glob("d-001-*.md")).read_text(encoding="utf-8")
-        # Bracket the wall clock so a run that crosses midnight still passes.
-        expected = {(day + dt.timedelta(days=90)).isoformat() for day in (before, dt.date.today())}
+        create_evidence(self.vault, source="Process study", kind="report", location="https://example.com/study",
+                        claims="Supports the process", today=before)
+        _, path = approved_decision(self.vault, "Ship the policy", owner="Test owner", source_ids=["E-001"], today=before)
+        record = path.read_text(encoding="utf-8")
         match = re.search(r"(?m)^review_by: (\S+)$", record)
         self.assertIsNotNone(match)
-        self.assertIn(match.group(1), expected)
+        self.assertEqual(match.group(1), (before + dt.timedelta(days=90)).isoformat())
 
     def test_new_note_stays_inside_an_existing_workstream(self) -> None:
         result = run(
@@ -129,20 +126,13 @@ class RecordWorkflowTests(unittest.TestCase):
         self.assertTrue(payload["path"].startswith("06-decisions/d-001-"))
 
     def test_approved_supersession_updates_only_predecessor_lifecycle_and_log(self) -> None:
-        first = run(
-            "new", "--root", str(self.vault), "decision", "Use option A",
-            "--status", "approved", "--owner", "Test owner", "--review-by", "2027-01-01",
-        )
-        self.assertEqual(first.returncode, 0, first.stderr)
-        old = next((self.vault / "06-decisions").glob("d-001-*.md"))
+        day = dt.date.today()
+        create_evidence(self.vault, source="Process study", kind="report", location="https://example.com/study",
+                        claims="Supports the process", today=day)
+        _, old = approved_decision(self.vault, "Use option A", owner="Test owner", source_ids=["E-001"], today=day)
         old_body_before = old.read_text(encoding="utf-8").split("---", 2)[-1]
-
-        second = run(
-            "new", "--root", str(self.vault), "decision", "Use option B",
-            "--status", "approved", "--owner", "Test owner", "--review-by", "2027-02-01",
-            "--supersedes", "D-001",
-        )
-        self.assertEqual(second.returncode, 0, second.stderr)
+        approved_decision(self.vault, "Use option B", owner="Test owner", source_ids=["E-001"],
+                          supersedes="D-001", today=day)
         old_text = old.read_text(encoding="utf-8")
         self.assertIn("status: superseded", old_text)
         self.assertIn("superseded_by: D-002", old_text)

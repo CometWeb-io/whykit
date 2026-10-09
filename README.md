@@ -37,7 +37,7 @@ uv run whykit new --root ../my-ledger evidence \
   --location "https://example.com/exports/q3-tickets.csv" \
   --claims "Most onboarding tickets mention SSO"
 uv run whykit new --root ../my-ledger decision "Ship SSO before audit logs" \
-  --owner Platform --status approved --source E-001
+  --owner Platform --status draft --source E-001
 
 # 3. Check the vault and see what is due for review.
 uv run whykit lint --root ../my-ledger
@@ -52,11 +52,12 @@ created E-001: 00-context/evidence-register.md
 created D-001: 06-decisions/d-001-ship-sso-before-audit-logs.md
 ...
 24 files — 0 error(s), 5 warning(s)
-DUE     <today + 90 days>  06-decisions/d-001-ship-sso-before-audit-logs.md  (Platform)
+0 review(s) overdue or due by <date> (120 day(s) from <today>)
 ```
 
 The vault now holds an evidence row (`E-001`), a decision record that cites it
-(`D-001`), a matching decision-log entry, and a review date 90 days out. Four of
+(`D-001`), and a matching decision-log entry. The record is a draft until you
+complete and [approve it](docs/guide.md#approve-a-decision). Four of
 the warnings are the questions in the vault's `AGENTS.md` that only you can
 answer (reply language, branching rule, tone-of-voice owner, safety rules).
 The fifth, `decision.placeholder`, says the new record still holds the
@@ -69,7 +70,7 @@ decision ...` and `whykit new decision ... --root ../my-ledger` both work).
 Inside the vault directory you can drop `--root` altogether.
 
 Next: write the real context and rationale into `06-decisions/d-001-*.md`,
-`git init` the vault, and commit it. Then follow
+preview and approve the completed record, `git init` the vault, and commit it. Then follow
 [Record, check and supersede a decision](docs/tutorials/record-and-supersede.md)
 (ten minutes) and [Gate pull requests in GitHub Actions](docs/tutorials/gate-pull-requests.md).
 

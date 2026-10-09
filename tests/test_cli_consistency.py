@@ -82,6 +82,20 @@ class GroupedHelpTests(unittest.TestCase):
         for name in _top_level_commands():
             self.assertIn(name, script)
 
+    def test_every_subcommand_and_nested_action_has_usable_help(self) -> None:
+        def paths(parser, prefix=()):
+            for action in parser._actions:
+                if hasattr(action, "choices") and isinstance(action.choices, dict):
+                    for name, child in action.choices.items():
+                        yield (*prefix, name)
+                        yield from paths(child, (*prefix, name))
+        for path in paths(build_parser()):
+            with self.subTest(command=" ".join(path)):
+                result = run(*path, "--help")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("usage: whykit " + " ".join(path), result.stdout)
+                self.assertNotIn("author - create and change records", result.stdout)
+
 
 class RootPlacementTests(unittest.TestCase):
     def test_root_before_the_command_is_accepted(self) -> None:

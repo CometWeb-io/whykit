@@ -56,9 +56,7 @@ AGENT_PREAMBLES = {
 def _allowed(context: dict[str, Any], allowed: set[str] | None) -> bool:
     if allowed is None:
         return True
-    # Evidence-register rows carry no sensitivity of their own and inherit the
-    # register's `internal` classification; so do documents without the key.
-    record = context.get("record") if context.get("kind") != "evidence" else None
+    record = context.get("record") if context.get("kind") != "evidence" else (context.get("evidence") or {}).get("record")
     level = str((record or {}).get("sensitivity") or "internal").lower()
     return level in allowed
 

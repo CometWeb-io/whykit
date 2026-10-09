@@ -178,7 +178,7 @@ class ExplorerIndexTests(unittest.TestCase):
         self.assertEqual(payload["lint"]["errors"], 0)
 
     def test_explorer_index_bodies_exclude_front_matter(self) -> None:
-        result = run("explorer-index", "--root", str(ROOT / "examples" / "northline"), "--today", "2026-09-17")
+        result = run("explorer-index", "--private", "--root", str(ROOT / "examples" / "northline"), "--today", "2026-09-17")
         self.assertEqual(result.returncode, 0, result.stderr)
         docs = json.loads(result.stdout)["docs"]
         self.assertGreater(len(docs), 1)

@@ -10,8 +10,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .contract import emit_error, vault_not_found
-from .config import ConfigError, configuration_readiness, get_profile, load_config
-from .immutability import changed_records
+from .config import CONFIG_FILE, ConfigError, configuration_readiness, get_profile, load_config, parse_config
+from .immutability import _git_prefix, _require_revisions, changed_records, git
 from .lint import _parse_date, find_vault_root, is_vault_root, lint, rel, path_cache
 from .console import emit_machine, one_line
 from .rule_policy import Override, describe_override, secret_scan_skipped
@@ -29,16 +29,16 @@ def _git_clean(root: Path) -> bool:
     return result.returncode == 0 and not result.stdout.strip()
 
 
-@path_cache()
-def run_check(
+def _run_profile(
     root: Path,
+    config: dict,
+    config_path: Path | None,
     *,
     profile_name: str,
     base: str | None = None,
     head: str = "HEAD",
     today: dt.date | None = None,
 ) -> dict:
-    config, config_path = load_config(root)
     profile = get_profile(config, profile_name)
     applied: list[Override] = []
     files, findings = lint(
@@ -48,6 +48,7 @@ def run_check(
         hub_links=bool(profile.get("require_hub_links", False)),
         today=today,
         overrides=applied,
+        config=config,
     )
     if not profile["secrets"]:
         applied.append(secret_scan_skipped(f"profile {profile_name} (secrets = false)"))
@@ -84,6 +85,7 @@ def run_check(
     else:
         checks.append({"name": "policy_configuration", "passed": True, "detail": "not required"})
 
+    history_checked = False
     history_mode = profile["history"]
     if history_mode == "off":
         checks.append({"name": "history", "passed": True, "detail": "disabled by profile"})
@@ -92,21 +94,24 @@ def run_check(
             checks.append({"name": "history", "passed": False, "detail": "--base supplied but vault is not in a git work tree"})
         else:
             try:
-                blocked = changed_records(base, head, str(root))
+                history_reasons: dict[str, str] = {}
+                blocked = changed_records(base, head, str(root), reasons=history_reasons)
             except subprocess.CalledProcessError as exc:
                 checks.append({"name": "history", "passed": False, "detail": (exc.stderr or str(exc)).strip()})
             else:
+                history_checked = True
                 checks.append({
                     "name": "history",
                     "passed": not blocked,
                     "detail": "immutable reasoning unchanged" if not blocked else f"{len(blocked)} immutable decision change(s)",
-                    "blocked": [{"status": status, "path": path} for status, path in blocked],
+                    "blocked": [{"status": status, "path": path, **({"reason": history_reasons[path]} if path in history_reasons else {})} for status, path in blocked],
                 })
     elif history_mode == "required":
         checks.append({"name": "history", "passed": False, "detail": "profile requires --base <git-ref>"})
     else:
         checks.append({"name": "history", "passed": True, "detail": "optional; pass --base to enforce"})
 
+    checks[-1]["checked"] = history_checked
     passed = all(item["passed"] for item in checks)
     lint_report: dict = {
         "files": len(files),
@@ -123,9 +128,56 @@ def run_check(
         "config_source": rel(root, config_path) if config_path else "built-in defaults",
         "as_of": (today or dt.date.today()).isoformat(),
         "passed": passed,
+        "history_checked": history_checked,
         "checks": checks,
         "lint": lint_report,
     }
+
+
+@path_cache()
+def run_check(
+    root: Path,
+    *,
+    profile_name: str,
+    base: str | None = None,
+    head: str = "HEAD",
+    today: dt.date | None = None,
+) -> dict:
+    """Check the working vault against both head and protected base policies."""
+    config, path = load_config(root)
+    report = _run_profile(root, config, path, profile_name=profile_name, base=base, head=head, today=today)
+    if base is None:
+        return report
+    try:
+        _require_revisions(str(root), base)
+        policy_path = _git_prefix(str(root)) + CONFIG_FILE
+        entry = git("ls-tree", "-z", "--full-tree", base, "--", policy_path, root=str(root))
+        if entry:
+            if entry.split(" ", 1)[0] not in {"100644", "100755"}:
+                raise ConfigError("baseline policy must be a regular file")
+            baseline_config = parse_config(git("show", f"{base}:{policy_path}", root=str(root)))
+        else:
+            baseline_config = parse_config("")
+        baseline = _run_profile(
+            root, baseline_config, root / CONFIG_FILE if entry else None,
+            profile_name=profile_name, base=base, head=head, today=today,
+        )
+        baseline["config_source"] = f"{base}:{policy_path}" if entry else f"{base}:built-in defaults"
+    except (ConfigError, subprocess.CalledProcessError) as exc:
+        report["checks"].append({
+            "name": "baseline_policy", "passed": False,
+            "detail": f"cannot validate policy at {base}: " + (getattr(exc, "stderr", None) or str(exc)).strip(),
+        })
+    else:
+        report["baseline"] = {"ref": base, **baseline}
+        report["history_checked"] = report["history_checked"] or baseline["history_checked"]
+        failed = "; ".join(f"{check['name']}: {check['detail']}" for check in baseline["checks"] if not check["passed"])
+        report["checks"].append({
+            "name": "baseline_policy", "passed": baseline["passed"],
+            "detail": f"policy at {base}: " + (failed or "all checks passed"),
+        })
+    report["passed"] = all(check["passed"] for check in report["checks"])
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -172,13 +224,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  config  {one_line(report['config_source'])}")
         width = max(len(check["name"]) for check in report["checks"])
         for check in report["checks"]:
-            marker = "OK" if check["passed"] else "FAIL"
+            marker = "SKIP" if check.get("checked") is False and check["passed"] else ("OK" if check["passed"] else "FAIL")
             print(f"  {marker:<4} {check['name']:<{width}}  {one_line(check['detail'])}")
             for item in check.get("blocked", []):
                 print(f"         {item['status']}  {one_line(item['path'])}")
         if report["lint"]["errors"] or report["lint"]["warnings"]:
             print(f"  lint findings  {report['lint']['errors']} error(s), {report['lint']['warnings']} warning(s)")
         _print_gate_findings(report)
+        if report.get("baseline", {}).get("lint", {}).get("findings"):
+            print("  findings under the baseline policy:")
+            _print_gate_findings(report["baseline"])
         for entry in report["lint"].get("overrides", []):
             if entry["security"]:
                 print(f"  policy  {one_line(describe_override(entry))}")
@@ -212,9 +267,15 @@ def gate_annotations(report: dict, root: Path) -> list[str]:
         blocked = check.get("blocked") or []
         for item in blocked:
             path = item["path"].split(" -> ")[0]
+            reason = item.get("reason")
+            message = (
+                f"{reason}: include a newly appended matching review event with this record."
+                if reason else
+                f"Accepted decision reasoning is append-only ({item['status']}); supersede it with a new record instead of rewriting it."
+            )
             lines.append(workflow_command(
                 "error",
-                f"Accepted decision reasoning is append-only ({item['status']}); supersede it with a new record instead of rewriting it.",
+                message,
                 file=f"{prefix}{path}",
                 title="WhyKit history",
             ))

@@ -7,7 +7,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from .contract import emit_error, vault_not_found
+from .contract import ERROR_EXIT_CODES, emit_error, error_payload, vault_not_found
 from .config import ConfigError, load_config
 from .lint import DECISION_ID_RE, evidence_register, find_vault_root, is_vault_root, lint, path_cache
 from .vault_index import VaultIndex
@@ -114,6 +114,67 @@ def build_status(
         "approved_without_owner": ownership_gaps,
         "findings": [asdict(f) for f in findings],
     }
+
+
+def build_workspace_status(
+    roots: list[Path], *, today: dt.date | None = None,
+    due_days: int | None = None, strict: bool = False,
+) -> dict:
+    """Read independent vaults; one failure never hides the remaining results."""
+    if not roots or (due_days is not None and due_days < 0):
+        raise ValueError("supply vault roots and a non-negative review window")
+    today = today or dt.date.today()
+    entries = []
+    seen: set[Path] = set()
+    vault_roots: set[Path] = set()
+    identities: set[tuple[int, int]] = set()
+    for requested in roots:
+        entry: dict = {"root": str(requested)}
+        try:
+            root = requested.expanduser().resolve()
+            if root in seen:
+                continue
+            seen.add(root)
+            entry["root"] = str(root)
+            if is_vault_root(root):
+                stat = root.stat()
+                identity = (stat.st_dev, stat.st_ino)
+                if identity in identities:
+                    continue
+                identities.add(identity)
+                vault_roots.add(root)
+            else:
+                entry["error"] = error_payload("vault_not_found", "no WhyKit vault at this root")["error"]
+        except (OSError, ValueError, RuntimeError):
+            entry["error"] = error_payload("io_error", "vault root could not be resolved")["error"]
+        entries.append(entry)
+    for entry in entries:
+        try:
+            root = Path(entry["root"])
+            if "error" in entry:
+                pass
+            elif any(other != root and (
+                any(parent.samefile(other) for parent in root.parents)
+                or any(parent.samefile(root) for parent in other.parents)
+            ) for other in vault_roots):
+                entry["error"] = error_payload("invalid_target", "overlapping vault roots must be checked separately")["error"]
+            else:
+                config, _ = load_config(root)
+                window = due_days if due_days is not None else int(config["defaults"]["status_due_days"])
+                status = build_status(root, today=today, due_days=window)
+                entry.update(status=status, due_days=window,
+                             exit_code=int(bool(status["errors"] or (strict and status["warnings"]))))
+        except ConfigError as exc:
+            entry["error"] = error_payload("invalid_config", str(exc))["error"]
+        except (OSError, ValueError):
+            entry["error"] = error_payload("io_error", "vault could not be read")["error"]
+        except Exception:  # noqa: BLE001 - isolate a failing vault, but never report it healthy
+            entry["error"] = error_payload("internal_error", "vault status could not be computed")["error"]
+        if "error" in entry:
+            entry["exit_code"] = ERROR_EXIT_CODES[entry["error"]["code"]]
+    codes = {entry["exit_code"] for entry in entries}
+    return {"contract_version": 1, "as_of": today.isoformat(), "vaults": entries,
+            "exit_code": next((code for code in (70, 2, 1) if code in codes), 0)}
 
 
 def main(argv: list[str] | None = None) -> int:

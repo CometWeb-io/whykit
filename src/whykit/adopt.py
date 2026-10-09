@@ -26,6 +26,7 @@ import re
 import secrets
 import shutil
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,6 +37,7 @@ from .lint import (
     Note, check_front_matter, find_vault_root, is_markdown_name, is_vault_root, iter_markdown, load_note,
 )
 from .console import as_printed, emit_machine
+from .immutability import _review_log_parts
 
 SKIP_DIRS = {
     ".git", ".obsidian", ".import-staging", "node_modules", "__pycache__",
@@ -324,6 +326,85 @@ def score_adoption(candidates: list[Candidate], vault: Path | None = None) -> di
     }
 
 
+def compare_migration(source: Path, target: Path, candidates: list[Candidate]) -> dict:
+    """Compare same-path Markdown snapshots without rewriting either tree."""
+    files = []
+    scanned = {candidate.relative: candidate for candidate in candidates}
+    names = sorted(set(scanned) | {
+        path.relative_to(source).as_posix() for path in iter_markdown(source)
+        if not any(part in SKIP_DIRS for part in path.relative_to(source).parts)
+    })
+    for relative in names:
+        path = source / relative
+        candidate = scanned.get(relative)
+        entry: dict = {"path": relative, "source_sha256": candidate.sha256 if candidate else None,
+                 "target_sha256": None, "unchanged": False, "missing_wikilinks": [],
+                 "missing_ids": [], "review_history": "not_checked", "issues": []}
+        try:
+            if candidate is None or not _within(source, path):
+                entry["issues"].append("unreadable_source")
+                files.append(entry)
+                continue
+            before = path.read_bytes()
+            if hashlib.sha256(before).hexdigest() != candidate.sha256:
+                entry["issues"].append("source_changed")
+                files.append(entry)
+                continue
+            destination = target / relative
+            if not _within(target, destination):
+                entry["issues"].append("unsafe_target")
+                files.append(entry)
+                continue
+            if not destination.is_file():
+                entry["issues"].append("missing_file")
+                files.append(entry)
+                continue
+            after = destination.read_bytes()
+            if b"\0" in after:
+                raise ValueError("binary target")
+            entry["target_sha256"] = hashlib.sha256(after).hexdigest()
+            entry["unchanged"] = before == after
+            old = load_note(path, text=before.decode("utf-8"))
+            new = load_note(destination, text=after.decode("utf-8"))
+            old_links = Counter(unicodedata.normalize("NFC", m.group(0).replace("\\|", "|")) for m in WIKILINK_RE.finditer(old.masked))
+            new_links = Counter(unicodedata.normalize("NFC", m.group(0).replace("\\|", "|")) for m in WIKILINK_RE.finditer(new.masked))
+            entry["missing_wikilinks"] = sorted((old_links - new_links).elements())
+            old_ids = set(EVIDENCE_ID_RE.findall(old.masked) + DECISION_ID_RE.findall(old.masked))
+            new_ids = set(EVIDENCE_ID_RE.findall(new.masked) + DECISION_ID_RE.findall(new.masked))
+            entry["missing_ids"] = sorted(old_ids - new_ids)
+            if entry["missing_wikilinks"]:
+                entry["issues"].append("wikilinks_lost")
+            if entry["missing_ids"]:
+                entry["issues"].append("ids_lost")
+            declared = old.front.get("decision_id")
+            if isinstance(declared, str) and DECISION_ID_RE.fullmatch(declared) and new.front.get("decision_id") != declared:
+                entry["issues"].append("decision_id_changed")
+            sources = old.front.get("source_ids")
+            if isinstance(sources, list) and all(isinstance(item, str) for item in sources):
+                replacement = new.front.get("source_ids")
+                if sources and (not isinstance(replacement, list) or not all(isinstance(item, str) for item in replacement)
+                                or not set(sources).issubset(replacement)):
+                    entry["issues"].append("source_ids_lost")
+            entry["review_history"] = "not_present"
+            if path.name.casefold() == "review-log.md":
+                old_log, new_log = _review_log_parts(old.text), _review_log_parts(new.text)
+                if before == after:
+                    entry["review_history"] = "unchanged"
+                elif old_log is None or new_log is None:
+                    entry["review_history"] = "unrecognized"
+                    entry["issues"].append("history_unrecognized")
+                elif new_log[1][:len(old_log[1])] != old_log[1]:
+                    entry["review_history"] = "changed"
+                    entry["issues"].append("history_changed")
+                else:
+                    entry["review_history"] = "preserved"
+        except (OSError, UnicodeError, ValueError):
+            entry["issues"].append("unreadable_file")
+        files.append(entry)
+    return {"target": str(target), "passed": bool(files) and not any(f["issues"] for f in files),
+            "files": files, "scope": "same-relative-path Markdown; code examples and Git commit history are not checked"}
+
+
 def _migration_md(source: Path, candidates: list[Candidate], score: dict, profile: str) -> str:
     lines = [
         f"# Migration from `{source}`",
@@ -532,8 +613,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--write", action="store_true", help="stage files and write an ingestion record")
     parser.add_argument("--owner", default="TODO", help="owner recorded on the ingestion record")
     parser.add_argument("--profile", choices=ADOPT_PROFILES, default="generic", help="adoption mapping profile")
+    parser.add_argument("--compare", metavar="DIR", help="read-only preservation check against files at the same relative paths")
     parser.add_argument("--json", action="store_true", help="machine-readable inventory + score (implies dry-run shape)")
     args = parser.parse_args(argv)
+    if args.compare and args.write:
+        return emit_error("usage", "--compare cannot be combined with --write", json_mode=args.json)
 
     source = Path(args.source).expanduser().resolve()
     if not source.is_dir():
@@ -546,8 +630,11 @@ def main(argv: list[str] | None = None) -> int:
             "no WhyKit vault found — run `whykit init <dir>` first, or pass --into",
             json_mode=args.json,
         )
-    if source == vault or vault in source.parents or source in vault.parents:
+    if not args.compare and (source == vault or vault in source.parents or source in vault.parents):
         return emit_error("invalid_target", "refusing to adopt overlapping source/vault directories", json_mode=args.json)
+    compare = Path(args.compare).expanduser().resolve() if args.compare else None
+    if compare is not None and (not compare.is_dir() or source.samefile(compare)):
+        return emit_error("invalid_target", "--compare must name a different existing directory", json_mode=args.json)
 
     try:
         candidates, record, migration, score = adopt(
@@ -555,6 +642,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (OSError, RuntimeError) as exc:
         return emit_error("io_error", f"adoption failed: {exc}", json_mode=args.json)
+    preservation = compare_migration(source, compare, candidates) if compare is not None else None
 
     visible_files = [
         path for path in source.rglob("*")
@@ -604,8 +692,18 @@ def main(argv: list[str] | None = None) -> int:
             "ingestion_record": record.relative_to(vault).as_posix() if record else None,
             "migration": migration.relative_to(vault).as_posix() if migration else None,
         }
+        if preservation is not None:
+            payload["preservation"] = preservation
         emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
-        return 0
+        return int(preservation is not None and not preservation["passed"])
+
+    if preservation is not None:
+        print(f"Preservation: {'PASS' if preservation['passed'] else 'FAIL'}")
+        print(preservation["scope"])
+        for item in preservation["files"]:
+            if item["issues"]:
+                print(f"  {item['path']}: {', '.join(item['issues'])}")
+        return int(not preservation["passed"])
 
     if not candidates:
         print(f"no Markdown found under {source}")

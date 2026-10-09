@@ -430,3 +430,32 @@ currently takes well under a second. Before this work, `lint` took 13 seconds
 and `pack` 49 seconds. The test also counts `Path.resolve()` calls during a
 full lint, which catches a return to per-occurrence resolution even on fast
 hardware. On a runner too slow for these budgets, set `WHYKIT_SKIP_PERF=1`.
+
+## MCP query page materialization
+
+Query retains the full visible ranking for exact totals and cursor validation,
+but only builds result summaries for the selected page. Hidden notes never enter
+that ranking. This bounds result materialization by the requested page size;
+file discovery, stat checks and ranking still depend on vault size.
+
+Run one size per fresh process to keep peak RSS independent between sizes:
+
+```bash
+uv run python tests/profile_mcp_query.py --notes 1000
+uv run python tests/profile_mcp_query.py --notes 5000
+uv run python tests/profile_mcp_query.py --notes 20000
+```
+
+The deterministic corpus includes intentional lint findings and is not a real
+production vault. The profile uses the SDK-free handler's real request/cache
+scopes, waits for racy-file protection to settle, measures one cold and two warm
+calls, then counts summaries and traces allocations for a one-result page.
+Warm timings exclude that instrumentation; peak RSS includes the complete run
+and is reported as null where the OS has no stdlib RSS reader.
+It is a diagnostic, not a model/HTTP benchmark or a latency guarantee.
+
+On Python 3.12/macOS, a 20k-note diagnostic returned the same 14,020 matches
+before/after this change. One-result materialization fell from 15,310 summaries
+to one; warm calls changed from about 0.83 s to 0.79 s, including the new
+content fingerprint that prevents mixed-version query pages. Those samples describe
+the local candidate only; remeasure on the target machine before claiming scale.

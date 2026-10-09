@@ -6,12 +6,28 @@ import hashlib
 import codecs
 import json
 import os
+import re
 import secrets
 import stat
 import time
 from contextlib import contextmanager
 from collections.abc import Iterator, Mapping
 from pathlib import Path
+
+
+def _sync_directory(path: Path) -> None:
+    """Persist a rename on systems that support syncing directories."""
+    if os.name == "nt":
+        return  # Windows does not expose directory fsync through os.open.
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        try:
+            os.fsync(fd)
+        except OSError as exc:
+            if exc.errno not in {errno.EINVAL, errno.ENOTSUP}:
+                raise
+    finally:
+        os.close(fd)
 
 
 def ensure_writable(path: Path) -> None:
@@ -85,16 +101,7 @@ def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None
         if previous_mode is not None:
             os.chmod(tmp, previous_mode)
         os.replace(tmp, path)
-        try:
-            fd = os.open(path.parent, os.O_RDONLY)
-        except (OSError, AttributeError):
-            return
-        try:
-            os.fsync(fd)
-        except OSError:
-            pass
-        finally:
-            os.close(fd)
+        _sync_directory(path.parent)
     finally:
         try:
             tmp.unlink()
@@ -128,16 +135,7 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
         if previous_mode is not None:
             os.chmod(tmp, previous_mode)
         os.replace(tmp, path)
-        try:
-            fd = os.open(path.parent, os.O_RDONLY)
-        except (OSError, AttributeError):
-            return
-        try:
-            os.fsync(fd)
-        except OSError:
-            pass
-        finally:
-            os.close(fd)
+        _sync_directory(path.parent)
     finally:
         try:
             tmp.unlink()
@@ -159,6 +157,7 @@ def safe_vault_dir(root: Path, relative: str | Path) -> Path:
         if not current.exists():
             try:
                 current.mkdir(mode=0o755)
+                _sync_directory(current.parent)
             except FileExistsError:
                 # Another writer may have created this directory after our
                 # existence check. Revalidate below; in particular, do not
@@ -286,11 +285,15 @@ def stage_transaction(root: Path, updates: Mapping[Path, str]) -> Path:
     tx = safe_vault_dir(root, Path(".whykit") / "transactions" / txid)
     manifest: list[dict[str, str]] = []
     for index, (target, content) in enumerate(updates.items()):
+        if Path(target).is_symlink():
+            raise RuntimeError(f"refusing to mutate symlink: {target}")
         resolved_target = Path(target).resolve()
         try:
             relative = resolved_target.relative_to(root).as_posix()
         except ValueError as exc:
             raise RuntimeError(f"transaction target escapes vault: {target}") from exc
+        if resolved_target.is_relative_to(root / ".whykit"):
+            raise ValueError(f"transaction cannot replace its own state: {target}")
         staged_name = f"{index}.new"
         staged = tx / staged_name
         content = match_line_endings(resolved_target, content)
@@ -308,30 +311,59 @@ def stage_transaction(root: Path, updates: Mapping[Path, str]) -> Path:
 
 
 def commit_transaction(root: Path, tx: Path) -> None:
-    """Apply a READY transaction, then mark it COMMITTED."""
+    """Replay a READY transaction; discard staged bytes only after COMMITTED."""
     root = Path(root).resolve(strict=True)
     tx = Path(tx)
+    base = safe_vault_dir(root, ".whykit/transactions")
+    if tx.parent.resolve() != base or tx.is_symlink():
+        raise RuntimeError(f"unsafe transaction directory: {tx}")
     ready = tx / "READY"
     committed = tx / "COMMITTED"
-    if committed.exists():
-        return
     if not ready.exists():
         raise RuntimeError(f"transaction is not READY: {tx}")
+    if any(path.is_symlink() for path in (ready, committed, tx / "manifest.json")):
+        raise RuntimeError(f"symlinked transaction metadata refused: {tx}")
     manifest = json.loads((tx / "manifest.json").read_text(encoding="utf-8"))
-    if not isinstance(manifest, list):
+    if not isinstance(manifest, list) or not manifest:
         raise RuntimeError(f"malformed transaction manifest: {tx}")
+    entries: list[tuple[Path, Path, str]] = []
+    sources: set[str] = set()
+    targets: set[Path] = set()
     for item in manifest:
-        if not isinstance(item, dict):
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("target"), str)
+            or not isinstance(item.get("staged"), str)
+            or not re.fullmatch(r"[0-9]+\.new", item["staged"])
+            or not isinstance(item.get("sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])
+        ):
             raise RuntimeError(f"malformed transaction entry: {tx}")
-        source = tx / str(item["staged"])
-        target = safe_vault_target(root, str(item["target"]))
-        data = source.read_bytes()
-        digest = hashlib.sha256(data).hexdigest()
-        if digest != item.get("sha256"):
-            raise RuntimeError(f"staged content digest mismatch: {source}")
-        atomic_write_bytes(target, data)
+        source = tx / item["staged"]
+        target = safe_vault_target(root, item["target"])
+        if source.is_symlink() or item["staged"] in sources or target in targets:
+            raise RuntimeError(f"unsafe or duplicate transaction entry: {tx}")
+        if target.is_relative_to(root / ".whykit"):
+            raise RuntimeError(f"transaction cannot replace its own state: {target}")
+        sources.add(item["staged"])
+        targets.add(target)
+        entries.append((source, target, item["sha256"]))
+    if not committed.exists():
+        for source, target, expected in entries:
+            try:
+                data = source.read_bytes()
+            except FileNotFoundError:
+                # Older journals deleted each source immediately after writing.
+                if target.exists() and hashlib.sha256(target.read_bytes()).hexdigest() == expected:
+                    continue
+                raise RuntimeError(f"cannot recover missing staged content: {source}; restore it from a backup") from None
+            if hashlib.sha256(data).hexdigest() != expected:
+                raise RuntimeError(f"staged content digest mismatch: {source}")
+            atomic_write_bytes(target, data)
+        atomic_write_text(committed, "1\n")
+    for source, _target, _digest in entries:
         source.unlink(missing_ok=True)
-    atomic_write_text(committed, "1\n")
+    _sync_directory(tx)
 
 
 def recover_pending_transactions(root: Path) -> list[Path]:
@@ -340,13 +372,18 @@ def recover_pending_transactions(root: Path) -> list[Path]:
     base = root / ".whykit" / "transactions"
     if not base.is_dir():
         return []
+    base = safe_vault_dir(root, ".whykit/transactions")
     recovered: list[Path] = []
     for tx in sorted(base.iterdir()):
         if not tx.is_dir():
             continue
-        if (tx / "READY").exists() and not (tx / "COMMITTED").exists():
+        if (tx / "READY").exists():
+            pending = not (tx / "COMMITTED").exists()
+            if not pending and next(tx.glob("[0-9]*.new"), None) is None:
+                continue
             commit_transaction(root, tx)
-            recovered.append(tx)
+            if pending:
+                recovered.append(tx)
     return recovered
 
 

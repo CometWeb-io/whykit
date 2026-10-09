@@ -462,7 +462,7 @@ class InstallHooksTests(unittest.TestCase):
 
 
 class ExplorerAutomationTests(unittest.TestCase):
-    """The optional Explorer jobs: useful signal, never a blocker, least privilege."""
+    """Explorer gates block the full-product release with least privilege."""
 
     EXPLORER = ROOT / "apps" / "explorer"
 
@@ -472,11 +472,11 @@ class ExplorerAutomationTests(unittest.TestCase):
         self.assertIn(name, jobs)
         return "\n".join(jobs[name])
 
-    def test_explorer_jobs_cannot_block_a_merge(self) -> None:
+    def test_explorer_jobs_block_the_product_gate(self) -> None:
         for name in ("explorer", "explorer-e2e"):
             with self.subTest(job=name):
                 job = self._job(name)
-                self.assertIn("continue-on-error: true", job)
+                self.assertNotIn("continue-on-error: true", job)
                 self.assertRegex(job, r"timeout-minutes: \d+")
                 self.assertNotIn("secrets.", job)
 

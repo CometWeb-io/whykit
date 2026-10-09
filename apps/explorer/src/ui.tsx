@@ -66,7 +66,7 @@ export function countExposed(docs: readonly { sensitivity: string }[]): Record<(
 
 /**
  * Shown on every page of a build that contains confidential or restricted
- * notes. Explorer has no access control, so whoever can open the page can
+ * records. Explorer has no access control, so whoever can open the page can
  * read them; the warning cannot be dismissed for the same reason.
  */
 export function ExposureNotice({ counts }: { counts: ReturnType<typeof countExposed> }) {
@@ -75,6 +75,6 @@ export function ExposureNotice({ counts }: { counts: ReturnType<typeof countExpo
   const total = counts.confidential + counts.restricted;
   return <div className="exposure-wrap"><div className="exposure" role="note" aria-label="Sensitive content in this build">
     <ShieldAlert size={16} aria-hidden="true"/>
-    <span><strong>This build includes {parts.join(" and ")} note{total === 1 ? "" : "s"}.</strong> Explorer has no access control: anyone who can open this page can read {total === 1 ? "it" : "them"}. Serve it only behind your own authentication.</span>
+    <span><strong>This build includes {parts.join(" and ")} record{total === 1 ? "" : "s"}.</strong> Explorer has no access control: anyone who can open this page can read {total === 1 ? "it" : "them"}. Serve it only behind your own authentication.</span>
   </div></div>;
 }

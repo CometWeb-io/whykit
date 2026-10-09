@@ -21,7 +21,7 @@ const PYTHON = process.env.PYTHON || "python3";
 const OUT = resolve(APP, "e2e/.build");
 
 function run(cmd, args, env = {}) {
-  execFileSync(cmd, args, { cwd: APP, stdio: "inherit", env: { ...process.env, ...env } });
+  execFileSync(cmd, args, { cwd: APP, stdio: "inherit", env: { ...process.env, WHYKIT_EXPLORER_PRIVATE: "1", ...env } });
 }
 
 function build(name, vaultDir) {
@@ -39,7 +39,12 @@ function buildSynthetic(name, vaultDir) {
     "from synthetic_vault import AS_OF, generate",
     "from whykit.explorer_index import build_explorer_index",
     `root = generate(Path(${JSON.stringify(vaultDir)}), ${SYNTHETIC_NOTES}).resolve()`,
-    "payload = build_explorer_index(root, today=dt.date.fromisoformat(AS_OF))",
+    "from whykit.scaffold import _with_evidence_sensitivity",
+    "register = root / '00-context/evidence-register.md'",
+    "text = _with_evidence_sensitivity(register.read_text(encoding='utf-8'), 'active', 'internal')",
+    "text = '\\n'.join(line.rsplit('internal', 1)[0] + 'restricted |' if line.startswith('| E-001 |') else line for line in text.splitlines()) + '\\n'",
+    "register.write_text(text, encoding='utf-8')",
+    "payload = build_explorer_index(root, today=dt.date.fromisoformat(AS_OF), private=True)",
     `Path(${JSON.stringify(join(vaultDir, "..", "synthetic-index.json"))}).write_text(json.dumps(payload), encoding='utf-8')`,
   ].join("\n");
   run(PYTHON, ["-c", code]);

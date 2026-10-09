@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from .contract import emit_error, vault_not_found
-from .lint import EVIDENCE_ID_RE, find_vault_root, is_vault_root, path_cache
+from .lint import EVIDENCE_ID_RE, Note, find_vault_root, is_vault_root, path_cache
 from .vault_index import VaultIndex
 from .console import emit_machine
 
@@ -53,41 +54,48 @@ def query_vault(
     canonical_only: bool = False,
     limit: int = 100,
     vault: VaultIndex | None = None,
+    _select: Callable[[list[tuple[int, str, Note]]], list[tuple[int, str, Note]]] | None = None,
 ) -> dict:
     index = vault or VaultIndex.load(root)
     needle = (text or "").casefold().strip()
     owner_needle = (owner or "").casefold().strip()
     tag_needle = (tag or "").casefold().strip()
-    matches: list[tuple[int, dict]] = []
+    matches: list[tuple[int, str, Note]] = []
     for note in index.notes:
-        summary = _summary(index, note)
-        record_sensitivity = summary["sensitivity"] or "internal"
+        front = note.front
+        raw_sensitivity = str(front.get("sensitivity") or "")
+        record_sensitivity = raw_sensitivity or "internal"
         if allowed_sensitivities is not None and record_sensitivity not in allowed_sensitivities:
             continue
-        if doc_type and summary["type"] != doc_type:
+        if doc_type and str(front.get("type") or "") != doc_type:
             continue
         # A template declares the type it is a starter for, but it is not a
         # record of that type: `--type decision` lists decisions. Ask for
         # `--status template` to see templates.
-        if doc_type and summary["status"] == "template" and status != "template":
+        record_status = str(front.get("status") or "")
+        if doc_type and record_status == "template" and status != "template":
             continue
-        if status and summary["status"] != status:
+        if status and record_status != status:
             continue
-        if sensitivity and summary["sensitivity"] != sensitivity:
+        if sensitivity and raw_sensitivity != sensitivity:
             continue
-        if canonical_only and not summary["source_of_truth"]:
+        canonical = front.get("source_of_truth") is True
+        if canonical_only and not canonical:
             continue
-        if source_id and source_id not in summary["source_ids"]:
+        if owner_needle and owner_needle not in str(front.get("owner") or "").casefold():
             continue
-        if owner_needle and owner_needle not in summary["owner"].casefold():
+        if tag_needle and not any(tag_needle == value.casefold() for value in _as_list(front.get("tags"))):
             continue
-        if tag_needle and not any(tag_needle == value.casefold() for value in summary["tags"]):
-            continue
+        path = index.relative(note.path)
+        if source_id:
+            inline_ids = set() if path == "00-context/evidence-register.md" else set(note.cited_evidence)
+            if source_id not in set(_as_list(front.get("source_ids"))) | inline_ids:
+                continue
 
         score = 0
         if needle:
-            title = summary["title"].casefold()
-            path_text = summary["path"].casefold()
+            title = str(front.get("title") or note.path.stem).casefold()
+            path_text = path.casefold()
             body = note.text.casefold()
             if needle not in title and needle not in path_text and needle not in body:
                 continue
@@ -98,15 +106,17 @@ def query_vault(
             if needle in path_text:
                 score += 20
             score += min(body.count(needle), 20)
-        if summary["source_of_truth"]:
+        if canonical:
             score += 5
-        if summary["status"] == "approved":
+        if record_status == "approved":
             score += 2
-        matches.append((score, summary))
+        matches.append((score, path, note))
 
-    matches.sort(key=lambda item: (-item[0], item[1]["path"]))
+    matches.sort(key=lambda item: (-item[0], item[1]))
     total = len(matches)
-    limited = [item for _, item in matches[: max(0, limit)]]
+    # MCP selects and verifies its page before materializing result metadata.
+    selected = _select(matches) if _select is not None else matches[:max(0, limit)]
+    limited = [_summary(index, note) for _, _, note in selected]
     return {
         "contract_version": 1,
         "query": {

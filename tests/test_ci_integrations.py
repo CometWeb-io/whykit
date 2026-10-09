@@ -458,12 +458,12 @@ class StagedHistoryTests(unittest.TestCase):
     def history(self, *argv: str) -> subprocess.CompletedProcess[str]:
         return run("history", "--staged", "--root", str(self.vault), *argv)
 
-    def test_before_the_first_commit_nothing_can_be_rewritten(self) -> None:
+    def test_initial_accepted_records_require_approval_events(self) -> None:
         git("add", "-A", cwd=self.repo)
         result = self.history("--json")
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual((payload["head"], payload["staged"], payload["passed"]), ("INDEX", True, True))
+        self.assertEqual((payload["head"], payload["staged"], payload["passed"]), ("INDEX", True, False))
 
     def test_only_the_staged_rewrite_is_blocked(self) -> None:
         commit_all(self.repo, "base")

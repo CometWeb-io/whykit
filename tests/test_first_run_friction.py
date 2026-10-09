@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import io
 import json
 import os
@@ -12,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from _vaults import fresh_vault
+from _vaults import fresh_vault, historical_decision
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "scripts" / "whykit.py"
@@ -101,11 +102,9 @@ class RetiredEvidenceOnHistoryTests(VaultTestCase):
     def supersede_and_retire(self) -> subprocess.CompletedProcess[str]:
         self.add_evidence("Q3 export")
         self.add_evidence("Q4 export")
-        self.ok("new", "decision", "First", "--owner", "Ops", "--status", "approved", "--source", "E-001")
-        self.ok(
-            "new", "decision", "Second", "--owner", "Ops", "--status", "approved",
-            "--source", "E-002", "--supersedes", "D-001",
-        )
+        historical_decision(self.vault, "First", owner="Ops", source_ids=["E-001"], today=dt.date.today(), review_by=(dt.date.today() + dt.timedelta(days=90)).isoformat())
+        historical_decision(self.vault, "Second", owner="Ops", source_ids=["E-002"], supersedes="D-001",
+                            today=dt.date.today(), review_by=(dt.date.today() + dt.timedelta(days=90)).isoformat())
         return self.ok("evidence", "retire", "E-001", "--why", "replaced", "--replaced-by", "E-002")
 
     def test_supersede_then_retire_leaves_no_unfixable_warning(self) -> None:
@@ -122,7 +121,7 @@ class RetiredEvidenceOnHistoryTests(VaultTestCase):
     def test_live_record_citing_retired_evidence_is_still_flagged(self) -> None:
         self.add_evidence("Q3 export")
         self.add_evidence("Q4 export")
-        self.ok("new", "decision", "Live", "--owner", "Ops", "--status", "approved", "--source", "E-001")
+        historical_decision(self.vault, "Live", owner="Ops", source_ids=["E-001"], today=dt.date.today(), review_by=(dt.date.today() + dt.timedelta(days=90)).isoformat())
         result = self.ok("evidence", "retire", "E-001", "--why", "replaced", "--replaced-by", "E-002")
         self.assertIn("1 current and 0 historical reference(s)", result.stdout)
         self.assertIn("whykit impact E-001", result.stdout)
@@ -130,7 +129,7 @@ class RetiredEvidenceOnHistoryTests(VaultTestCase):
 
     def test_archived_record_is_history_too(self) -> None:
         self.add_evidence("Q3 export")
-        self.ok("new", "decision", "Old", "--owner", "Ops", "--status", "archived", "--source", "E-001")
+        historical_decision(self.vault, "Old", owner="Ops", status="archived", source_ids=["E-001"], today=dt.date.today())
         self.ok("evidence", "retire", "E-001", "--why", "gone")
         self.assertNotIn("evidence.retired", self.codes())
 
@@ -155,7 +154,7 @@ class PackDeduplicationTests(VaultTestCase):
 class StatusDecisionCountTests(VaultTestCase):
     def test_template_and_log_are_not_counted_as_decisions(self) -> None:
         self.add_evidence("Export")
-        self.ok("new", "decision", "Only one", "--owner", "Ops", "--status", "approved", "--source", "E-001")
+        historical_decision(self.vault, "Only one", owner="Ops", source_ids=["E-001"], today=dt.date.today(), review_by=(dt.date.today() + dt.timedelta(days=90)).isoformat())
         report = json.loads(self.ok("status", "--json").stdout)
         self.assertEqual(report["decisions"], 1)
         self.assertEqual(report["decision_states"], {"approved": 1})
@@ -166,7 +165,7 @@ class StatusDecisionCountTests(VaultTestCase):
 class QueryTypeExcludesTemplatesTests(VaultTestCase):
     def test_type_filter_lists_records_not_their_template(self) -> None:
         self.add_evidence("Export")
-        self.ok("new", "decision", "Only one", "--owner", "Ops", "--status", "approved", "--source", "E-001")
+        historical_decision(self.vault, "Only one", owner="Ops", source_ids=["E-001"], today=dt.date.today(), review_by=(dt.date.today() + dt.timedelta(days=90)).isoformat())
         report = json.loads(self.ok("query", "--type", "decision", "--json").stdout)
         paths = [item["path"] for item in report["results"]]
         self.assertTrue(any(path.startswith("06-decisions/d-001-") for path in paths), paths)
@@ -183,7 +182,7 @@ class ExplorerVaultNameTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp) / "ledger"
             fresh_vault(vault, *flags)
-            result = run("explorer-index", "--root", str(vault))
+            result = run("explorer-index", "--private", "--root", str(vault))
             self.assertEqual(result.returncode, 0, result.stderr)
             return json.loads(result.stdout)["vaultName"]
 
@@ -225,7 +224,7 @@ class CheckOutputTests(VaultTestCase):
 
     def test_blocked_history_lists_the_rewritten_record(self) -> None:
         self.add_evidence("Export")
-        self.ok("new", "decision", "Kept", "--owner", "Ops", "--status", "approved", "--source", "E-001")
+        historical_decision(self.vault, "Kept", owner="Ops", source_ids=["E-001"], today=dt.date.today(), review_by=(dt.date.today() + dt.timedelta(days=90)).isoformat())
         git("init", "-q", cwd=self.vault)
         git("add", "-A", cwd=self.vault)
         git("commit", "-qm", "base", cwd=self.vault)

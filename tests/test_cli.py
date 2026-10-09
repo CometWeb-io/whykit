@@ -57,6 +57,25 @@ class InitTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertFalse(target.exists())
 
+    def test_named_gtm_profile_matches_the_legacy_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            named, legacy = Path(td) / "named", Path(td) / "legacy"
+            result = run("init", "--profile", "gtm", "--json", str(named))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["profile"], "gtm")
+            self.assertEqual(run("init", "--full", str(legacy)).returncode, 0)
+            def contents(root):
+                return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+            self.assertEqual(contents(named), contents(legacy))
+
+    def test_named_profile_conflicts_are_rejected_without_writes(self) -> None:
+        for flags in (("--profile", "gtm", "--minimal"), ("--profile", "minimal", "--full")):
+            with self.subTest(flags=flags), tempfile.TemporaryDirectory() as td:
+                target = Path(td) / "vault"
+                result = run("init", *flags, str(target))
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse(target.exists())
+
     def test_init_produces_a_vault_that_lints_without_errors(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "vault"
@@ -418,7 +437,7 @@ class ContractTests(unittest.TestCase):
             "exact `main` commit",
             "explicit decision and coordination plan",
             "configure a `main` ruleset",
-            "optional Explorer check non-blocking",
+            "Require the Explorer and Explorer end-to-end checks",
             "private-preview or access-required notice",
             "Python 3.11–3.14",
             "exact tag",

@@ -316,7 +316,7 @@ class GitTransitionTests(RepoTestCase):
         self.assertEqual(self.repo.blocked(self.base), [])
 
     def test_new_records_and_draft_edits_pass(self) -> None:
-        self.repo.write("06-decisions/d-003-new.md", APPROVED.replace("D-001", "D-003"))
+        self.repo.write("06-decisions/d-003-new.md", DRAFT.replace("D-002", "D-003"))
         self.repo.write("06-decisions/d-002-draft.md", DRAFT + "More drafting.\n")
         self.repo.commit()
         self.assertEqual(self.repo.blocked(self.base), [])

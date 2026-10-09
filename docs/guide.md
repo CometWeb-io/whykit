@@ -41,9 +41,9 @@ zero lint errors; its warnings point at the unanswered questions in `AGENTS.md`,
 the contract agents work under, so answer those before relying on agents. The
 exact warning count and line numbers can change as the template evolves.
 
-- `whykit init --full <dir>` adds optional workstream folders (strategy,
-  website, research and others). `--minimal` is a compatibility alias for the
-  default.
+- `whykit init --profile gtm <dir>` adds optional go-to-market workstream
+  folders (strategy, website, research and others). `--full` is its legacy
+  alias; `--minimal` is a compatibility alias for the default.
 - `whykit init --force <dir>` adds only missing starter files to a non-empty
   directory. It keeps existing notes, configuration, agent rules and custom
   `.gitignore` patterns. It does not reset or upgrade anything.
@@ -82,6 +82,33 @@ fails, nothing from that run is left behind. The ingestion record lands in
 `notes/`; link it from a map or lint reports `note.orphan`. A person decides
 what becomes canonical.
 
+### Check preservation after normalization
+
+```bash
+whykit adopt ../old-docs --into . --compare ../normalized-docs --json
+```
+
+`--compare DIR` is read-only and cannot be combined with `--write`. It compares
+all in-scope source Markdown at the same relative paths, including files that
+the adoption inventory would skip as duplicates or stubs. Renamed or moved
+files are reported missing; this check does not infer a path or ID mapping.
+
+The optional `preservation` report records source/target SHA-256, byte equality,
+missing supported wikilink occurrences (including labels and anchors), missing
+E-/D-IDs, and changes to native `decision_id` and `source_ids` declarations.
+Inline/fenced code examples do not count as graph links or ID references.
+Escaped table pipes and canonically equivalent Unicode are normalized for comparison. A recognized WhyKit
+`review-log.md` must retain its earlier table rows as an unchanged prefix;
+new rows and padded headers are allowed. Byte-identical files preserve their
+contents without certifying their validity.
+
+Exit 1 means loss, an unreadable file, a source changed since inventory, or an
+empty Markdown inventory. Exit 2 means invalid options/directories. This is a
+local owner report: filenames and link labels may contain private metadata.
+It does not check non-Markdown assets, full prose equivalence, all foreign
+history formats, Git commit history or whether the migrated vault passes lint.
+Keep the baseline and use `whykit lint`/`history` for those separate gates.
+
 ## Promote an adopted ADR
 
 Once a person has decided that a staged ADR should become a decision record,
@@ -106,8 +133,9 @@ WhyKit section:
 The title comes from the source's title or first heading, without ADR
 numbering (`7. Use queues` becomes `Use queues`); pass a title to override it.
 The next free `D-NNN` is allocated, and the record and its decision-log row are
-written in one journalled transaction, so an interrupted run leaves both or
-neither. The record keeps:
+written in one journalled transaction. The next write recovers an interrupted
+commit before it starts; readers may see a partial batch until recovery runs.
+Staged copies are retained until the commit marker is persisted. The record keeps:
 
 - the whole source text under `## Original record`, in a fence lint does not
   parse (line endings normalized to LF);
@@ -139,7 +167,7 @@ whykit new evidence \
   --claims "Repeated procurement delay"
 
 whykit new decision "Narrow the first ICP" \
-  --owner Product --status approved --source E-001
+  --owner Product --status draft --source E-001
 
 whykit new note "Interview synthesis" \
   --workstream notes \
@@ -157,10 +185,47 @@ written.
 map unless asked. When it is given, the note and the link are created in one
 atomic operation, and the note is rolled back if the map update fails.
 
-An approved decision gets a `review_by` date from `defaults.decision_review_days`
-unless you pass `--review-by`. `--supersedes D-NNN` replaces an earlier decision
-and marks it `superseded` in the same operation; see
-[Concepts](concepts.md#changing-your-mind-supersede-do-not-rewrite).
+A draft with `--supersedes D-NNN` leaves its predecessor unchanged until the
+new record is approved. See [Concepts](concepts.md#changing-your-mind-supersede-do-not-rewrite).
+
+## Approve a decision
+
+Create a draft or in-review decision, then write the Context, Decision,
+Rationale, Evidence, Alternatives considered and Consequences. Approval
+requires a real owner and cited active evidence. It refuses empty sections,
+placeholders, stale evidence and failed vault checks.
+
+```bash
+whykit review approve D-001 --reviewer "Ada Example" --json
+```
+
+This previews the complete record, cited register rows and exact changes without
+writing. Read the record, inspect its sources and check every diff. After you
+accept that specific preview, copy its `expected_sha256` into:
+
+```bash
+whykit review approve D-001 --reviewer "Ada Example" \
+  --write --expect-hash HASH_FROM_PREVIEW
+```
+
+Keep `--today`, `--next-review` and reviewer identical if you supplied them.
+The hash binds the draft bytes, register, policy, ledgers, predecessor and
+proposed changes. Changed inputs or parameters require a new preview. The
+record, decision log, approval event and any predecessor lifecycle change are
+written in one recoverable transaction. The default review deadline comes from
+`defaults.decision_review_days`.
+
+The new `approved` event stores `record-sha256:<hash>; snapshot-sha256:<hash>`.
+The snapshot hash identifies the original draft bytes; the record hash binds
+reasoning and provenance while excluding the mutable lifecycle keys `status`,
+`review_by`, `last_updated` and `superseded_by`, normalizing line endings and BOM.
+`whykit history` requires a matching newly appended event for a new acceptance;
+editing only the metadata or replaying an old event fails.
+
+Reviewer names and hashes establish attribution and consistency, not identity
+or truth. WhyKit does not fetch or freeze remote source contents during approval.
+Use your repository's protected review process for authenticated acceptance.
+MCP stays read-only and has no approval tool.
 
 ## Record a review
 
@@ -174,6 +239,28 @@ whykit review record D-001 \
 
 The review log is append-only under `whykit history`. The four outcomes and what
 each does to `review_by` are in [Concepts](concepts.md#the-review-cycle).
+
+## Check several vaults
+
+```bash
+whykit workspace ~/vault-a ~/vault-b --today 2026-09-17
+whykit workspace ~/vault-a ~/vault-b --json --strict
+```
+
+Each root uses its own policy, lint rules and default review window. Explicit
+`--due-days` overrides the window for this run. Aliases of the same resolved
+root are counted once; overlapping roots are rejected to keep vault scopes
+separate. No notes are copied or joined and this command writes no parse cache.
+
+JSON contains a separate `status` report or `error` for each root. A missing,
+unreadable or misconfigured vault does not hide the others. Exit code precedence
+is 70 (internal error), then 2 (a vault could not be checked), then 1 (lint
+errors, or warnings under `--strict`), otherwise 0. `--root` is for single-vault
+commands; `workspace` requires explicit roots.
+
+This is a local owner report. Paths, findings and review queues may contain
+private metadata: do not publish its output as a public vault export. It does
+not provide a cross-vault MCP search, shared database or cloud synchronization.
 
 ## Retire evidence
 
@@ -290,6 +377,12 @@ pre-commit hook that runs the `local` profile. For GitHub Actions, follow
 has every Action input and the setup for other CI systems.
 
 ## Browse the vault in the Explorer
+
+Static `explorer-index` and npm builds default to public. Private local
+viewing requires `--private` or `WHYKIT_EXPLORER_PRIVATE=1`; `serve` opts in
+automatically and keeps its network guard. Public export withholds whole notes
+referring to hidden records and unclassified attachments rather than rewriting
+approved reasoning.
 
 The Explorer is an optional, read-only viewer and not part of the data
 contract. It needs Node.js and runs only from a source checkout. A copy

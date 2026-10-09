@@ -153,14 +153,14 @@ const EVIDENCE_STEP = 150;
 function EvidencePage({ params }: { params: Params }) {
   const q = params.q ?? "";
   const needle = useDeferredValue(q.trim().toLowerCase());
-  const haystacks = useMemo(() => vault.evidence.map(e => ({ e, text: `${e.id} ${e.source} ${e.type} ${e.claims} ${e.location} ${e.why || ""}`.toLowerCase() })), []);
+  const haystacks = useMemo(() => vault.evidence.map(e => ({ e, text: `${e.id} ${e.source} ${e.sensitivity || "inherited"} ${e.type} ${e.claims} ${e.location} ${e.why || ""}`.toLowerCase() })), []);
   const rows = needle ? haystacks.filter(x => x.text.includes(needle)).map(x => x.e) : vault.evidence;
   const [limit, more] = useIncremental(needle, EVIDENCE_STEP);
   return <div className="page wide"><div className="eyebrow">Provenance</div><h1>Evidence</h1><p className="lede">Active and retired evidence keep stable IDs. Retirement preserves the source history instead of turning existing citations into dangling references.</p>
     {vault.evidence.length ? <>
       <label className="search-field"><Search size={16} aria-hidden="true"/><span className="sr-only">Filter evidence</span><input type="search" value={q} onChange={(e: ChangeEvent<HTMLInputElement>) => setParams({ q: e.target.value || null })} placeholder="Filter evidence…" /></label>
       <p className="muted small" role="status" aria-live="polite">{needle ? `${rows.length} of ${vault.evidence.length} rows match` : `${vault.evidence.length} rows`}</p>
-      {rows.length ? <div className="table-wrap evidence-table" tabIndex={0} role="region" aria-label="Evidence register"><table><thead><tr><th scope="col">ID</th><th scope="col">State</th><th scope="col">Source</th><th scope="col">Type / retired</th><th scope="col">Used by</th><th scope="col">Location / replacement</th><th scope="col">Claim / retirement reason</th></tr></thead><tbody>{rows.slice(0, limit).map(e => { const used = docsForEvidence(e.id); return <tr key={e.id}><td className="mono decision-id">{e.id}</td><td><StatusBadge status={e.state}/></td><td>{e.source}</td><td>{e.state === "active" ? (e.type || "—") : (e.retiredOn || "—")}</td><td><span title={used.map(d => d.title).join(" · ")}>{used.length}</span></td><td><span className="mono small">{e.state === "active" ? (e.location || "—") : (e.replacedBy ? `→ ${e.replacedBy}` : "—")}</span></td><td>{e.state === "active" ? e.claims : e.why}</td></tr>; })}</tbody></table></div>
+      {rows.length ? <div className="table-wrap evidence-table" tabIndex={0} role="region" aria-label="Evidence register"><table><thead><tr><th scope="col">ID</th><th scope="col">State</th><th scope="col">Source</th><th scope="col">Sensitivity</th><th scope="col">Type / retired</th><th scope="col">Used by</th><th scope="col">Location / replacement</th><th scope="col">Claim / retirement reason</th></tr></thead><tbody>{rows.slice(0, limit).map(e => { const used = docsForEvidence(e.id); return <tr key={e.id}><td className="mono decision-id">{e.id}</td><td><StatusBadge status={e.state}/></td><td>{e.source}</td><td><Sensitivity value={e.sensitivity || "inherited"}/></td><td>{e.state === "active" ? (e.type || "—") : (e.retiredOn || "—")}</td><td><span title={used.map(d => d.title).join(" · ")}>{used.length}</span></td><td><span className="mono small">{e.state === "active" ? (e.location || "—") : (e.replacedBy ? `→ ${e.replacedBy}` : "—")}</span></td><td>{e.state === "active" ? e.claims : e.why}</td></tr>; })}</tbody></table></div>
         : null}
       {rows.length ? <ShowMore shown={Math.min(limit, rows.length)} total={rows.length} step={EVIDENCE_STEP} onMore={more} noun="rows"/>
         : <Empty>No evidence matches “{q.trim()}”.</Empty>}
@@ -254,7 +254,7 @@ function DocPage({ id }: { id: string }) {
     {doc.decisionId ? <DecisionLineage decisionId={doc.decisionId}/> : null}
     <DocBody body={bodyOf(doc)} state={bodies}/>
     {(evidenceRows.length || missing.length) ? <section><h2>Registered evidence</h2>
-      {evidenceRows.length ? <div className="cards two">{evidenceRows.map(e => <div className="card" key={e.id}><div className="eyebrow">{e.id} · {e.state === "active" ? (e.type || "evidence") : "retired"}</div><h3>{e.source}</h3><p>{e.state === "active" ? e.claims : e.why}</p><small className="mono">{e.state === "active" ? e.location : (e.replacedBy ? `replacement: ${e.replacedBy}` : `retired ${e.retiredOn || ""}`)}</small></div>)}</div> : null}
+      {evidenceRows.length ? <div className="cards two">{evidenceRows.map(e => <div className="card" key={e.id}><div className="eyebrow">{e.id} · {e.state === "active" ? (e.type || "evidence") : "retired"}</div><h3>{e.source}</h3><Sensitivity value={e.sensitivity || "inherited"}/><p>{e.state === "active" ? e.claims : e.why}</p><small className="mono">{e.state === "active" ? e.location : (e.replacedBy ? `replacement: ${e.replacedBy}` : `retired ${e.retiredOn || ""}`)}</small></div>)}</div> : null}
       {missing.length ? <Empty>Not in the evidence register: <code>{missing.join(", ")}</code></Empty> : null}
     </section> : null}
     {(links.length || backs.length) ? <section className="relations"><h2>Relationships</h2><div className="cards two">{links.length ? <div className="card"><div className="eyebrow">Links to</div>{links.map(d => <a className="relation" key={d.id} href={hrefFor("doc", d.id)}>{d.title}<ChevronRight size={14} aria-hidden="true"/></a>)}</div> : null}{backs.length ? <div className="card"><div className="eyebrow">Referenced by</div>{backs.map(d => <a className="relation" key={d.id} href={hrefFor("doc", d.id)}>{d.title}<ChevronRight size={14} aria-hidden="true"/></a>)}</div> : null}</div></section> : null}
@@ -348,7 +348,7 @@ function SearchOverlay({ initial, onClose }: { initial: string; onClose: () => v
   /* eslint-enable jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus */
 }
 
-const EXPOSED = countExposed(docs);
+const EXPOSED = countExposed([...docs, ...vault.evidence.map(e => ({ sensitivity: e.sensitivity || "internal" }))]);
 
 function App() {
   const route = useRoute();

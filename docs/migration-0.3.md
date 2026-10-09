@@ -27,6 +27,48 @@ command's output, an exit code, a stricter check or a default.
 7. Reinstall the pre-commit hook in each vault
    ([hooks](#pre-commit-hooks)).
 
+## Review history and interrupted writes
+
+`new decision` now accepts only `draft` or `in_review` as an initial state.
+Replace direct `--status approved` creation with a draft, complete its sections,
+and [preview/apply approval](guide.md#approve-a-decision). Existing accepted
+records in the comparison baseline remain historical; newly added or newly
+accepted records, including the first staged commit, require a matching new
+`approved` event. Do not reset old accepted records to draft to invent a new
+history. Import unverified historical decisions as drafts and preserve their
+source status in provenance.
+
+History/check blocked entries may now include `approval_without_event` or
+`review_without_event` in the optional `reason` field. Keep unknown optional
+fields when forwarding reports.
+
+Review logs gain the `approved` outcome, written only by `review approve`.
+Consumers must accept that value and its record/snapshot hashes in the Note
+cell. The seven-column table layout stays unchanged. The preview/result JSON
+uses `decision-approval-result.schema.json`; no MCP write capability was added.
+
+
+Imported ADRs must start as `draft` or `in_review`, even when the source says
+accepted. Keep that source status in provenance. `decision.unreviewed` is a new
+warning when an approved record explicitly denies human review; strict CI fails
+it. Review the content through your authorized human workflow. An editable
+`human_reviewed: true` field is an assertion, not proof of reviewer identity.
+The decision metadata schema now requires `review_by` for approved records and
+rejects an explicitly false `human_reviewed` value.
+
+Do not move an approved decision's `review_by` by editing metadata alone.
+`whykit history` now requires newly appended, matching confirmed review events
+in the same commit or staged change. Run `whykit review record D-NNN --reviewer
+"Reviewer" --outcome confirmed --next-review YYYY-MM-DD` and include both the
+record and `00-context/review-log.md` in the change. Existing events cannot be
+reused to postpone a deadline; multiple new reviews may form one consistent
+chain. Padding Markdown table columns preserves the recorded cell values.
+
+Interrupted writes retain staged bytes until COMMITTED. Recovery also reads
+older journals that deleted a staged file early, accepting it only when the
+target matches its recorded hash. Keep pending journals; see
+[interrupted writes](troubleshooting.md#an-interrupted-write-or-cannot-recover-missing-staged-content).
+
 ## Removed module entry points
 
 The per-module entry points are gone: `python -m whykit.lint`, `python -m
@@ -176,11 +218,13 @@ go-to-market workstream folders such as `01-strategy` and `07-research` is
 opt-in:
 
 ```bash
-whykit init --full company-vault
+whykit init --profile gtm company-vault
 ```
 
-`--minimal` is still accepted and now means the default, so a setup script
-that passes it keeps working. Existing vaults are not touched by any of this.
+`--full` remains a compatibility alias for `--profile gtm`. `--minimal` still
+means the default, so setup scripts keep working. The JSON `layout` field keeps
+its `minimal`/`full` values; the optional `profile` field names the profile.
+Existing vaults are not touched by any of this.
 
 ## MCP server
 
@@ -210,6 +254,36 @@ that passes it keeps working. Existing vaults are not touched by any of this.
   `Origin` header does not name the machine itself, however the loopback
   address was spelt. A client behind a proxy that rewrites `Host` needs a
   token (`--token-file` or `WHYKIT_MCP_TOKEN`).
+
+## Evidence row sensitivity
+
+The active and retired source tables may each have one optional **final**
+`Sensitivity` column. Existing tables remain valid and inherit the register's
+front-matter label. Existing vaults are not rewritten automatically.
+
+```sh
+whykit new evidence --source "Synthetic private source" --type fixture \
+  --location https://example.com/source --claims "A fictional claim" \
+  --sensitivity restricted
+```
+
+The first explicit label extends the active table in that one atomic write and
+fills populated legacy rows with their inherited label. Later unlabeled additions
+inherit the register floor. Retirement preserves the label and extends the retired
+table when needed. The register floor remains a minimum: a `public` row in an
+`internal` register is still internal. A retired row also inherits its replacement's
+classification, transitively, to avoid exposing a hidden replacement ID.
+
+Labels must use the four lowercase canonical values. A blank/truncated labeled
+row, unknown label or duplicate ID is withheld by filtered readers. The new
+`evidence.sensitivity` warning reports malformed explicit cells; duplicate IDs
+retain the existing error. The raw labeled table is withheld in MCP/public exports;
+public Explorer exports keep permitted rows and withhold notes citing hidden rows.
+Local full-access CLI reads and `explorer-index --private` remain available.
+
+The reviewed D-002 in [the generic example](../examples/approval/README.md)
+demonstrates the format. No label authenticates a reviewer, encrypts data or proves
+source truth. Check classification before using a public export.
 
 ## Pre-commit hooks
 
@@ -258,3 +332,13 @@ repository now ships `whykit-lint` and `whykit-history` hooks; see
   `WHYKIT_NO_CACHE=1`; output is identical either way.
 - The top-level `whykit -h` lists commands grouped by job, and `--root DIR`
   may come before the command (`whykit --root vault lint`).
+
+## Public Explorer exports
+
+`explorer-index` and npm builds now default to public. Existing scripts that
+need a private local viewer must explicitly add `--private` or
+`WHYKIT_EXPLORER_PRIVATE=1`; `serve` already does this. Public notes that refer
+to hidden records or unclassified local attachments are withheld as whole
+notes. Ledgers, findings and search follow the resulting visibility. Private
+export preserves the previous full content, with an added `exportMode` field.
+No vault file is rewritten by an export.

@@ -10,7 +10,8 @@ from .contract import TargetNotFound, describe_os_error, emit_error, vault_not_f
 from .io import atomic_write_text, safe_vault_target, vault_mutation_lock
 from .impact import analyze_impact
 from .lint import HISTORICAL_STATUSES, EVIDENCE_ID_RE, _split_table_row, evidence_register, find_vault_root, is_vault_root
-from .scaffold import _frontmatter_replace, _table_cell
+from .scaffold import _frontmatter_replace, _table_cell, _with_evidence_sensitivity, _register_inherited_label
+from .tables import evidence_table_bounds
 from .console import emit_machine
 
 
@@ -25,16 +26,6 @@ def list_evidence(root: Path, *, state: str = "all") -> dict:
             items.append({"id": evidence_id, "state": "retired", **row})
     items.sort(key=lambda item: item["id"])
     return {"contract_version": 1, "state": state, "count": len(items), "evidence": items}
-
-
-def _find_table(lines: list[str], header: str) -> tuple[int, int]:
-    header_idx = next((i for i, line in enumerate(lines) if line.strip() == header), None)
-    if header_idx is None or header_idx + 1 >= len(lines):
-        raise ValueError(f"expected table header: {header}")
-    end = header_idx + 2
-    while end < len(lines) and lines[end].lstrip().startswith("|"):
-        end += 1
-    return header_idx, end
 
 
 def retire_evidence(
@@ -53,12 +44,14 @@ def retire_evidence(
         raise ValueError("--why must explain why the evidence is being retired")
 
     with vault_mutation_lock(root):
-        active, retired, _ = evidence_register(root)
+        active, retired, occurrences = evidence_register(root)
         if evidence_id in retired:
             raise ValueError(f"{evidence_id} is already retired")
         row = active.get(evidence_id)
         if row is None:
             raise TargetNotFound(f"unknown active evidence: {evidence_id}")
+        if sum(key == evidence_id for key, _ in occurrences) != 1:
+            raise ValueError("evidence ID must identify exactly one populated row")
         if replaced_by:
             if not EVIDENCE_ID_RE.fullmatch(replaced_by):
                 raise ValueError("--replaced-by must be an E-NNN identifier")
@@ -71,11 +64,12 @@ def retire_evidence(
 
         path = safe_vault_target(root, "00-context/evidence-register.md", create_parents=False)
         original = path.read_text(encoding="utf-8")
+        inherited = _register_inherited_label(path, original)
+        if "sensitivity" in row:
+            original = _with_evidence_sensitivity(original, "retired", inherited)
         lines = original.splitlines()
-        active_header = "| ID | Source | Type | Date | Accessed | Location | Claims it supports |"
-        retired_header = "| ID | Source | Retired on | Why | Replaced by |"
-        _, active_end = _find_table(lines, active_header)
-        active_start = next(i for i, line in enumerate(lines) if line.strip() == active_header) + 2
+        active_header, active_end, _ = evidence_table_bounds(lines, "active")
+        active_start = active_header + 2
         row_idx = None
         source = str(row.get("source") or "")
         for idx in range(active_start, active_end):
@@ -90,14 +84,17 @@ def retire_evidence(
 
         del lines[row_idx]
         # Recompute retired bounds after deletion because line indexes shifted.
-        _, retired_end = _find_table(lines, retired_header)
-        retired_row = "| " + " | ".join(_table_cell(value) for value in (
+        _, retired_end, labeled = evidence_table_bounds(lines, "retired")
+        values: tuple[str, ...] = (
             evidence_id,
             source,
             today.isoformat(),
             reason,
             replaced_by or "—",
-        )) + " |"
+        )
+        if labeled:
+            values += (row.get("sensitivity", inherited),)
+        retired_row = "| " + " | ".join(_table_cell(value) for value in values) + " |"
         lines.insert(retired_end, retired_row)
         updated = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
         updated = _frontmatter_replace(updated, "last_updated", today.isoformat())

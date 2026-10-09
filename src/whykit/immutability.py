@@ -13,7 +13,11 @@ Everything else must be represented by a new D-NNN record.
 """
 from __future__ import annotations
 
+from .tables import review_table_header, split_table_row
+
 import argparse
+import datetime as dt
+import hashlib
 import os
 import re
 import subprocess
@@ -143,20 +147,22 @@ def allowed_lifecycle_change(base_text: str, head_text: str) -> bool:
     return base_normalized is not None and base_normalized == head_normalized
 
 
-def _review_log_parts(text: str) -> tuple[list[str], list[str], list[str]] | None:
+def _review_log_parts(text: str) -> tuple[list[str], list[list[str]], list[str]] | None:
     normalized = _without_frontmatter_keys(text, {"last_updated"})
     if normalized is None:
         return None
     lines = normalized.splitlines(keepends=True)
-    header = "| Date | Target | Reviewer | Outcome | Previous review | Next review | Note |"
-    header_idx = next((i for i, line in enumerate(lines) if line.strip() == header), None)
+    header_idx = review_table_header(lines)
     if header_idx is None or header_idx + 1 >= len(lines):
         return None
     row_start = header_idx + 2
     row_end = row_start
     while row_end < len(lines) and lines[row_end].lstrip().startswith("|"):
         row_end += 1
-    return lines[:row_start], lines[row_start:row_end], lines[row_end:]
+    rows = [split_table_row(line) for line in lines[row_start:row_end]]
+    if any(len(row) != 7 for row in rows):
+        return None
+    return lines[:header_idx], rows, lines[row_end:]
 
 
 def allowed_review_log_append(base_text: str, head_text: str) -> bool:
@@ -173,6 +179,128 @@ def allowed_review_log_append(base_text: str, head_text: str) -> bool:
         and len(head_rows) >= len(base_rows)
         and head_rows[: len(base_rows)] == base_rows
     )
+
+
+def _front_scalar(text: str, key: str) -> str | None:
+    parsed = _front_matter_lines(text)
+    if parsed is None:
+        return None
+    lines, end = parsed
+    values = [line.split(":", 1)[1].strip() for line in lines[1:end] if line.startswith(f"{key}:")]
+    if len(values) != 1:
+        return None
+    return values[0].split(" #", 1)[0].strip().strip("\"'")
+
+
+def approval_record_hash(text: str) -> str:
+    """Bind reasoning and provenance while permitting the lifecycle envelope."""
+    normalized = _without_frontmatter_keys(
+        text.replace("\r\n", "\n").replace("\r", "\n"),
+        {"status", "review_by", "last_updated", "superseded_by"},
+    )
+    if normalized is None:
+        raise ValueError("approval requires readable front matter")
+    return hashlib.sha256(normalized.encode("utf-8", "surrogateescape")).hexdigest()
+
+
+def _approval_event_matches(text: str, path: str, base_log: str | None, head_log: str) -> bool:
+    head = _review_log_parts(head_log)
+    base = _review_log_parts(base_log) if base_log is not None else None
+    if head is None or (base_log is not None and (base is None or not allowed_review_log_append(base_log, head_log))):
+        return False
+    old_rows = base[1] if base else []
+    try:
+        digest = approval_record_hash(text)
+        created = dt.date.fromisoformat(_front_scalar(text, "created") or "")
+        updated = dt.date.fromisoformat(_front_scalar(text, "last_updated") or "")
+        review_by = dt.date.fromisoformat(_front_scalar(text, "review_by") or "")
+    except ValueError:
+        return False
+    target = re.sub(r"(?i)\.md$", "", path)
+    new_rows = head[1][len(old_rows):]
+
+    def matches(row: list[str]) -> bool:
+        link = re.fullmatch(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]", row[1])
+        return link is not None and re.sub(r"(?i)\.md$", "", link.group(1).strip()) == target
+
+    if (any(row[3] == "approved" and matches(row) for row in old_rows)
+            or sum(row[3] == "approved" and matches(row) for row in new_rows) != 1):
+        return False
+    for at, row in enumerate(new_rows):
+        if row[3] != "approved" or not matches(row):
+            continue
+        try:
+            date = dt.date.fromisoformat(row[0])
+            next_review = dt.date.fromisoformat(row[5])
+        except ValueError:
+            continue
+        receipt = re.fullmatch(r"record-sha256:([0-9a-f]{64}); snapshot-sha256:([0-9a-f]{64})", row[6])
+        if (receipt and receipt.group(1) == digest and row[2].strip()
+                and row[2].strip().casefold() != "todo"
+                and created <= date <= updated and date < next_review):
+            deadline = row[5]
+            latest = date
+            for later in new_rows[at + 1:]:
+                if not matches(later):
+                    continue
+                if later[3] == "approved":
+                    return False
+                if later[3] != "confirmed":
+                    continue
+                try:
+                    event_date = dt.date.fromisoformat(later[0])
+                    next_date = dt.date.fromisoformat(later[5])
+                except ValueError:
+                    return False
+                if not (latest <= event_date <= updated and event_date < next_date
+                        and later[4] == deadline and later[2].strip()
+                        and later[2].strip().casefold() != "todo"):
+                    return False
+                latest, deadline = event_date, later[5]
+            return deadline == review_by.isoformat()
+    return False
+
+
+def _review_change_confirmed(base_text: str, head_text: str, path: str, base_log: str | None, head_log: str) -> bool:
+    """Require new confirmed events to explain the complete review-date change."""
+    before = _front_scalar(base_text, "review_by") or "—"
+    after = _front_scalar(head_text, "review_by")
+    if before == after:
+        return True
+    head = _review_log_parts(head_log)
+    base = _review_log_parts(base_log) if base_log is not None else None
+    if head is None or (base_log is not None and (base is None or not allowed_review_log_append(base_log, head_log))):
+        return False
+    old_rows = base[1] if base else []
+    target = re.sub(r"(?i)\.md$", "", path)
+
+    def matches(row: list[str]) -> bool:
+        link = re.fullmatch(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]", row[1])
+        return link is not None and re.sub(r"(?i)\.md$", "", link.group(1).strip()) == target
+
+    try:
+        latest = max(
+            [dt.date.fromisoformat(_front_scalar(base_text, "created") or "0001-01-01")]
+            + [dt.date.fromisoformat(row[0]) for row in old_rows if matches(row)]
+        )
+        updated = dt.date.fromisoformat(_front_scalar(head_text, "last_updated") or "0001-01-01")
+        found = False
+        for row in head[1][len(old_rows):]:
+            if not matches(row):
+                continue
+            date = dt.date.fromisoformat(row[0])
+            if date < latest or date > updated or not row[2].strip() or row[2].strip() == "TODO":
+                return False
+            latest = date
+            if row[3] != "confirmed":
+                continue
+            if row[4] != before or dt.date.fromisoformat(row[5]) <= date:
+                return False
+            before = row[5]
+            found = True
+        return found and before == after
+    except ValueError:
+        return False
 
 
 def immutable_at(base: str, path: str, root: str | None = None, *, prefix: str | None = None) -> bool:
@@ -275,7 +403,33 @@ def has_commits(root: str | None = None) -> bool:
     return True
 
 
-def changed_records(base: str, head: str, root: str | None = None, *, staged: bool = False) -> list[tuple[str, str]]:
+def _initial_approvals(root: str | None, *, reasons: dict[str, str] | None = None) -> list[tuple[str, str]]:
+    """The first commit has no old reasoning, but acceptance still needs review."""
+    prefix = _git_prefix(root)
+    paths = git("ls-files", "-z", "--cached", "--", RECORD_SUFFIX.rstrip("/"), root=root).split("\0")
+    try:
+        log = git("show", f":{_git_object_path(REVIEW_LOG_SUFFIX, prefix)}", root=root)
+    except subprocess.CalledProcessError:
+        log = ""
+    blocked = []
+    for path in paths:
+        if not RECORD_RE.search(path):
+            continue
+        try:
+            text = git("show", f":{_git_object_path(path, prefix)}", root=root)
+        except subprocess.CalledProcessError:
+            blocked.append(("A", path))
+            if reasons is not None:
+                reasons[path] = "approval_without_event"
+            continue
+        if _status(text) is not None and not _approval_event_matches(text, path, None, log):
+            blocked.append(("A", path))
+            if reasons is not None:
+                reasons[path] = "approval_without_event"
+    return blocked
+
+
+def changed_records(base: str, head: str, root: str | None = None, *, staged: bool = False, reasons: dict[str, str] | None = None) -> list[tuple[str, str]]:
     """Immutable records and review-log rows rewritten between two states.
 
     With ``staged`` the second state is the index (what the next commit will
@@ -310,9 +464,32 @@ def changed_records(base: str, head: str, root: str | None = None, *, staged: bo
         return git("show", f"{rev}:{_git_object_path(path, prefix)}", root=root)
 
     blocked: list[tuple[str, str]] = []
-    for status, old_path, new_path in _diff_entries(out):
+    entries = _diff_entries(out)
+    log_added = any(status == "A" and path == REVIEW_LOG_SUFFIX for status, path, _ in entries)
+    for status, old_path, new_path in entries:
         kind = status[0]
         display_path = f"{old_path} -> {new_path}" if kind in {"R", "C"} else old_path
+        if RECORD_RE.search(new_path) and kind in {"A", "C", "M", "R", "T"}:
+            try:
+                head_text = show(head, new_path)
+                new_acceptance = _status(head_text) is not None and (
+                    kind in {"A", "C"} or not immutable_at(base, old_path, root, prefix=prefix)
+                )
+                if new_acceptance:
+                    try:
+                        base_log = show(base, REVIEW_LOG_SUFFIX)
+                    except subprocess.CalledProcessError:
+                        if not log_added:
+                            raise
+                        base_log = None
+                    if not _approval_event_matches(head_text, new_path, base_log, show(head, REVIEW_LOG_SUFFIX)):
+                        blocked.append((status, display_path))
+                        if reasons is not None:
+                            reasons[display_path] = "approval_without_event"
+                    continue
+            except subprocess.CalledProcessError:
+                blocked.append((status, display_path))
+                continue
         if kind == "A":
             continue
         if old_path == REVIEW_LOG_SUFFIX:
@@ -335,7 +512,20 @@ def changed_records(base: str, head: str, root: str | None = None, *, staged: bo
 
         if kind == "M":
             try:
-                if allowed_lifecycle_change(show(base, old_path), show(head, new_path)):
+                base_text, head_text = show(base, old_path), show(head, new_path)
+                if allowed_lifecycle_change(base_text, head_text):
+                    if _status(head_text) == "approved" and _front_scalar(base_text, "review_by") != _front_scalar(head_text, "review_by"):
+                        try:
+                            base_log = show(base, REVIEW_LOG_SUFFIX)
+                        except subprocess.CalledProcessError:
+                            if not log_added:
+                                raise
+                            base_log = None
+                        if not _review_change_confirmed(base_text, head_text, new_path, base_log, show(head, REVIEW_LOG_SUFFIX)):
+                            blocked.append((status, display_path))
+                            if reasons is not None:
+                                reasons[display_path] = "review_without_event"
+                            continue
                     continue
             except subprocess.CalledProcessError:
                 pass
@@ -384,14 +574,14 @@ def main(argv: list[str] | None = None) -> int:
         )
     base = args.base or "HEAD"
     head = "INDEX" if args.staged else (args.head or "HEAD")
+    reasons: dict[str, str] = {}
     try:
         if args.staged and args.base is None:
             _require_revisions(args.root)  # a work tree, but no ref yet
             if not has_commits(args.root):
-                # Before the first commit nothing is accepted yet, so nothing
-                # can have been rewritten.
-                return _report(args.json, base, head, [], staged=True)
-        blocked = changed_records(base, head, args.root, staged=args.staged)
+                blocked = _initial_approvals(args.root, reasons=reasons)
+                return _report(args.json, base, head, blocked, staged=True, reasons=reasons)
+        blocked = changed_records(base, head, args.root, staged=args.staged, reasons=reasons)
         if not blocked and not _tracks_vault_paths(base, head, args.root, staged=args.staged):
             print(
                 f"warning: no decision records or review log under {args.root or os.getcwd()} "
@@ -407,10 +597,10 @@ def main(argv: list[str] | None = None) -> int:
             "git is not installed or not on PATH\nhint: `whykit history` needs Git to compare revisions",
             json_mode=args.json,
         )
-    return _report(args.json, base, head, blocked, staged=args.staged)
+    return _report(args.json, base, head, blocked, staged=args.staged, reasons=reasons)
 
 
-def _report(json_mode: bool, base: str, head: str, blocked: list[tuple[str, str]], *, staged: bool) -> int:
+def _report(json_mode: bool, base: str, head: str, blocked: list[tuple[str, str]], *, staged: bool, reasons: dict[str, str] | None = None) -> int:
     if json_mode:
         import json
         emit_machine(json.dumps({
@@ -419,7 +609,7 @@ def _report(json_mode: bool, base: str, head: str, blocked: list[tuple[str, str]
             "head": head,
             "staged": staged,
             "passed": not blocked,
-            "blocked": [{"status": status, "path": path} for status, path in blocked],
+            "blocked": [{"status": status, "path": path, **({"reason": reasons[path]} if reasons and path in reasons else {})} for status, path in blocked],
         }, ensure_ascii=False, indent=2))
         return 1 if blocked else 0
     if not blocked:
@@ -429,4 +619,6 @@ def _report(json_mode: bool, base: str, head: str, blocked: list[tuple[str, str]
     print("Historical decision reasoning is append-only. Supersede; do not rewrite:", file=sys.stderr)
     for status, path in blocked:
         print(f"  {status}\t{one_line(path)}", file=sys.stderr)
+        if reasons and path in reasons:
+            print(f"    {reasons[path]}: include a new matching review event with the record", file=sys.stderr)
     return 1

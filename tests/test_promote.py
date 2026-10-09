@@ -164,7 +164,10 @@ class PromoteTestCase(unittest.TestCase):
     def run_cli(self, *argv: str) -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = cli.main(["new", "decision", *argv, "--root", str(self.vault)])
+            try:
+                code = cli.main(["new", "decision", *argv, "--root", str(self.vault)])
+            except SystemExit as exc:
+                code = int(exc.code or 0)
         return code, out.getvalue(), err.getvalue()
 
     def state(self) -> dict[str, bytes]:
@@ -390,6 +393,18 @@ class WriteTests(PromoteTestCase):
 
 
 class RefusalTests(PromoteTestCase):
+    def test_import_cannot_create_approved_or_retired_records(self) -> None:
+        path = self.stage("0007-use-queues.md", NYGARD)
+        before = self.state()
+        for status in ("approved", "superseded", "archived"):
+            for write in (False, True):
+                with self.subTest(status=status, write=write):
+                    args = ["--from", str(path), "--status", status, "--json"]
+                    code, out, err = self.run_cli(*args, *(["--write"] if write else []))
+                    self.assertEqual(code, 2, err)
+                    self.assertEqual(json.loads(out)["error"]["code"], "usage")
+                    self.assertEqual(self.state(), before)
+
     def test_missing_binary_and_non_markdown_sources(self) -> None:
         cases = {
             "missing.md": None,

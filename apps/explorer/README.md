@@ -6,7 +6,7 @@ results, all derived from the Markdown files. Explorer has no database and no
 server-side code. It renders one JSON index that the Python package generates.
 
 Explorer is optional and is not part of the data contract. A vault is complete
-without it, and the CI job that builds it is non-blocking.
+without it. Explorer build and E2E/a11y jobs block the product release.
 
 | View | What it shows |
 |---|---|
@@ -69,7 +69,7 @@ implementation, so front matter and tables are parsed in only one place:
 uv run whykit explorer-index --root examples/northline --today 2026-09-17
 ```
 
-The command prints the index as JSON. It contains every document's metadata and
+The command prints a public index as JSON. It contains the surviving public documents' metadata and
 body, the evidence IDs each note cites, the evidence, decision and review rows,
 the freshness policy from `whykit.toml`, and the lint report. If the vault
 has lint errors the command fails, and Explorer will not build from an invalid
@@ -90,6 +90,19 @@ Until the bodies arrive, search matches titles, ids, tags and summaries and
 says so. `npm run check:index` checks that the files match the summary (note
 for note, and finding for counted finding) and rejects any of them that
 includes an absolute path from the build machine.
+
+Public is the default for CLI export and npm builds. Notes with non-public or
+unreadable labels, local unclassified attachments, or references to hidden
+records are withheld as whole notes, including transitive references. Ledger
+rows and findings follow their document visibility. A hub linking to a private
+note can therefore disappear; classify a dedicated publication vault rather
+than expecting redaction to preserve its meaning. The exporter cannot identify
+arbitrary private prose copied into a note labelled public.
+
+For a private local build, opt in with `WHYKIT_EXPLORER_PRIVATE=1 npm run build`
+or `whykit explorer-index --private`. `whykit serve` opts in automatically and
+keeps the existing network guard. Never publish such a build. The `--from`
+script path imports unverified JSON and also requires the private opt-in.
 
 Set `WHYKIT_VAULT_DIR` to choose the vault and `PYTHON` to choose the
 interpreter (default `python3`).
@@ -198,13 +211,11 @@ this file behind the static-site header above: both policies would apply, and
 `script-src 'self'` blocks the inline script. Serve `dist/` instead.
 
 > [!WARNING]
-> The build contains the full text of every document in the vault (the single
-> file too, and a file is easy to forward),
-> including `internal`, `confidential` and `restricted` notes. Explorer has no
-> access control. Publish a build only when every document in the vault is
-> meant to be public. Otherwise, serve it behind your own authentication.
-> When the vault has `confidential` or `restricted` notes, `npm run index`
-> prints a warning and every page of the build shows a banner with their count.
+> Private builds contain the full text of every document, including internal,
+> confidential and restricted notes. Explorer has no access control. The private
+> opt-in applies to single-file builds too; a file is easy to forward. Public
+> builds use the filtered export by default. Review labels and content before
+> publication, and use authentication for any private build.
 
 ## Checks
 
@@ -249,3 +260,5 @@ The suite runs only in Playwright's bundled Chromium. Install it once with:
 ```bash
 npx playwright install chromium
 ```
+
+Evidence rows show their effective sensitivity in the register and record cards. Private-view exposure notices include confidential/restricted evidence entries as well as notes. Public exports filter entries by their register/replacement floor; raw labeled tables are withheld.

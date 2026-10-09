@@ -14,6 +14,8 @@ Examples:
 """
 from __future__ import annotations
 
+from .tables import split_table_row as _split_table_row, review_table_header
+
 import argparse
 import contextlib
 import contextvars
@@ -425,6 +427,12 @@ class Note:
     has_front: bool = False
     front_error: str | None = None
     body_offset: int = 0  # line count, not a character index
+
+    @functools.cached_property
+    def content_sha256(self) -> str:
+        """Bind pagination to this parsed content, not only its place in the rank."""
+        import hashlib
+        return hashlib.sha256(self.text.encode("utf-8", "surrogateescape")).hexdigest()
 
     @functools.cached_property
     def masked(self) -> str:
@@ -1181,49 +1189,25 @@ def check_markdown_links(
             add(findings, root, note.path, line, "warning", "markdown_link.missing", f"local Markdown {kind} does not exist: ({target})")
 
 
-def _split_table_row(line: str) -> list[str]:
-    text = line.strip()
-    if text.startswith("|"):
-        text = text[1:]
-    if text.endswith("|"):
-        text = text[:-1]
-    cells: list[str] = []
-    buf: list[str] = []
-    wiki_depth = 0
-    # Searching for a closer after every opener made a row of `[[` quadratic;
-    # a closer exists later on the line exactly when the last one is further on.
-    last_close = text.rfind("]]")
-    i = 0
-    while i < len(text):
-        ch = text[i]
-        nxt = text[i + 1] if i + 1 < len(text) else ""
-        if ch == "\\" and nxt == "|":
-            buf.append("|")
-            i += 2
-            continue
-        # Only a `[[` that is closed later on the line opens a wikilink. A stray
-        # `[[` in free text must not swallow every following cell separator.
-        if ch == "[" and nxt == "[" and last_close >= i + 2:
-            wiki_depth += 1
-            buf.extend((ch, nxt))
-            i += 2
-            continue
-        if ch == "]" and nxt == "]" and wiki_depth:
-            wiki_depth -= 1
-            buf.extend((ch, nxt))
-            i += 2
-            continue
-        if ch == "|" and wiki_depth == 0:
-            cells.append("".join(buf).strip())
-            buf = []
-        else:
-            buf.append(ch)
-        i += 1
-    cells.append("".join(buf).strip())
-    return cells
+_EVIDENCE_VIEW: contextvars.ContextVar[tuple[Path, tuple | Callable[[], tuple]] | None] = contextvars.ContextVar("whykit_evidence_view", default=None)
+
+
+@contextlib.contextmanager
+def evidence_view(root: Path, rows: tuple | Callable[[], tuple]):
+    """Use one captured, filtered register throughout a read-only request."""
+    token = _EVIDENCE_VIEW.set((_real(root), rows))
+    try:
+        yield
+    finally:
+        _EVIDENCE_VIEW.reset(token)
 
 
 def evidence_register(root: Path) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]], list[tuple[str, int]]]:
+    view = _EVIDENCE_VIEW.get()
+    if view is not None and view[0] == _real(root):
+        rows = view[1]() if callable(view[1]) else view[1]
+        active, retired, occurrences = rows
+        return ({key: dict(row) for key, row in active.items()}, {key: dict(row) for key, row in retired.items()}, list(occurrences))
     path = root / "00-context" / "evidence-register.md"
     if not path.exists():
         return {}, {}, []
@@ -1257,11 +1241,31 @@ def _parse_evidence_register_text(text: str) -> tuple[dict[str, dict[str, str]],
     retired: dict[str, dict[str, str]] = {}
     occurrences: list[tuple[str, int]] = []
     mode = "active"
+    sensitivity_column: int | None = None
+    fence: str | None = None
     for lineno, line in enumerate(text.splitlines(), 1):
+        opener = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+        if opener:
+            mark = opener.group(1)
+            if fence is None:
+                fence = mark
+            elif mark[0] == fence[0] and len(mark) >= len(fence):
+                fence = None
+            continue
+        if fence is not None:
+            continue
         if line.strip().lower().startswith("## retired sources"):
             mode = "retired"
+            sensitivity_column = None
             continue
         cells = _split_table_row(line) if line.lstrip().startswith("|") else []
+        if cells and cells[0].casefold() == "id":
+            from .tables import EVIDENCE_COLUMNS
+
+            header = tuple(cell.casefold() for cell in cells)
+            expected = EVIDENCE_COLUMNS[mode]
+            sensitivity_column = len(expected) if header == (*expected, "sensitivity") else None if header == expected else -1
+            continue
         if not cells or not EVIDENCE_ID_RE.fullmatch(cells[0]):
             continue
         eid = cells[0]
@@ -1283,6 +1287,14 @@ def _parse_evidence_register_text(text: str) -> tuple[dict[str, dict[str, str]],
                 "source": cells[1], "retired_on": cells[2], "why": cells[3],
                 "replaced_by": cells[4], "line": str(lineno),
             }
+        else:
+            continue
+        row = active[eid] if mode == "active" else retired[eid]
+        expected_length = 7 if mode == "active" else 5
+        if sensitivity_column is not None:
+            row["sensitivity"] = cells[sensitivity_column] if sensitivity_column >= 0 and len(cells) == expected_length + 1 else ""
+        elif len(cells) != expected_length:
+            row["sensitivity"] = ""
     return active, retired, occurrences
 
 
@@ -1290,13 +1302,16 @@ def evidence_rows(root: Path) -> dict[str, dict[str, str]]:
     return evidence_register(root)[0]
 
 
-def check_evidence_register(root: Path, findings: list[Finding], today: dt.date) -> None:
+def check_evidence_register(root: Path, findings: list[Finding], today: dt.date, config: dict | None = None) -> None:
+    from .sensitivity import SENSITIVITY_LEVEL
+
     path = root / "00-context" / "evidence-register.md"
     if not path.exists():
         return
     active, retired, occurrences = evidence_register(root)
     try:
-        config, _ = load_config(root)
+        if config is None:
+            config, _ = load_config(root)
         access_age_policy = config["evidence_access_age_days"]
     except ConfigError:
         # check_config reports the malformed policy once, without extra findings.
@@ -1308,6 +1323,8 @@ def check_evidence_register(root: Path, findings: list[Finding], today: dt.date)
         else:
             seen[eid] = line
     for eid, row in active.items():
+        if "sensitivity" in row and row["sensitivity"] not in SENSITIVITY_LEVEL:
+            add(findings, root, path, int(row["line"]), "warning", "evidence.sensitivity", f"{eid} has an empty or invalid Sensitivity cell; filtered readers withhold it")
         for key in ("date", "accessed"):
             value = row.get(key, "")
             if value and _parse_date(value) is None:
@@ -1324,6 +1341,8 @@ def check_evidence_register(root: Path, findings: list[Finding], today: dt.date)
                     add(findings, root, path, int(row["line"]), "warning", "evidence.access_stale", f"{eid} was last accessed {accessed}, more than {max_age} days ago")
     known = set(active) | set(retired)
     for eid, row in retired.items():
+        if "sensitivity" in row and row["sensitivity"] not in SENSITIVITY_LEVEL:
+            add(findings, root, path, int(row["line"]), "warning", "evidence.sensitivity", f"{eid} has an empty or invalid Sensitivity cell; filtered readers withhold it")
         value = row.get("retired_on", "")
         if value and _parse_date(value) is None:
             add(findings, root, path, int(row["line"]), "error", "evidence.retired_date", f"{eid} has invalid retired-on date `{value}`")
@@ -1614,6 +1633,10 @@ def check_decision_review(root: Path, notes: list[Note], findings: list[Finding]
             continue
         if note.front.get("status") != "approved":
             continue
+        provenance = note.front.get("provenance")
+        if isinstance(provenance, dict) and "human_reviewed" in provenance and provenance["human_reviewed"] is not True:
+            add(findings, root, note.path, 1, "warning", "decision.unreviewed",
+                "approved decision declares it was not human-reviewed — keep it in review until an authorized person checks the record")
         review_by = str(note.front.get("review_by", "")).strip()
         if not review_by or review_by == PLACEHOLDER_DATE:
             add(findings, root, note.path, 1, "warning", "decision.review_missing",
@@ -1693,7 +1716,7 @@ def check_decision_placeholders(root: Path, notes: list[Note], findings: list[Fi
         )
 
 
-REVIEW_OUTCOMES = {"confirmed", "update-required", "supersede-required", "archived"}
+REVIEW_OUTCOMES = {"confirmed", "update-required", "supersede-required", "archived", "approved"}
 
 def check_config(root: Path, findings: list[Finding]) -> None:
     path = root / CONFIG_FILE
@@ -1712,15 +1735,7 @@ def check_review_log(root: Path, notes: list[Note], findings: list[Finding], res
     real = _real(path)
     note = next((item for item in notes if _real(item.path) == real), None) or load_note(path)
     lines = note.text.splitlines()
-    header = ["date", "target", "reviewer", "outcome", "previous review", "next review", "note"]
-    # Compare cells, not the raw line: Markdown formatters pad table columns.
-    header_idx = next(
-        (
-            i for i, line in enumerate(lines)
-            if line.lstrip().startswith("|") and [c.lower() for c in _split_table_row(line)] == header
-        ),
-        None,
-    )
+    header_idx = review_table_header(lines)
     if header_idx is None or header_idx + 1 >= len(lines):
         add(findings, root, path, None, "error", "review_log.table", "review log table is missing or malformed")
         return
@@ -1957,6 +1972,7 @@ def lint(
     today: dt.date | None = None,
     vault: object | None = None,
     overrides: list[Override] | None = None,
+    config: dict | None = None,
 ) -> tuple[list[Path], list[Finding]]:
     """Lint *root* (or the scoped *paths* inside it).
 
@@ -2002,16 +2018,17 @@ def lint(
         check_wikilinks(root, note, index, findings, attachments, index_model.resolve_link)
         check_markdown_links(root, note, findings, link_exists)
         check_fact_evidence(root, note, findings, known_evidence)
-    check_evidence_register(root, findings, today)
+    check_evidence_register(root, findings, today, config)
     check_evidence_ids(root, notes, findings)
     check_decision_ids(root, notes, findings)
     check_decision_log(root, all_notes, findings, index_model.resolve_link)
     check_decision_review(root, notes, findings)
     check_decision_placeholders(root, notes, findings)
-    try:
-        config: dict | None = load_config(root)[0]
-    except Exception:  # noqa: BLE001 — reported as config.invalid by check_config
-        config = None
+    if config is None:
+        try:
+            config = load_config(root)[0]
+        except Exception:  # noqa: BLE001 — reported as config.invalid by check_config
+            config = None
     policy = policy_from_config(config) if config is not None else EMPTY_POLICY
     if policy.custom:
         check_custom_rules(policy, notes, findings, today, lambda path: rel(root, path))

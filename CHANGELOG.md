@@ -51,6 +51,20 @@ hello@cometweb.io the contact; CometWeb is not the copyright holder.
 
 ### Breaking changes
 
+#### Controlled decision approval
+
+- New decisions start as draft/in-review. `review approve` previews the complete
+  record, evidence and diff, then applies only its `--expect-hash` snapshot in a
+  recoverable transaction. Supersession occurs at approval, not draft creation.
+- Review logs accept `approved` events with record/snapshot SHA-256 receipts.
+  History requires a new matching event for new accepted records, including
+  staged first commits. Existing baseline history is preserved. Reviewer labels
+  remain assertions; they do not authenticate identity or validate source truth.
+  See [migration](docs/migration-0.3.md#review-history-and-interrupted-writes).
+  A [worked approval record](examples/approval/README.md) demonstrates the event
+  format without modifying the existing historical examples.
+
+
 Each entry says what an existing vault, script or pipeline has to change. The
 [migration guide](docs/migration-0.3.md) has the details and examples.
 
@@ -111,6 +125,21 @@ Each entry says what an existing vault, script or pipeline has to change. The
   in [Lint rules](docs/rules.md).
 
 ### Added
+
+- Document the private-vault dogfood record: tool/vault revisions, dirty-state
+  hashes, command/date, counts and PASS/FAIL, with raw operating notes kept out
+  of public artifacts.
+
+- `adopt --compare DIR` checks same-path Markdown after migration without
+  writing either tree. Typed per-file hashes and issues cover lost wikilinks,
+  E-/D-IDs, native declarations and canonical review-log rows; code examples
+  are excluded. Unknown/unreadable or missing files fail closed. No inferred
+  path mapping, generic history conversion or Git history preservation claim.
+
+- `whykit workspace ROOT…` reports independent vault lint and review state,
+  with each vault's policy and review window, isolated failures, alias
+  deduplication and typed JSON. Overlapping roots are rejected; no vault notes
+  or parse caches are written. This is a local owner report, not a public export.
 
 #### Commands
 
@@ -493,6 +522,43 @@ Each entry says what an existing vault, script or pipeline has to change. The
 
 ### Fixed
 
+- Subcommands use the regular argument parser for their own help. The main
+  parser keeps grouped command help; `lint --help` and other leaf commands no
+  longer crash while attempting to render an empty top-level command list.
+
+- Query cursors now bind the content of visible matches, so a metadata/body edit
+  cannot mix two versions of the result set while retaining the same path order.
+  Hidden changes still leave cursors valid.
+
+
+- Explorer export defaults to public with fail-closed labels and transitive
+  reference withholding; private local viewing is an explicit opt-in. Product
+  Explorer build and E2E/a11y jobs now block CI and release gates.
+- Explorer lockfile uses patched source-map-js 1.2.2 for GHSA-68fv-2mgg-jv7q.
+
+- `check --base` evaluates the current vault under both the pinned base policy
+  and the current policy. The report adds `history_checked`; optional or disabled
+  history is printed as SKIP rather than an executed OK.
+- ADR promotion refuses approved/superseded/archived output; the source status
+  remains in provenance. `decision.unreviewed` warns when approval contradicts
+  `human_reviewed`; strict profiles fail it. The decision schema requires
+  `review_by` for approved metadata and rejects an explicitly denied review.
+- The MCP stdio negotiator uses a bounded queue and bounded discovery reply
+  bookkeeping while preserving classic fallback after a burst of probes.
+- `init --profile gtm` names the optional workstream scaffold explicitly;
+  `--full` remains a compatibility alias and default init stays neutral.
+
+- Multi-file commits keep their staged bytes until COMMITTED, recover legacy
+  journals from hash-matching targets, and retry interrupted cleanup without
+  overwriting a later edit. Real directory-sync I/O failures are reported.
+  `new note --link-from` uses the same transaction as decision/review writes.
+- The history gate rejects review-date changes without matching new confirmed
+  review events in the same diff. It validates the complete deadline chain,
+  reviewer, dates and target, including staged changes.
+- Review tables share header/separator parsing across lint, history, review
+  writes and Explorer; column padding cannot hide events. Explorer's Markdown
+  renderer handles escaped pipes and unclosed wikilinks like the Python parser.
+
 #### Decision history and lineage
 
 - `whykit history` checked the wrong thing in several cases: a record with a
@@ -645,6 +711,31 @@ Each entry says what an existing vault, script or pipeline has to change. The
 
 ### Security
 
+- Evidence tables support an optional final Sensitivity column and
+  `new evidence --sensitivity`. Writers preserve labels during retirement;
+  filtered readers honor register/replacement floors, withhold invalid labels
+  and duplicate IDs, and share captured contents and classification. MCP hides
+  raw labeled tables and source row offsets; public Explorer exports keep safe
+  rows. `evidence.sensitivity` starts as a warning. Legacy tables keep inherited
+  classification; see the migration note and example D-002.
+
+- MCP results have a separate 1 MiB compact UTF-8 JSON budget, including both
+  tool representations, metadata and resource/prompt results. Oversized results
+  return `response_too_large` rather than incomplete success data. The result
+  budget excludes the enclosing JSON-RPC/transport framing and report-building
+  memory; document `max_chars` budgets retain their character-based meaning.
+- Streamable HTTP enforces a 1 MiB body budget, 30-second body receive deadline,
+  eight active authorized requests and a shared 60-request burst refilling at
+  two requests/second, after authentication/Host checks. Connection/task cap 32
+  in Uvicorn. Rate/busy/body failures have documented HTTP statuses and codes.
+  Limits are per process; remote TLS/proxy controls remain operator-owned.
+- MCP transport guards cap stdio input lines at 1 MiB, JSON request IDs at
+  1024 UTF-8 bytes and JSON-RPC envelopes at 2 MiB. Stdio checks the actual
+  output including its newline and closes on oversized input without draining
+  it. HTTP preflight and stdio validation return fixed errors without echoing
+  peer data. Buffered diagnostic stdout is flushed before descriptor restoration.
+
+
 #### Vault writes and files
 
 - A change that would rewrite a file marked read-only is refused before any
@@ -775,6 +866,11 @@ Each entry says what an existing vault, script or pipeline has to change. The
   hidden marker that identifies it cannot be closed early by a note.
 
 ### Performance
+
+- Query filters/ranking retain lightweight note references; CLI renders only its
+  result limit and MCP renders only its verified page. Full visible ordering and
+  exact total remain unchanged; a one-result page no longer builds all summaries.
+
 
 - Large vaults are much faster: on a 5,000-note vault `lint`, `status`,
   `check` and `explorer-index` take about 1.5 s, `context` and `pack` about

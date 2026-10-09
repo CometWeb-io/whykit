@@ -12,12 +12,12 @@ From a source checkout, prefix commands with `uv run` (see
 
 - `whykit --version` (or `-V`) prints the version; `whykit --help` lists the
   commands grouped by job: **author** (`init`, `adopt`, `new`, `review`,
-  `evidence`), **check** (`lint`, `check`, `status`, `trace`, `history`,
+  `evidence`), **check** (`lint`, `check`, `status`, `workspace`, `trace`, `history`,
   `diff`, `snapshot`, `verify-snapshot`), **explore** (`query`, `context`,
   `pack`, `graph`, `backlinks`, `impact`), **integrate** (`install-hooks`,
   `explorer-index`, `serve`, `completion`) and **maintain** (`policy`, `rules`,
   `doctor`). The table below follows the same order.
-- `--root DIR` selects the vault. Every command that reads a vault accepts it
+- `--root DIR` selects one vault. Single-vault commands accept it
   after the command name, before the command name (`whykit --root DIR lint`),
   and, for `new`, `review` and `evidence`, before or after the action. `adopt`
   also spells it `--into`, and `serve` also takes the vault as an argument.
@@ -45,18 +45,20 @@ From a source checkout, prefix commands with `uv run` (see
 
 | Command | Does | Options | More |
 |---|---|---|---|
-| `init <dir>` | Create a vault from the bundled template | `--force`, `--full`, `--minimal`, `--json` | [How-to](guide.md#create-a-vault) |
-| `adopt <source>` | Inventory existing Markdown; stage it with `--write` | `--into` (or `--root`), `--profile`, `--owner`, `--write`, `--json` | [How-to](guide.md#already-have-a-pile-of-markdown) |
+| `init <dir>` | Create a vault from the bundled template | `--force`, `--profile`, `--full`, `--minimal`, `--json` | [How-to](guide.md#create-a-vault) |
+| `adopt <source>` | Inventory existing Markdown; stage it with `--write` or compare preservation with `--compare DIR` | `--into` (or `--root`), `--profile`, `--owner`, `--write`, `--compare`, `--json` | [How-to](guide.md#already-have-a-pile-of-markdown) |
 | `new decision <title>` | Create a decision record and its decision-log row; with `--from FILE`, promote an existing ADR into one (a dry run that prints the mapping until `--write`) | `--from`, `--write`, `--owner`, `--status`, `--source`, `--supersedes`, `--review-by`, `--sensitivity`, `--json`, `--root` | [How-to](guide.md#promote-an-adopted-adr) |
-| `new evidence` | Append a source to the evidence register | `--source`, `--type`, `--location`, `--claims`, `--date`, `--accessed`, `--json`, `--root` | [Concepts](concepts.md#evidence) |
+| `new evidence` | Append a source to the evidence register | `--source`, `--type`, `--location`, `--claims`, `--date`, `--accessed`, `--sensitivity`, `--json`, `--root` | [Concepts](concepts.md#evidence) |
 | `new note <title>` | Create a draft note in a workstream | `--workstream`, `--type`, `--owner`, `--sensitivity`, `--link-from`, `--json`, `--root` | [How-to](guide.md#create-records) |
 | `review list` | Show upcoming and overdue reviews | `--due-days`, `--overdue-only`, `--owner`, `--today`, `--json`, `--root` | [How-to](guide.md#record-a-review) |
+| `review approve <target>` | Preview the record, evidence and approval diff; apply only the reviewed snapshot | `--reviewer`, `--next-review`, `--today`, `--write`, `--expect-hash`, `--json`, `--root` | [How-to](guide.md#approve-a-decision) |
 | `review record <target>` | Append a review event; `confirmed` moves `review_by` forward | `--reviewer`, `--outcome`, `--next-review`, `--note`, `--today`, `--json`, `--root` | [Concepts](concepts.md#the-review-cycle) |
 | `evidence list` | List active and retired evidence | `--state`, `--json`, `--root` | [How-to](guide.md#retire-evidence) |
 | `evidence retire <E-NNN>` | Retire a source without deleting its ID | `--why`, `--replaced-by`, `--today`, `--json`, `--root` | [How-to](guide.md#retire-evidence) |
 | `lint [paths…]` | Check the vault, or some files in it; `--format` picks `text`, `json`, `sarif` (SARIF 2.1.0 for code scanning) or `github` (workflow annotations) | `--strict`, `--quiet`, `--json`, `--format`, `--no-orphans`, `--no-secrets`, `--today`, `--root` | [Rules](rules.md), [CI](ci.md) |
 | `check` | Run a named policy gate (`local`, `ci`, `release` or your own; default `ci`); `--format` picks `text`, `json` or `github` | `--profile`, `--base`, `--head`, `--today`, `--json`, `--format`, `--root` | [CI](ci.md) |
 | `status` | Summarize vault health and the review queue | `--due-days`, `--strict`, `--today`, `--json`, `--root` | [Concepts](concepts.md#the-review-cycle) |
+| `workspace <roots…>` | Report independent vault health and review queues; explicit roots instead of `--root` | `--due-days`, `--strict`, `--today`, `--json` | [How-to](guide.md#check-several-vaults) |
 | `trace` | Trace each decision to its evidence; flag missing, retired or stale sources | `--decision`, `--gaps-only`, `--max-age-days`, `--strict`, `--today`, `--json`, `--root` | [How-to](guide.md#trace-decisions-to-their-evidence) |
 | `history` | Verify that accepted reasoning and earlier review events were not rewritten between two commits, or (`--staged`) in the staged changes, for pre-commit | `--base`, `--head`, `--staged`, `--json`, `--root` | [Concepts](concepts.md#lifecycle) |
 | `diff` | Show what a change does to the decisions: new, superseded and archived decisions with their supersession chain, status and review-date moves, evidence added, retired or re-sourced, decisions citing changed evidence, and lint findings introduced or fixed. Reads both commits from Git without a checkout; `--format` picks `text`, `json`, `markdown` (a pull request comment) or `github` (workflow annotations) | `--base`, `--head`, `--today`, `--json`, `--format`, `--root` | [CI](ci.md#decision-diff-comment) |
@@ -69,7 +71,7 @@ From a source checkout, prefix commands with `uv run` (see
 | `backlinks <target>` | List what links to a note, decision or evidence ID | `--json`, `--root` | [Obsidian](obsidian.md#graph-view-and-whykits-graph) |
 | `impact <target>` | Show what depends on evidence, a decision or a document | `--json`, `--root` | [How-to](guide.md#retire-evidence) |
 | `install-hooks` | Install a pre-commit hook that runs the `local` profile | `--force`, `--root` | [CI](ci.md#local-hooks) |
-| `explorer-index` | Export the Explorer's vault index (always JSON) | `--today`, `--json`, `--root` | [Automation](automation.md#schemas) |
+| `explorer-index` | Export the Explorer's vault index (always JSON) | `--today`, `--json`, `--root`, `--private` | [Automation](automation.md#schemas) |
 | `serve [vault]` | Run the optional Explorer from a source checkout; an installed copy names the checkout it came from, or the source to clone | `--root`, `--host`, `--port`, `--allow-sensitive-network` | [How-to](guide.md#browse-the-vault-in-the-explorer) |
 | `lsp` | Run the read-only language server over stdio, for editors: lint diagnostics, wikilink and ID completion, hover, go-to-definition and document links | `--root`, `--debounce`, `--today`, `--stdio` | [Editors](editors.md) |
 | `completion <shell>` | Print a `bash`, `zsh` or `fish` completion script | | `eval "$(whykit completion zsh)"` |

@@ -8,7 +8,9 @@ nothing.
 """
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 from typing import Any
 
 ANNOTATIONS = frozenset({"$schema", "$id", "title", "description", "$defs", "$comment", "examples", "default"})
@@ -57,7 +59,12 @@ def validate(instance: Any, schema: dict[str, Any]) -> list[str]:
 
 def _resolve(root: dict[str, Any], ref: str) -> dict[str, Any]:
     if not ref.startswith("#/"):
-        raise ValueError(f"only local $ref is supported: {ref}")
+        if not ref.startswith("https://cometweb.io/schemas/whykit/"):
+            raise ValueError(f"only bundled $ref is supported: {ref}")
+        schema = json.loads((Path(__file__).resolve().parents[1] / "schemas" / ref.rsplit("/", 1)[-1]).read_text(encoding="utf-8"))
+        if schema.get("$id") != ref:
+            raise ValueError(f"bundled schema ID does not match: {ref}")
+        return schema
     node: Any = root
     for part in ref[2:].split("/"):
         node = node[part]
@@ -71,7 +78,8 @@ def _check(value: Any, schema: Any, root: dict[str, Any], where: str, errors: li
         errors.append(f"{where}: no value is allowed here")
         return
     if "$ref" in schema:
-        _check(value, _resolve(root, schema["$ref"]), root, where, errors)
+        resolved = _resolve(root, schema["$ref"])
+        _check(value, resolved, root if schema["$ref"].startswith("#/") else resolved, where, errors)
     if "anyOf" in schema:
         if not any(not validate_with_root(value, sub, root, where) for sub in schema["anyOf"]):
             errors.append(f"{where}: matches none of anyOf")

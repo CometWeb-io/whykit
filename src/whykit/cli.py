@@ -154,8 +154,10 @@ def cmd_init(args: argparse.Namespace) -> int:
     json_mode = bool(getattr(args, "json", False))
     if getattr(args, "minimal", False) and getattr(args, "full", False):
         return emit_error("usage", "--minimal and --full cannot be used together", json_mode=json_mode)
-
-    minimal_layout = not getattr(args, "full", False)
+    profile = getattr(args, "profile", None)
+    if (getattr(args, "minimal", False) and profile == "gtm") or (getattr(args, "full", False) and profile == "minimal"):
+        return emit_error("usage", "--profile conflicts with the requested layout alias", json_mode=json_mode)
+    minimal_layout = not (getattr(args, "full", False) or profile == "gtm")
     # Do not Path.resolve(): that follows symlinks and can write outside the
     # path the user named. Expand ~ and absolutize only.
     target = _absolute_without_following_symlinks(args.target)
@@ -243,6 +245,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             "contract_version": CONTRACT_VERSION,
             "root": str(target),
             "layout": "minimal" if minimal_layout else "full",
+            "profile": "minimal" if minimal_layout else "gtm",
             "preserved": preserved,
         }, ensure_ascii=False, indent=2))
         return 0
@@ -252,7 +255,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     if minimal_layout:
         print("Layout: vendor-neutral (default)")
     else:
-        print("Layout: full starter with optional workstreams (--full)")
+        print("Layout: optional GTM workstreams (--profile gtm; --full is a legacy alias)")
     print()
     print("Next, in order:")
     print("  1. Answer every TODO in AGENTS.md - that file is the contract agents work under.")
@@ -315,6 +318,8 @@ def cmd_new(args: argparse.Namespace) -> int:
             argv += ["--date", args.date]
         if args.accessed:
             argv += ["--accessed", args.accessed]
+        if args.sensitivity:
+            argv += ["--sensitivity", args.sensitivity]
         if args.json:
             argv.append("--json")
     else:
@@ -344,6 +349,35 @@ def cmd_status(args: argparse.Namespace) -> int:
     if args.strict:
         argv.append("--strict")
     return status_main(argv)
+
+
+def cmd_workspace(args: argparse.Namespace) -> int:
+    import json
+    from .status import build_workspace_status
+
+    try:
+        today = dt.date.fromisoformat(args.today) if args.today else dt.date.today()
+        report = build_workspace_status([Path(root) for root in args.roots], today=today,
+                                        due_days=args.due_days, strict=args.strict)
+    except ValueError:
+        return emit_error("invalid_argument", "use a real ISO --today and non-negative --due-days", json_mode=args.json)
+    if args.json:
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(f"WhyKit workspace — {report['as_of']}")
+        for entry in report["vaults"]:
+            print(f"  {entry['root']}")
+            if "error" in entry:
+                print(f"    {entry['error']['code']}: {entry['error']['message']}")
+                continue
+            status = entry["status"]
+            print(f"    lint: {status['errors']} error(s), {status['warnings']} warning(s)")
+            print(f"    reviews: {len(status['review_queue'])} due within {entry['due_days']} day(s), {status['review_overdue']} overdue")
+            for item in status["review_queue"][:20]:
+                print(f"      {item['state'].upper()} {item['review_by']} {item['path']}")
+            if len(status["review_queue"]) > 20:
+                print(f"      … {len(status['review_queue']) - 20} more")
+    return report["exit_code"]
 
 
 def _json_format(args: argparse.Namespace, command: str) -> str | None:
@@ -480,10 +514,17 @@ def cmd_review(args: argparse.Namespace) -> int:
             argv.append("--json")
     else:
         argv.append(args.target)
-        argv += ["--reviewer", args.reviewer, "--outcome", args.outcome]
+        argv += ["--reviewer", args.reviewer]
+        if args.review_command == "record":
+            argv += ["--outcome", args.outcome]
+        else:
+            if args.write:
+                argv.append("--write")
+            if args.expected_sha256:
+                argv += ["--expect-hash", args.expected_sha256]
         if args.next_review:
             argv += ["--next-review", args.next_review]
-        if args.note_text:
+        if getattr(args, "note_text", None):
             argv += ["--note", args.note_text]
         if args.today:
             argv += ["--today", args.today]
@@ -595,6 +636,8 @@ def cmd_adopt(args: argparse.Namespace) -> int:
         argv += ["--owner", args.owner]
     if args.profile:
         argv += ["--profile", args.profile]
+    if args.compare:
+        argv += ["--compare", args.compare]
     if args.write:
         argv.append("--write")
     if args.json:
@@ -871,11 +914,14 @@ def _sensitive_docs(vault: Path) -> list[str]:
 
 def _non_public_docs(vault: Path) -> list[str]:
     index = VaultIndex.load(vault)
+    from .sensitivity import note_sensitivity_level, classified_evidence
+
     result: list[str] = []
     for note in index.notes:
-        sensitivity = str(note.front.get("sensitivity", "internal")).lower()
-        if sensitivity != "public":
+        if note_sensitivity_level(note) != 0:
             result.append(index.relative(note.path))
+    active, retired, _, _ = classified_evidence(index)
+    result.extend(f"evidence:{key}" for key, row in (*active.items(), *retired.items()) if row["sensitivity"] != "public")
     return result
 
 
@@ -885,6 +931,8 @@ def cmd_explorer_index(args: argparse.Namespace) -> int:
         argv += ["--root", args.root]
     if getattr(args, "today", None):
         argv += ["--today", args.today]
+    if getattr(args, "private", False):
+        argv += ["--private"]
     from .explorer_index import main as explorer_index_main
     return explorer_index_main(argv)
 
@@ -1003,6 +1051,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         return 2
     env = os.environ.copy()
     env["WHYKIT_VAULT_DIR"] = str(vault)
+    env["WHYKIT_EXPLORER_PRIVATE"] = "1"
     return subprocess.run([npm, "run", "dev", "--", "--host", args.host, "--port", str(args.port)],
                           cwd=explorer, env=env).returncode
 
@@ -1028,7 +1077,7 @@ Docs: https://github.com/CometWeb-io/whykit#readme"""
 # group; tests/test_cli_consistency.py holds this table to the parser.
 COMMAND_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("author", "create and change records", ("init", "adopt", "new", "review", "evidence")),
-    ("check", "gate a vault or a change", ("lint", "check", "status", "trace", "history", "diff", "snapshot", "verify-snapshot")),
+    ("check", "gate a vault or a change", ("lint", "check", "status", "workspace", "trace", "history", "diff", "snapshot", "verify-snapshot")),
     ("explore", "find and hand over context", ("query", "context", "pack", "graph", "backlinks", "impact")),
     ("integrate", "connect hooks, viewers and shells", ("install-hooks", "explorer-index", "serve", "lsp", "completion")),
     ("maintain", "inspect policy, rules and setup", ("policy", "rules", "doctor")),
@@ -1072,9 +1121,9 @@ class _Parser(argparse.ArgumentParser):
 
 def _usage_hint(message: str, command_path: str = "") -> str | None:
     """A next step for argparse errors where the message alone misleads."""
-    if "invalid choice: 'accepted'" in message and "approved" in message:
+    if "invalid choice: 'accepted'" in message and "--status" in message and command_path == "new decision":
         # Decision logs render the approved state as "Accepted", so people type it.
-        return "decision logs display approved decisions as \"Accepted\"; on the command line use --status approved"
+        return "decision logs display approved decisions as \"Accepted\"; create a draft, complete it and use `whykit review approve`"
     if message.startswith("unrecognized arguments") and command_path:
         # argparse reports these from the top-level parser, whose usage line
         # lists no subcommand options at all.
@@ -1180,11 +1229,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-cache", action="store_true",
         help="do not read or update the parse cache in .whykit/cache/ (same as WHYKIT_NO_CACHE=1)",
     )
-    sub = parser.add_subparsers(dest="command", metavar="<command>", title="commands")
+    sub = parser.add_subparsers(dest="command", metavar="<command>", title="commands", parser_class=_Parser)
 
     init = sub.add_parser("init", help="create a new vault", description="Create a new WhyKit vault from the bundled template.")
     init.add_argument("target", help="directory to create (must be empty unless --force)")
     init.add_argument("--force", action="store_true", help="add missing template files in a non-empty directory without replacing existing files")
+    init.add_argument("--profile", choices=("minimal", "gtm"), help="starter profile: minimal (default) or optional GTM workstreams")
     init.add_argument(
         "--minimal",
         action="store_true",
@@ -1193,7 +1243,7 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument(
         "--full",
         action="store_true",
-        help="also create the optional starter workstreams (strategy, website, automation, operations, research) and their templates",
+        help="legacy alias for --profile gtm",
     )
     init.add_argument("--json", action="store_true", help=JSON_HELP)
     init.set_defaults(func=cmd_init)
@@ -1218,7 +1268,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_decision.add_argument("--from", dest="from_path", metavar="FILE", help="promote an existing ADR (MADR, Nygard, Y-statement or Polish headings), e.g. one staged by `adopt`; prints the mapping unless --write")
     new_decision.add_argument("--write", action="store_true", help="with --from: create the record and its decision-log row (default: dry run)")
     new_decision.add_argument("--owner", help="accountable person (default: policy defaults.owner)")
-    new_decision.add_argument("--status", choices=("draft", "in_review", "approved", "superseded", "archived"), default="draft", help="initial status (default: %(default)s)")
+    new_decision.add_argument("--status", choices=("draft", "in_review"), default="draft", help="initial status; approve a completed record with review approve (default: %(default)s)")
     new_decision.add_argument("--sensitivity", choices=SENSITIVITIES, help="default: policy defaults.sensitivity")
     new_decision.add_argument("--source", action="append", default=[], dest="source_ids", metavar="E-NNN", help="supporting evidence ID (repeatable)")
     new_decision.add_argument("--review-by", metavar="YYYY-MM-DD", help="date by which the decision must be re-checked")
@@ -1234,6 +1284,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_evidence.add_argument("--claims", required=True, help="what the source supports, in one line")
     new_evidence.add_argument("--date", metavar="YYYY-MM-DD", help="when the source was produced (default: today)")
     new_evidence.add_argument("--accessed", metavar="YYYY-MM-DD", help="when it was last checked (default: today)")
+    new_evidence.add_argument("--sensitivity", choices=SENSITIVITIES, help="optional row label; cannot lower the register's classification")
     new_evidence.add_argument("--json", action="store_true", help=JSON_HELP)
     _add_leaf_root(new_evidence)
     new_evidence.set_defaults(func=cmd_new)
@@ -1256,6 +1307,14 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--due-days", type=int, metavar="N", help="review window in days (default: policy defaults.status_due_days)")
     status.add_argument("--strict", action="store_true", help="exit 1 when anything needs attention")
     status.set_defaults(func=cmd_status)
+
+    workspace = sub.add_parser("workspace", help="report independent vault health and review queues")
+    workspace.add_argument("roots", nargs="+", metavar="ROOT", help="explicit vault roots (aliases counted once)")
+    workspace.add_argument("--json", action="store_true", help=JSON_HELP)
+    workspace.add_argument("--today", help=TODAY_HELP)
+    workspace.add_argument("--due-days", type=int, metavar="N", help="review window (default: each vault's policy)")
+    workspace.add_argument("--strict", action="store_true", help="exit 1 for warnings as well as errors")
+    workspace.set_defaults(func=cmd_workspace)
 
     graph = sub.add_parser("graph", help="export the vault wikilink graph")
     graph.add_argument("--root", help=ROOT_HELP)
@@ -1342,6 +1401,16 @@ def build_parser() -> argparse.ArgumentParser:
     review_record.add_argument("--json", action="store_true", help=JSON_HELP)
     _add_leaf_root(review_record)
     review_record.set_defaults(func=cmd_review)
+    review_approve = review_sub.add_parser("approve", help="preview approval, then apply the reviewed snapshot")
+    review_approve.add_argument("target", help="vault-relative decision path or D-NNN")
+    review_approve.add_argument("--reviewer", required=True, help="who reviewed the snapshot; an attribution, not authentication")
+    review_approve.add_argument("--next-review", metavar="YYYY-MM-DD", help="default: policy decision_review_days after approval")
+    review_approve.add_argument("--today", help="approval date as YYYY-MM-DD")
+    review_approve.add_argument("--write", action="store_true", help="apply only the snapshot identified by --expect-hash")
+    review_approve.add_argument("--expect-hash", dest="expected_sha256", help="expected_sha256 from a reviewed preview")
+    review_approve.add_argument("--json", action="store_true", help=JSON_HELP)
+    _add_leaf_root(review_approve)
+    review_approve.set_defaults(func=cmd_review)
 
     snapshot = sub.add_parser("snapshot", help="create a deterministic vault snapshot")
     snapshot.add_argument("--root", help=ROOT_HELP)
@@ -1401,6 +1470,7 @@ def build_parser() -> argparse.ArgumentParser:
     adopt.add_argument("--owner", default="TODO", help="owner for adopted notes (default: %(default)s)")
     adopt.add_argument("--profile", choices=("generic", "adr-only", "obsidian-loose"), default="generic", help="how to interpret the source (default: %(default)s)")
     adopt.add_argument("--write", action="store_true", help="write the staged files (default: dry run)")
+    adopt.add_argument("--compare", metavar="DIR", help="read-only preservation check of same-relative-path Markdown")
     adopt.add_argument("--json", action="store_true", help=JSON_HELP)
     adopt.set_defaults(func=cmd_adopt)
 
@@ -1453,6 +1523,7 @@ def build_parser() -> argparse.ArgumentParser:
     explorer_index.add_argument("--root", help=ROOT_HELP)
     explorer_index.add_argument("--today", help=TODAY_HELP)
     explorer_index.add_argument("--json", action="store_true", default=True, help="accepted for symmetry; output is always JSON")
+    explorer_index.add_argument("--private", action="store_true", help="include non-public content for a private local viewer")
     explorer_index.set_defaults(func=cmd_explorer_index)
 
     serve = sub.add_parser("serve", help="run the optional Explorer (source checkout only)")

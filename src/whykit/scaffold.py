@@ -90,19 +90,21 @@ def _next_id(values: list[str], prefix: str) -> str:
 
 
 def _frontmatter_replace(text: str, key: str, value: str) -> str:
+    bom = "\ufeff" if text.startswith("\ufeff") else ""
+    text = text.removeprefix("\ufeff")
     if not text.startswith("---\n"):
         return text
     end = text.find("\n---\n", 4)
     if end < 0:
         return text
     head = text[:end]
-    pattern = re.compile(rf"(?m)^{re.escape(key)}:\s*.*$")
+    pattern = re.compile(rf"(?m)^{re.escape(key)}:[ \t]*.*$")
     replacement = f"{key}: {value}"
     if pattern.search(head):
         head = pattern.sub(replacement, head, count=1)
     else:
         head += "\n" + replacement
-    return head + text[end:]
+    return bom + head + text[end:]
 
 
 def _append_table_row_text(text: str, header_prefix: str, row: str, today: dt.date, *, record_id: str, path_label: str = "table") -> str:
@@ -127,14 +129,6 @@ def _append_table_row_text(text: str, header_prefix: str, row: str, today: dt.da
         lines.insert(insert_at, row)
     updated = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
     return _frontmatter_replace(updated, "last_updated", today.isoformat())
-
-
-def _append_table_row(path: Path, header_prefix: str, row: str, today: dt.date, *, record_id: str) -> None:
-    text = path.read_text(encoding="utf-8")
-    atomic_write_text(
-        path,
-        _append_table_row_text(text, header_prefix, row, today, record_id=record_id, path_label=str(path)),
-    )
 
 
 def _update_decision_log_status_text(text: str, decision_id: str, status: str, today: dt.date) -> str:
@@ -207,6 +201,10 @@ def create_decision(
     promotion: Promotion | None = None,
 ) -> tuple[str, Path]:
     today = today or dt.date.today()
+    if promotion is not None and status not in {"draft", "in_review"}:
+        raise ValueError("imported decisions must start as draft or in_review; the original status is retained in provenance")
+    if status not in {"draft", "in_review"}:
+        raise ValueError("new decisions must start as draft or in_review; complete the record, then use `whykit review approve`")
     title = title.strip() or (promotion.title if promotion else "")
     if not title:
         raise ValueError("decision title cannot be empty")
@@ -229,14 +227,8 @@ def create_decision(
         )
         if path.exists():
             raise FileExistsError(path)
-        if status == "approved" and not review_by:
-            raise ValueError("approved decisions require --review-by")
-        if status == "approved" and owner.strip() in {"", "TODO"}:
-            raise ValueError("approved decisions require a real --owner")
         if review_by:
             parse_iso_date("--review-by", review_by)
-        predecessor_path: Path | None = None
-        predecessor_text: str | None = None
         if supersedes:
             if not DECISION_ID_RE.fullmatch(supersedes):
                 raise ValueError("--supersedes must be a D-NNN identifier")
@@ -246,7 +238,6 @@ def create_decision(
             predecessor_note = load_note(predecessor_path)
             if predecessor_note.front.get("status") != "approved":
                 raise ValueError(f"{supersedes} must be approved before it can be superseded")
-            predecessor_text = predecessor_path.read_text(encoding="utf-8")
         source_ids = source_ids or []
         invalid = [value for value in source_ids if not EVIDENCE_ID_RE.fullmatch(value)]
         if invalid:
@@ -360,21 +351,35 @@ tags: []
                 log_before, "| ID | Decision |", row, today, record_id=decision_id, path_label=str(log)
             ),
         }
-        if status == "approved" and supersedes and predecessor_path and predecessor_text is not None:
-            predecessor_path = safe_vault_target(
-                vault,
-                # The record was globbed under `vault` as given, so it is relative
-                # to that spelling even when the vault sits behind a symlink.
-                predecessor_path.relative_to(vault),
-                create_parents=False,
-            )
-            updated_predecessor = _frontmatter_replace(predecessor_text, "status", "superseded")
-            updated_predecessor = _frontmatter_replace(updated_predecessor, "last_updated", today.isoformat())
-            updated_predecessor = _frontmatter_replace(updated_predecessor, "superseded_by", decision_id)
-            updates[predecessor_path] = updated_predecessor
-            updates[log] = _update_decision_log_status_text(updates[log], supersedes, "superseded", today)
         apply_transaction(vault, updates)
         return decision_id, path
+
+
+def _with_evidence_sensitivity(text: str, mode: str, inherited: str) -> str:
+    """Extend one legacy table without declassifying any existing row."""
+    from .tables import evidence_table_bounds
+
+    lines = text.splitlines()
+    start, end, labeled = evidence_table_bounds(lines, mode)
+    if labeled:
+        return text
+    for index in range(start, end):
+        value = "Sensitivity" if index == start else "---" if index == start + 1 else inherited
+        if index > start + 1:
+            cells = _split_table_row(lines[index])
+            if len(cells) != (7 if mode == "active" else 5):
+                raise ValueError("cannot extend an evidence table with malformed rows")
+            if not cells[1]:
+                value = ""
+        lines[index] = lines[index].rstrip() + f" {_table_cell(value)} |"
+    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+
+
+def _register_inherited_label(path: Path, text: str) -> str:
+    from .sensitivity import SENSITIVITY_LEVEL, note_sensitivity_level
+
+    level = note_sensitivity_level(load_note(path, text=text))
+    return next((name for name, value in SENSITIVITY_LEVEL.items() if value == level), "unclassified")
 
 
 def create_evidence(
@@ -386,6 +391,7 @@ def create_evidence(
     claims: str,
     date: str | None = None,
     accessed: str | None = None,
+    sensitivity: str | None = None,
     today: dt.date | None = None,
 ) -> str:
     today = today or dt.date.today()
@@ -395,16 +401,36 @@ def create_evidence(
     accessed_date = accessed or today.isoformat()
     parse_iso_date("--date", source_date)
     parse_iso_date("--accessed", accessed_date)
+    if sensitivity is not None and sensitivity not in VALID_SENSITIVITY:
+        raise ValueError("unsupported evidence sensitivity")
     with vault_mutation_lock(vault):
         evidence_id = _next_id(_existing_evidence_ids(vault), "E")
         register = safe_vault_target(vault, "00-context/evidence-register.md", create_parents=False)
         if not register.exists():
             raise FileNotFoundError(errno.ENOENT, "the evidence register is missing", str(register))
+        from .tables import evidence_table_bounds
+
+        original = register.read_text(encoding="utf-8")
+        inherited = _register_inherited_label(register, original)
+        updated = _with_evidence_sensitivity(original, "active", inherited) if sensitivity is not None else original
+        lines = updated.splitlines()
+        header, end, labeled = evidence_table_bounds(lines, "active")
+        placeholder = next((index for index in range(header + 2, end)
+                            if _split_table_row(lines[index])[0] == evidence_id), None)
+        values: tuple[str, ...] = (evidence_id, source, kind, source_date, accessed_date, location, claims)
+        if labeled:
+            prior = _split_table_row(lines[placeholder]) if placeholder is not None else []
+            values += (sensitivity or (prior[7] if len(prior) == 8 and prior[7] else inherited),)
         row = "| " + " | ".join(
             _table_cell(value)
-            for value in (evidence_id, source, kind, source_date, accessed_date, location, claims)
+            for value in values
         ) + " |"
-        _append_table_row(register, "| ID | Source | Type |", row, today, record_id=evidence_id)
+        if placeholder is not None:
+            lines[placeholder] = row
+        else:
+            lines.insert(end, row)
+        updated = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
+        atomic_write_text(register, _frontmatter_replace(updated, "last_updated", today.isoformat()))
         return evidence_id
 
 
@@ -422,11 +448,11 @@ def _resolve_link_from(vault: Path, value: str) -> Path:
     return path
 
 
-def _append_note_link(vault: Path, map_path: Path, note_path: Path, title: str, today: dt.date) -> None:
+def _append_note_link(vault: Path, map_path: Path, note_path: Path, title: str, today: dt.date) -> str:
     text = map_path.read_text(encoding="utf-8")
     target = note_path.relative_to(vault).with_suffix("").as_posix()
     if re.search(rf"\[\[{re.escape(target)}(?:\||\]\])", text):
-        return
+        return text
     bullet = f"- [[{target}|{title}]]"
     lines = text.splitlines()
     heading = "## Linked notes"
@@ -447,7 +473,7 @@ def _append_note_link(vault: Path, map_path: Path, note_path: Path, title: str, 
         lines.insert(insert_at, bullet)
     updated = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
     updated = _frontmatter_replace(updated, "last_updated", today.isoformat())
-    atomic_write_text(map_path, updated)
+    return updated
 
 
 def _note_exists_message(vault: Path, path: Path) -> str:
@@ -500,7 +526,6 @@ def create_note(
         if map_path:
             # Fail before the note exists rather than half-way through.
             ensure_writable(map_path)
-        map_before = map_path.read_text(encoding="utf-8") if map_path else None
         body = f'''---
 title: {_yaml_string(title)}
 aliases: []
@@ -534,15 +559,10 @@ Separate verified facts from hypotheses, recommendations and open questions.
 
 -
 '''
-        try:
-            atomic_write_text(path, body)
-            if map_path:
-                _append_note_link(vault, map_path, path, title, today)
-        except Exception:
-            path.unlink(missing_ok=True)
-            if map_path and map_before is not None:
-                atomic_write_text(map_path, map_before)
-            raise
+        updates = {path: body}
+        if map_path:
+            updates[map_path] = _append_note_link(vault, map_path, path, title, today)
+        apply_transaction(vault, updates)
         return path
 
 
@@ -565,6 +585,11 @@ def _promote(vault: Path, args: argparse.Namespace, *, owner: str, sensitivity: 
         return emit_error("invalid_target", str(exc), json_mode=args.json)
     except OSError as exc:
         return emit_error("io_error", describe_os_error(exc), json_mode=args.json)
+    if args.status not in {"draft", "in_review"}:
+        return emit_error(
+            "operation_rejected", "imported decisions must start as draft or in_review; review the imported record before approval",
+            json_mode=args.json,
+        )
     earlier = promoted_from(vault, promotion.sha256)
     if earlier and not args.write:
         return emit_error(
@@ -652,7 +677,7 @@ def main(argv: list[str] | None = None) -> int:
     decision.add_argument("--from", dest="from_path", metavar="FILE")
     decision.add_argument("--write", action="store_true")
     decision.add_argument("--owner")
-    decision.add_argument("--status", choices=tuple(DECISION_STATUS_TO_LOG), default="draft")
+    decision.add_argument("--status", choices=("draft", "in_review"), default="draft")
     decision.add_argument("--sensitivity", choices=VALID_SENSITIVITY)
     decision.add_argument("--source", action="append", default=[], dest="source_ids", help="supporting E-NNN (repeatable)")
     decision.add_argument("--review-by")
@@ -666,6 +691,7 @@ def main(argv: list[str] | None = None) -> int:
     evidence.add_argument("--claims", required=True)
     evidence.add_argument("--date")
     evidence.add_argument("--accessed")
+    evidence.add_argument("--sensitivity", choices=VALID_SENSITIVITY)
     evidence.add_argument("--json", action="store_true")
 
     note = sub.add_parser("note", help="create a draft note in an existing workstream")
@@ -690,8 +716,6 @@ def main(argv: list[str] | None = None) -> int:
     owner = getattr(args, "owner", None) or default_owner
     sensitivity = getattr(args, "sensitivity", None) or default_sensitivity
     review_by = getattr(args, "review_by", None)
-    if args.kind == "decision" and args.status == "approved" and not review_by:
-        review_by = (dt.date.today() + dt.timedelta(days=int(config["defaults"]["decision_review_days"]))).isoformat()
     if args.kind == "decision" and (args.from_path or args.write):
         return _promote(vault, args, owner=owner, sensitivity=sensitivity, review_by=review_by)
     if args.kind == "decision" and not (args.title or "").strip():
@@ -714,7 +738,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.kind == "evidence":
             evidence_id = create_evidence(
                 vault, source=args.source_name, location=args.location, kind=args.evidence_type,
-                claims=args.claims, date=args.date, accessed=args.accessed,
+                claims=args.claims, date=args.date, accessed=args.accessed, sensitivity=args.sensitivity,
             )
             payload = {"contract_version": 1, "kind": "evidence", "id": evidence_id, "path": "00-context/evidence-register.md"}
             if args.json:

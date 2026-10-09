@@ -39,6 +39,7 @@ _RULES = (
     Rule("decision.id_missing", "error", "A decision record has no D-NNN identifier.", "Without an ID, citations and supersession cannot be stable.", "Add decision_id and a matching d-NNN-*.md filename."),
     Rule("decision.placeholder", "warning", "A draft, in-review or approved decision record still holds template placeholder text.", "A record that still says \"State the choice in one sentence.\" passes every other shape check while recording no decision.", "Replace the prompt with the real context, decision and rationale, fill the alternatives table or say there was one option, and list the consequences."),
     Rule("decision.review_missing", "warning", "An approved decision has no review_by date.", "Accepted decisions otherwise look current forever as assumptions change.", "Set a realistic review_by date."),
+    Rule("decision.unreviewed", "warning", "An approved decision's provenance denies human review.", "Approval contradicts the record's own declared review state.", "Keep the record draft or in_review until an authorized person reviews it; changing a boolean is not authentication."),
     Rule("decision.superseded_by_missing", "warning", "A superseded decision has no newer record pointing back to it.", "The chain of reasoning is incomplete.", "Create or fix the newer decision's supersedes field."),
     Rule("decision.superseded_by_format", "warning", "superseded_by is not a D-NNN identifier.", "Lifecycle metadata should point to the same stable decision namespace as supersedes.", "Use a D-NNN identifier or remove the convenience field."),
     Rule("decision.superseded_by_mismatch", "warning", "superseded_by disagrees with the approved reverse supersedes edge.", "Two replacement pointers make the decision lineage ambiguous.", "Align superseded_by with the approved record whose supersedes field points here."),
@@ -59,6 +60,7 @@ _RULES = (
     Rule("delivery_status.invalid", "error", "delivery_status has an unsupported value.", "Downstream systems need a small stable delivery state machine.", "Use draft, ready_to_send or sent."),
     Rule("delivery_status.sent_at", "error", "A sent document has no sent_at timestamp/date field.", "Delivery history must distinguish drafted content from delivered content.", "Record sent_at when setting delivery_status: sent."),
     Rule("evidence.date", "error", "An evidence date or accessed date is invalid.", "Freshness cannot be reasoned about without valid dates.", "Use real YYYY-MM-DD dates."),
+    Rule("evidence.sensitivity", "warning", "An explicit evidence Sensitivity cell is empty or invalid.", "Filtered readers cannot safely classify the row.", "Use public, internal, confidential or restricted; omit the column only for legacy inheritance."),
     Rule("evidence.access_missing", "warning", "An active source covered by an access-age policy has no Accessed date.", "The policy cannot tell whether this source was revisited.", "Record when the source was last accessed, or remove the policy for historical source types."),
     Rule("evidence.access_future", "warning", "An active source has an Accessed date after the lint date.", "A future date cannot establish that a source has already been checked.", "Correct the Accessed date or run lint with the intended --today date."),
     Rule("evidence.access_stale", "warning", "An active source has not been accessed within its configured age window.", "Mutable sources may have changed since the last check.", "Revisit the source and update Accessed after review; do not treat access alone as claim approval."),
@@ -105,6 +107,7 @@ _RULES = (
 )
 
 SECURITY_RULE_CODES = frozenset({
+    "decision.unreviewed",
     "markdown_link.outside",
     "secret.detected",
     "secret.scan_non_utf8",
