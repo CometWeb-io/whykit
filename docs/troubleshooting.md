@@ -105,12 +105,13 @@ the one allowed transition. Undo the edit to the old record and create a new one
 instead:
 
 ```bash
-whykit new decision "New title" --owner Platform --status approved \
+whykit new decision "New title" --owner Platform --status draft \
   --source E-001 --supersedes D-001
 ```
 
-That marks the old record `superseded`, sets `superseded_by`, and updates the
-decision log. Apart from a confirmed review moving `review_by`, that lifecycle
+Complete the new draft, inspect its [approval preview](guide.md#approve-a-decision)
+and apply that exact hash. Approval marks the old record `superseded`, sets
+`superseded_by`, and updates the decision log. Apart from a confirmed review moving `review_by`, that lifecycle
 change is the only edit the history check accepts on an accepted record. A typo fix counts as a rewrite too; if it really matters, record it in a
 superseding decision.
 
@@ -153,6 +154,23 @@ lines to its `.gitignore`:
 `.whykit/cache/` is the parse cache read commands keep (see
 [Performance](performance.md#parse-cache)). It carries its own `.gitignore`,
 so it stays out of `git status` even before you add the line.
+
+### An interrupted write or `cannot recover missing staged content`
+
+The next command that changes the vault finishes every READY transaction under
+the mutation lock before it starts. Do not delete `.whykit/transactions/` while
+a transaction is pending: it contains the bytes needed to finish that write.
+Readers can see a partial multi-file update until recovery completes.
+
+Older versions deleted staged copies before the commit marker. Recovery accepts
+a missing copy only when the target's SHA-256 matches the manifest. Otherwise it
+stops without guessing; restore the staged bytes from a backup, or investigate
+the journal and targets before making any further change.
+
+WhyKit fsyncs file contents and, on supporting POSIX filesystems, directory
+entries. I/O failures are reported. Windows does not expose directory fsync
+through Python's `os.open`; process-restart recovery is tested there, but this
+is not a guarantee against every filesystem or hardware power failure.
 
 ### `ignoring unreadable parse cache`
 

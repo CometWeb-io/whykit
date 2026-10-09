@@ -520,7 +520,7 @@ class QuickstartTests(unittest.TestCase):
             self.assertRegex(combined, r"\d+ files \S 0 error\(s\), 5 warning\(s\)")
             # The fifth warning is the scaffold's prompts in the new decision.
             self.assertIn("[decision.placeholder]", combined)
-            self.assertIn("06-decisions/d-001-ship-sso-before-audit-logs.md  (Platform)", combined)
+            self.assertIn("0 review(s) overdue or due by", combined)
 
 
 class LinkTests(unittest.TestCase):

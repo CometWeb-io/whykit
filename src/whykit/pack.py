@@ -1,11 +1,14 @@
 """Build deterministic multi-record context bundles for agent handoffs."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import json
 from pathlib import Path
 from typing import Any
 
+from .claim_readers import claim_reader
 from .contract import emit_error, vault_not_found
 from .context import build_context
 from .lint import find_vault_root, is_vault_root, path_cache
@@ -56,9 +59,7 @@ AGENT_PREAMBLES = {
 def _allowed(context: dict[str, Any], allowed: set[str] | None) -> bool:
     if allowed is None:
         return True
-    # Evidence-register rows carry no sensitivity of their own and inherit the
-    # register's `internal` classification; so do documents without the key.
-    record = context.get("record") if context.get("kind") != "evidence" else None
+    record = context.get("record") if context.get("kind") != "evidence" else (context.get("evidence") or {}).get("record")
     level = str((record or {}).get("sensitivity") or "internal").lower()
     return level in allowed
 
@@ -75,7 +76,9 @@ def _record_key(context: dict[str, Any]) -> str:
     return f"target:{context.get('target')}"
 
 
+@consistent_read
 @path_cache()
+@claim_reader("pack")
 def build_pack(
     root: Path,
     *,
@@ -225,10 +228,16 @@ def _markdown(report: dict[str, Any]) -> str:
         record = item.get("record") or {}
         if record:
             lines.append(f"Path: `{record.get('path', '—')}`")
+        for claim in item.get("claims", []):
+            lines.append(f"Claim {claim['claim_id']}: **{claim['verification_status']}** ({', '.join(claim['reasons']) or 'reviewed'})")
         if item.get("content"):
             lines.extend(["", item["content"]])
             if item.get("content_truncated"):
                 lines.append("\n> Content truncated by bundle budget.")
+        for fragment in item.get("fragments", []):
+            lines.extend(["", f"### Untrusted source: {fragment['evidence_id']} — {fragment['relation']} ({fragment['fragment']})", "", fragment["content"]])
+            if fragment["content_truncated"]:
+                lines.append("\n> Source fragment truncated by bundle budget.")
     if report["evidence"]:
         lines.extend(["", "---", "", "## Deduplicated evidence"])
         for item in report["evidence"]:

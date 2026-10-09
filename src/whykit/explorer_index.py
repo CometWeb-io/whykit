@@ -1,10 +1,17 @@
 """Canonical Explorer index export — one Python parser for the UI contract."""
 from __future__ import annotations
 
+from .io import consistent_read, vault_read_lock
+
+from .tables import review_table_header
+
 import argparse
 import datetime as dt
+import hashlib
 import json
+import os
 import re
+from collections import defaultdict, deque
 from pathlib import Path
 
 from .config import ConfigError, load_config
@@ -15,14 +22,205 @@ from .lint import (
     strip_markdown_suffix,
     _split_table_row,
     decision_log_rows,
-    evidence_register,
     find_vault_root,
     is_vault_root,
     lint,
+    Note,
     rel,
 )
 from .vault_index import VaultIndex
 from .console import emit_machine
+from .sensitivity import note_sensitivity_level, classified_evidence
+
+
+def _marker_pattern(markers: set[str]) -> re.Pattern | None:
+    """Share prefixes so matching a path does not scan every vault path."""
+    if not markers:
+        return None
+    nodes: list[tuple[str, list[int]]] = []
+    pending = [(0, sorted(markers), 0)]
+    next_id = 1
+    while pending:
+        at, words, depth = pending.pop()
+        while len(nodes) <= at:
+            nodes.append(("", []))
+        if depth >= 32:
+            nodes[at] = ("(?:" + "|".join(re.escape(word) for word in sorted(words, key=len, reverse=True)) + ")", [])
+            continue
+        prefix = os.path.commonprefix((words[0], words[-1]))
+        groups: dict[str, list[str]] = defaultdict(list)
+        for word in words:
+            suffix = word[len(prefix):]
+            if suffix:
+                groups[suffix[0]].append(suffix)
+        children = []
+        for group in groups.values():
+            child = next_id
+            next_id += 1
+            children.append(child)
+            pending.append((child, group, depth + 1))
+        if prefix in words and children:
+            children.append(-1)
+        nodes[at] = (re.escape(prefix), children)
+    parts = {-1: ""}
+    for at in range(len(nodes) - 1, -1, -1):
+        prefix, children = nodes[at]
+        parts[at] = prefix + ("(?:" + "|".join(parts[child] for child in children) + ")" if children else "")
+    return re.compile(r"(?<!\w)(?:" + parts[0] + r")(?!\w)")
+
+
+def _public_payload(payload: dict, index: VaultIndex, *, reasons: dict[str, set[str]] | None = None) -> dict:
+    """Withhold non-public notes and their dependent references as whole notes.
+
+    Redacting fragments would invent a different decision or review history.
+    This closure also inspects code examples: unlike graph citations, an export
+    must not reveal a hidden identifier just because it occurs in a code block.
+    """
+    docs = {doc["id"]: doc for doc in payload["docs"]}
+    paths = {note.path.resolve(): strip_markdown_suffix(index.relative(note.path)) for note in index.notes}
+    withheld = {paths[note.path.resolve()] for note in index.notes if note_sensitivity_level(note) != 0}
+    def withhold(key: str, reason: str) -> None:
+        withheld.add(key)
+        if reasons is not None:
+            reasons.setdefault(key, set()).add(reason)
+
+    for key in withheld:
+        if reasons is not None:
+            reasons.setdefault(key, set()).add("non_public_sensitivity")
+    claim_evidence_ids: set[str] | None = None
+    has_claim_records = any(note.front.get("type") == "claim" or "claim_id" in note.front or "claim_ids" in note.front for note in index.notes)
+    try:
+        config, _ = load_config(index.root)
+    except ConfigError:
+        if has_claim_records:
+            raise  # Claims cannot be projected through an unknown policy.
+        config = {}
+    if "claims" in config or has_claim_records:
+        from .claims import capture_claims
+        from .sensitivity import visible_claim_view
+        visible_claim_index, claim_view = visible_claim_view(index, capture_claims(index, config), ceiling="public")
+        allowed_paths = {note.path for note in visible_claim_index.notes}
+        for note in index.notes:
+            if note.path not in allowed_paths:
+                withhold(paths[note.path.resolve()], "claim_dependency_visibility")
+        claim_evidence_ids = set(claim_view["evidence"])
+    markers: dict[str, set[str]] = defaultdict(set)
+    for key, doc in docs.items():
+        for value in (key, key + ".md", doc["decisionId"]):
+            if value:
+                markers[str(value)].add(key)
+    pattern = _marker_pattern(set(markers))
+    private_titles = {str(value) for key in withheld for value in (docs[key]["title"], *docs[key]["aliases"]) if value}
+    title_pattern = _marker_pattern(private_titles)
+    dependents: dict[str, set[str]] = defaultdict(set)
+    register_id = "00-context/evidence-register"
+    evidence_ids = {row["id"] for row in payload["evidence"]}
+    visible_evidence_ids = {row["id"] for row in payload["evidence"] if row["sensitivity"] == "public"}
+    if claim_evidence_ids is not None:
+        visible_evidence_ids &= claim_evidence_ids
+    _, _, _, per_row = classified_evidence(index)
+    if per_row and register_id in docs:
+        withhold(register_id, "per_row_evidence_classification")
+    evidence_pattern = re.compile(r"(?<!\w)E-[0-9]{3,}(?!\w)")
+    for note in index.notes:
+        key = paths[note.path.resolve()]
+        if key in withheld:
+            continue
+        raw = Note(note.path, note.text)
+        raw.masked = note.text
+        dependencies: set[str] = set()
+        for target, _, _ in raw.wikilink_hits:
+            if target.startswith(("https://", "http://")):
+                continue
+            try:
+                resolved, ambiguous = index.resolve_link(target)
+                target_id = paths.get(resolved.resolve()) if resolved is not None else None
+            except (OSError, ValueError, RuntimeError):
+                target_id, ambiguous = None, False
+            if ambiguous or target_id is None:
+                withhold(key, "unresolved_or_ambiguous_wikilink")
+            else:
+                dependencies.add(target_id)
+        for _, target, _ in raw.markdown_link_hits:
+            candidate = index.root / target.lstrip("/") if target.startswith("/") else note.path.parent / target
+            try:
+                target_id = paths.get(candidate.resolve())
+            except (OSError, ValueError, RuntimeError):
+                target_id = None
+            if target_id is None:
+                withhold(key, "unclassified_attachment_or_missing_markdown_link")
+            else:
+                dependencies.add(target_id)
+        text = "\n".join(value if isinstance(value, str) else "\n".join(map(str, value)) if isinstance(value, list) else str(value) for value in docs[key].values())
+        if title_pattern is not None and title_pattern.search("\n".join((docs[key]["title"], *docs[key]["aliases"], docs[key]["body"]))):
+            withhold(key, "private_title_or_alias")
+        if pattern is not None:
+            for match in pattern.finditer(text):
+                dependencies.update(markers[match.group()])
+        if key != register_id and evidence_ids.intersection(evidence_pattern.findall(note.text)):
+            cited = evidence_ids.intersection(evidence_pattern.findall(note.text))
+            if cited - visible_evidence_ids:
+                withhold(key, "non_public_evidence_reference")
+            if not per_row:
+                if register_id not in docs:
+                    withhold(key, "missing_evidence_register")
+                dependencies.add(register_id)
+        for target in dependencies - {key}:
+            dependents[target].add(key)
+    pending = deque(withheld)
+    while pending:
+        hidden = pending.popleft()
+        for dependent in dependents[hidden]:
+            if dependent not in withheld:
+                withhold(dependent, "withheld_dependency:" + hidden)
+                pending.append(dependent)
+    visible = set(docs) - withheld
+    hidden_markers = {marker for marker, targets in markers.items() if targets & withheld} | private_titles | (evidence_ids - visible_evidence_ids)
+    hidden_pattern = _marker_pattern(hidden_markers)
+    findings = [item for item in payload["lint"]["findings"]
+                if strip_markdown_suffix(item["path"]) in visible
+                and (hidden_pattern is None or not hidden_pattern.search(item["path"] + "\n" + item["message"]))]
+    public_index = index.subset(lambda note: paths[note.path.resolve()] in visible)
+    evidence = [row for row in payload["evidence"] if row["id"] in visible_evidence_ids
+                and (hidden_pattern is None or not hidden_pattern.search("\n".join(str(value) for value in row.values())))] if per_row or register_id in visible else []
+    return {
+        **payload,
+        "exportMode": "public",
+        "vaultName": _vault_name(index.root, public_index) if "README" in visible else "WhyKit public vault",
+        "docs": [{**doc, "sensitivity": "public"} for doc in payload["docs"] if doc["id"] in visible],
+        "evidence": evidence,
+        "decisions": payload["decisions"] if "06-decisions/decision-log" in visible else [],
+        "reviews": payload["reviews"] if "00-context/review-log" in visible else [],
+        "lint": {"files": len(visible), "errors": sum(item["level"] == "error" for item in findings),
+                 "warnings": sum(item["level"] == "warning" for item in findings), "findings": findings},
+        "policy": {**payload["policy"], "evidenceAccessAgeDays": {
+            kind: age for kind, age in payload["policy"]["evidenceAccessAgeDays"].items()
+            if kind in {row["type"] for row in evidence}
+        }},
+    }
+
+
+@consistent_read
+@path_cache()
+def build_publication_preview(root: Path, *, today: dt.date | None = None) -> dict:
+    """Private diagnostics only; never included in an Explorer publication artifact."""
+    payload, index = _build_explorer_index(root, today=today)
+    reasons: dict[str, set[str]] = {}
+    public = _public_payload(payload, index, reasons=reasons)
+    files = {note.path for note in index.notes}
+    files.update((root / "00-context/claim-snapshots").glob("*.txt"))
+    if (root / "whykit.toml").exists():
+        files.add(root / "whykit.toml")
+    digest = hashlib.sha256()
+    for path in sorted(files):
+        if path.is_symlink() or not path.resolve().is_relative_to(index.root):
+            raise RuntimeError("unsafe publication input")
+        digest.update(index.relative(path).encode("utf-8") + b"\0")
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
+    return {"contract_version": 1, "format": "whykit.publication-preview/v1", "private": True,
+            "source_manifest_sha256": digest.hexdigest(), "publication_ready": payload["lint"]["errors"] == 0,
+            "total_docs": len(payload["docs"]), "public_docs": len(public["docs"]),
+            "withheld": [{"path": key + ".md", "reasons": sorted(values)} for key, values in sorted(reasons.items())]}
 
 
 def _summary(body: str) -> str:
@@ -100,12 +298,20 @@ def _policy(root: Path) -> dict:
     }
 
 
+@consistent_read
 @path_cache()
-def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
+def build_explorer_index(root: Path, *, today: dt.date | None = None, private: bool = False) -> dict:
     """Build the Explorer vault.json payload from the canonical Python parser."""
+    payload, index = _build_explorer_index(root, today=today)
+    return payload if private else _public_payload(payload, index)
+
+
+@consistent_read
+@path_cache()
+def _build_explorer_index(root: Path, *, today: dt.date | None = None) -> tuple[dict, VaultIndex]:
     root = root.resolve()
     index = VaultIndex.load(root)
-    docs = []
+    docs: list[dict] = []
     for note in index.notes:
         doc_id = strip_markdown_suffix(rel(root, note.path))
         # Every E-NNN the note cites, in front matter or body, outside code:
@@ -138,7 +344,7 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
         })
     docs.sort(key=lambda item: item["id"])
 
-    active, retired, _ = evidence_register(root)
+    active, retired, _, _ = classified_evidence(index)
     evidence = []
     for eid, row in sorted(active.items()):
         evidence.append({
@@ -150,6 +356,7 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
             "accessed": str(row.get("accessed") or ""),
             "location": str(row.get("location") or ""),
             "claims": str(row.get("claims") or ""),
+            "sensitivity": row["sensitivity"],
         })
     for eid, row in sorted(retired.items()):
         replaced = str(row.get("replaced_by") or "")
@@ -165,6 +372,7 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
             "retiredOn": str(row.get("retired_on") or ""),
             "why": str(row.get("why") or ""),
             "replacedBy": None if replaced in {"", "—"} else replaced,
+            "sensitivity": row["sensitivity"],
         })
 
     decisions = []
@@ -200,8 +408,7 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
     reviews = []
     if review_path.is_file():
         lines = read_vault_lines(review_path)
-        header = "| Date | Target | Reviewer | Outcome | Previous review | Next review | Note |"
-        at = next((i for i, line in enumerate(lines) if line.strip() == header), None)
+        at = review_table_header(lines)
         if at is not None:
             for line in lines[at + 2 :]:
                 if not line.lstrip().startswith("|"):
@@ -240,9 +447,45 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
         ],
     }
 
+    from .claim_readers import claim_view, assessments
+    from .claim_review import decision_claim_review_current
+    view = claim_view(index)
+    version = CONTRACT_VERSION
+    if view is not None:
+        version = 2
+        states = assessments(index, today=today or dt.date.today())
+        notes_by_id = {strip_markdown_suffix(index.relative(note.path)):note for note in index.notes}
+        for doc in docs:
+            note = notes_by_id[doc["id"]]
+            if note.front.get("claim_ids"):
+                doc["claimIds"] = note.front["claim_ids"]
+                doc["requiresReview"] = not decision_claim_review_current(view, note, today=today or dt.date.today())
+            cid = note.front.get("claim_id")
+            if cid in states:
+                state = states[cid]
+                remaining = 20_000
+                relations = []
+                for row in view["records"][cid]["relations"]:
+                    text = row.get("fragment_text", "")[:remaining]
+                    remaining -= len(text)
+                    status: dict = next((item for item in state["relations"] if (item["evidence_id"],item["fragment"],item["relation"]) == (row["evidence_id"],row["fragment"],row["relation"])), {})
+                    relations.append({**row,"fragment_text":text,"fragment_truncated":len(text)<len(row.get("fragment_text","")),
+                                      "usable":status.get("usable",False),"reasons":status.get("reasons",[])})
+                doc.update(claimId=cid, statement=note.front.get("statement", ""), scope=note.front.get("scope", ""),
+                           validFrom=note.front.get("valid_from", ""), validTo=note.front.get("valid_to"),lastVerified=note.front.get("last_verified"),
+                           verificationStatus=state["verification_status"],verificationReasons=state["reasons"],claimRelations=relations,
+                           historyReconstructed=False,assessmentAsOf=state["as_of"],requiresReview=state["verification_status"] == "unknown")
+            # A browser receives a review summary; receipts stay in the ledger.
+            if doc["id"] == "00-context/review-log":
+                doc["body"] = re.sub(r"(?:record-sha256:[0-9a-f]{64}; snapshot-sha256:[0-9a-f]{64}; )?(?:decision-)?claim-receipt/v1:[A-Za-z0-9_-]+", "Bound claim review; receipt retained in the vault", doc["body"])
+                doc["summary"] = _summary(doc["body"])
+        for row in reviews:
+            if "claim-receipt/v1:" in row["note"]:
+                row["note"] = "Bound claim review; receipt retained in the vault"
+
     vault_name = _vault_name(root, index)
-    return {
-        "contract_version": CONTRACT_VERSION,
+    payload = {
+        "contract_version": version,
         "generatedAt": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "vaultName": vault_name,
         "docs": docs,
@@ -251,7 +494,9 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
         "reviews": reviews,
         "lint": lint_payload,
         "policy": _policy(root),
+        "exportMode": "private",
     }
+    return payload, index
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -262,6 +507,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", help="vault root (default: nearest vault)")
     parser.add_argument("--json", action="store_true", default=True, help="emit JSON (default)")
     parser.add_argument("--today", help="evaluate lint review dates as of this ISO date")
+    parser.add_argument("--publication-preview", action="store_true", help="private withheld-path diagnostics; never publish this report")
+    parser.add_argument("--private", action="store_true", help="include non-public content; never publish this index")
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
@@ -272,20 +519,28 @@ def main(argv: list[str] | None = None) -> int:
             today = dt.date.fromisoformat(args.today)
         except ValueError:
             return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=True)
-    payload = build_explorer_index(root, today=today)
-    if payload["lint"]["errors"] > 0:
-        details = "\n".join(
-            f"- {item['path']}: {item['message']}"
-            for item in payload["lint"]["findings"]
-            if item["level"] == "error"
-        )
-        summary = f"Vault has {payload['lint']['errors']} lint error(s); Explorer index not generated."
-        return emit_error(
-            "vault_invalid",
-            summary + ("\n" + details if details else ""),
-            json_hint="run `whykit lint` to see every finding",
-            json_mode=True,
-        )
-    # JSON escapes preserve Unicode content without requiring a UTF-8 console.
+    if args.publication_preview:
+        if args.private:
+            return emit_error("invalid_argument", "--publication-preview and --private are mutually exclusive", json_mode=True)
+        emit_machine(json.dumps(build_publication_preview(root, today=today), ensure_ascii=True, indent=2))
+        return 0
+    with vault_read_lock(root):
+        payload, index = _build_explorer_index(root, today=today)
+        if payload["lint"]["errors"] > 0:
+            details = "\n".join(
+                f"- {item['path']}: {item['message']}"
+                for item in payload["lint"]["findings"]
+                if item["level"] == "error"
+            )
+            summary = f"Vault has {payload['lint']['errors']} lint error(s); Explorer index not generated." if args.private else "Vault has lint errors; public Explorer index not generated."
+            return emit_error(
+                "vault_invalid",
+                summary + ("\n" + details if args.private and details else ""),
+                json_hint="run `whykit lint` to see every finding",
+                json_mode=True,
+            )
+        # JSON escapes preserve Unicode content without requiring a UTF-8 console.
+        if not args.private:
+            payload = _public_payload(payload, index)
     emit_machine(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0

@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/check-report-v2.schema.json",
+  "title": "WhyKit policy gate report (claims opt-in v2)",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "profile",
+    "passed",
+    "checks",
+    "lint"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 2
+    },
+    "profile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profile_config": {
+      "type": "object"
+    },
+    "config_source": {
+      "type": "string"
+    },
+    "as_of": {
+      "type": "string"
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "history_checked": {
+      "type": "boolean",
+      "description": "At least one applied policy completed the history check, including a failing result."
+    },
+    "baseline": {
+      "type": "object",
+      "description": "The head vault evaluated under the policy loaded from the pinned --base revision."
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "passed",
+          "detail"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "checked": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "blocked": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "status",
+                "path"
+              ],
+              "properties": {
+                "status": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "reason": {
+                  "enum": [
+                    "review_without_event",
+                    "approval_without_event",
+                    "review_history_rewritten",
+                    "immutable_claim_removed",
+                    "immutable_claim_semantics",
+                    "immutable_claim_lifecycle",
+                    "claim_lifecycle_reset",
+                    "claim_supersedes_without_approval",
+                    "immutable_claim_snapshot",
+                    "claim_supersedes_cycle_or_foreign",
+                    "claim_review_without_bound_event",
+                    "claim_review_chain_reset",
+                    "decision_claim_review_unbound",
+                    "claim_review_invalid_event",
+                    "claim_archive_without_event",
+                    "claim.invalid_metadata",
+                    "claim.requires_opt_in",
+                    "claim.duplicate_id",
+                    "claim.invalid_relation",
+                    "claim.invalid_snapshot",
+                    "claim.invalid_fragment",
+                    "claim.capture_changed",
+                    "claim.invalid_receipt",
+                    "claim.unsafe_git_input"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "lint": {
+      "type": "object",
+      "properties": {
+        "overrides": {
+          "type": "array",
+          "description": "Present only when whykit.toml declares [rules.overrides] or the profile sets secrets = false; same entries as lint --json.",
+          "items": {
+            "type": "object",
+            "required": [
+              "rule",
+              "level",
+              "paths",
+              "reason",
+              "security",
+              "matched"
+            ],
+            "properties": {
+              "rule": {
+                "type": "string",
+                "minLength": 1
+              },
+              "level": {
+                "enum": [
+                  "error",
+                  "warning",
+                  "off"
+                ]
+              },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "security": {
+                "type": "boolean"
+              },
+              "matched": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "skipped_by": {
+                "type": "string",
+                "minLength": 1
+              },
+              "suppressed": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "contract_version": {
+          "const": 2
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

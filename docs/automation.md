@@ -10,7 +10,7 @@ rely on across releases. For the optional MCP server, see [mcp.md](mcp.md).
 1. **stdout holds exactly one JSON document.** On success it is the command's
    report. When the command cannot produce its report, it is an error object.
    Nothing else is printed to stdout, so `json.loads(stdout)` always works.
-2. **Every document carries `contract_version`.** It is `1` today, on reports
+2. **Every document carries `contract_version`.** It remains `1` for legacy vaults and becomes `2` for claims-enabled reports; see [parallel claim versions](claims.md#parallel-report-versions). On legacy reports
    and on error objects alike.
 3. **Exit codes do not depend on `--json`.** The same failure exits with the same
    code whether or not you asked for JSON.
@@ -27,6 +27,13 @@ JSON mode when `--format` is `json` (their default), `lint`, `check` and `diff` 
 `--format` is `json`, `snapshot` when it writes to stdout (no `--output`), and
 `explorer-index` always. The CI formats (`--format sarif` and
 `--format github`) are not JSON mode; see [CI formats](#ci-formats).
+
+`history --json` and the history check inside `check --json` can include a
+`reason` on a blocked entry: `approval_without_event` means a new acceptance
+lacks a fresh matching receipt; `review_without_event` means a review deadline
+changed without a matching new event. Existing semantic rewrites retain the
+status/path report. GitHub annotations use these reasons to name the required
+fix instead of advising supersession for a missing review event.
 
 ## Exit codes
 
@@ -81,7 +88,7 @@ Schema: [`schemas/error.schema.json`](../schemas/error.schema.json).
 
 | Code | Exit | When |
 |---|---|---|
-| `usage` | 2 | The command line could not be parsed, or options conflict (`--json` with `--format dot`, `pack` with no target). An invalid choice names the valid values; `--status accepted` also points at `--status approved`. |
+| `usage` | 2 | The command line could not be parsed, or options conflict (`--json` with `--format dot`, `pack` with no target). An invalid choice names the valid values; `--status accepted` points at creating a draft and using `review approve`. |
 | `invalid_argument` | 2 | An option value is malformed or out of range: a date that does not exist, a negative count, an ID in the wrong form, an unknown rule code, an unreadable snapshot file, a lint path outside the vault. |
 | `invalid_target` | 2 | The named source or destination exists but cannot be used, e.g. `adopt` pointed at a file, or overlapping source and vault. |
 | `vault_not_found` | 2 | No vault at `--root`, or at or above the working directory. |
@@ -155,6 +162,11 @@ so it passes.
 
 ## Schemas
 
+`adopt --compare DIR --json` adds an optional `preservation` object to the
+adoption report. Exit 1 accompanies structural loss or an uncheckable input;
+the report keeps per-file issues and hashes. An unchanged file proves byte
+preservation, not source validity. This mode never writes either tree.
+
 Every command's JSON output has a JSON Schema (draft 2020-12) in
 [`schemas/`](../schemas/). The test suite runs each command against real vaults
 and validates the output against its schema, so the schemas describe what the
@@ -163,9 +175,12 @@ CLI actually prints.
 | Command | Schema |
 |---|---|
 | `init --json` | `init-result.schema.json` |
+| `new claim --json` | `claim-create-result.schema.json` |
+| `claims enable\|disable --json` | `claims-enable-result.schema.json` |
 | `lint --json` | `lint-report.schema.json` |
 | `new decision\|evidence\|note --json` | `record-create.schema.json` |
 | `status --json` | `status-report.schema.json` |
+| `workspace ROOT… --json` | `workspace-report.schema.json` |
 | `graph --json` | `graph.schema.json` |
 | `backlinks --json` | `backlinks-report.schema.json` |
 | `impact --json` | `impact-report.schema.json` |
@@ -174,6 +189,7 @@ CLI actually prints.
 | `context --json` | `context-pack.schema.json` |
 | `pack --json` | `context-bundle.schema.json` |
 | `review list --json` | `review-queue.schema.json` |
+| `review approve --json` | `decision-approval-result.schema.json` |
 | `review record --json` | `review-record-result.schema.json` |
 | `snapshot` | `snapshot.schema.json` |
 | `verify-snapshot --json` | `snapshot-verify.schema.json` |
@@ -347,3 +363,24 @@ BOM that is not at the start of the file, whitespace and any edited character.
 
 Schemas: [`snapshot.schema.json`](../schemas/snapshot.schema.json) and
 [`snapshot-verify.schema.json`](../schemas/snapshot-verify.schema.json).
+
+## Claim report schemas
+
+The original v1 IDs stay unchanged. Claims-enabled graph, backlinks, trace,
+impact, query, context, pack, status, review queue/approval/record, history, lint,
+check and Explorer use corresponding `*-v2.schema.json` contracts. Claim data
+has `claim-record.schema.json`, `claim-assessment.schema.json` and
+`claim-receipt.schema.json`; document/decision metadata has parallel v2 files.
+See [the claim guide](claims.md#parallel-report-versions). Workspace retains a
+v1 envelope with nested actual report versions. Error envelopes remain v1.
+
+## Recovery and publication previews
+
+`recover --json` emits [recovery-result.schema.json](../schemas/recovery-result.schema.json)
+only after recovery completes under the writer lock. A corrupt journal reports
+an error and remains for inspection; recovery is not a decision approval.
+
+`explorer-index --publication-preview` emits
+[publication-preview.schema.json](../schemas/publication-preview.schema.json).
+It is a **private** report with withholding reasons and source hashes, and is
+never included in public Explorer builds. A source hash is not reviewer identity.

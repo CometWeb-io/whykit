@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createSlugger, extractWikilinks, parseInline, parseMarkdown, slugify } from "../src/lib/markdown.ts";
 
 test("repeated headings get unique ids", () => {
@@ -31,6 +32,15 @@ test("tables keep wikilink pipes inside one cell", () => {
   const [table] = parseMarkdown("| A | B |\n|---|---|\n| [[x|label]] | 2 |");
   assert.equal(table?.t, "table");
   if (table?.t === "table") assert.equal(table.rows[0]?.length, 2);
+});
+
+test("table rows follow the same escaped-pipe contract as Python", () => {
+  const fixtures = JSON.parse(readFileSync(new URL("../../../tests/fixtures/table-rows.json", import.meta.url), "utf8")) as {row: string; cells: string[]}[];
+  for (const {row, cells} of fixtures) {
+    const [table] = parseMarkdown(`| A | B |\n|---|---|\n${row}`);
+    assert.equal(table?.t, "table", row);
+    if (table?.t === "table") assert.deepEqual(table.rows[0], cells.map(parseInline), row);
+  }
 });
 
 test("wrapped quote and callout lines join into paragraphs", () => {

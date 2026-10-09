@@ -50,3 +50,54 @@ def fresh_vault(destination: Path, *flags: str) -> dt.date:
     template, stamped = _TEMPLATES[key]
     shutil.copytree(template, destination, symlinks=True)
     return stamped
+
+
+def historical_decision(root: Path, title: str, *, status: str = "approved", **kwargs):
+    """Construct legacy/invalid data for reader tests, without an approval claim."""
+    from whykit.scaffold import (
+        DECISION_STATUS_TO_LOG, _frontmatter_replace, _update_decision_log_status_text,
+        create_decision,
+    )
+    did, path = create_decision(root, title, status="draft", **kwargs)
+    path.write_text(_frontmatter_replace(path.read_text(encoding="utf-8"), "status", status), encoding="utf-8")
+    log = root / "06-decisions/decision-log.md"
+    today = kwargs.get("today", dt.date.today())
+    text = _update_decision_log_status_text(log.read_text(encoding="utf-8"), did, DECISION_STATUS_TO_LOG[status], today)
+    predecessor = kwargs.get("supersedes")
+    if predecessor and status == "approved":
+        old = next((root / "06-decisions").glob(f"{predecessor.lower()}-*.md"))
+        old_text = _frontmatter_replace(old.read_text(encoding="utf-8"), "status", "superseded")
+        old.write_text(_frontmatter_replace(old_text, "superseded_by", did), encoding="utf-8")
+        text = _update_decision_log_status_text(text, predecessor, "superseded", today)
+    log.write_text(text, encoding="utf-8")
+    return did, path
+
+
+def fill_decision(path: Path) -> None:
+    """Complete synthetic reasoning; production users write their own record."""
+    from whykit.placeholders import ALTERNATIVES_EMPTY_ROW, SCAFFOLD_SECTION_PROMPTS
+    text = path.read_text(encoding="utf-8")
+    replacements = {
+        SCAFFOLD_SECTION_PROMPTS["Context"]: "The team needs a documented process.",
+        SCAFFOLD_SECTION_PROMPTS["Decision"]: "Use the process described by this record.",
+        SCAFFOLD_SECTION_PROMPTS["Rationale"]: "The cited evidence supports the chosen process.",
+        ALTERNATIVES_EMPTY_ROW: "| Keep the old process | Familiar | Missing audit trail | Does not meet the requirement |",
+        "### Positive\n\n-\n": "### Positive\n\n- A clear audit trail.\n",
+        "### Negative and trade-offs\n\n-\n": "### Negative and trade-offs\n\n- Review takes time.\n",
+    }
+    for old, new in replacements.items():
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    path.write_text(text, encoding="utf-8")
+
+
+def approved_decision(root: Path, title: str, *, today: dt.date, review_by: str | None = None, **kwargs):
+    """Exercise the real preview/apply workflow with complete synthetic data."""
+    from whykit.review import approve_decision
+    from whykit.scaffold import create_decision
+    did, path = create_decision(root, title, today=today, **kwargs)
+    fill_decision(path)
+    plan = approve_decision(root, did, reviewer="Ada Example", today=today, next_review=review_by)
+    approve_decision(root, did, reviewer="Ada Example", today=today, next_review=review_by,
+                     write=True, expected_sha256=plan["expected_sha256"])
+    return did, path

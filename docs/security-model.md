@@ -59,7 +59,9 @@ permissions are trusted. WhyKit never asks for elevated rights.
   resolution never opens a file outside the vault root.
 - **No mutation through symlinks.** Commands that write refuse to write through
   a symlinked directory or file inside the vault, and every multi-file change is
-  staged and applied atomically under one lock.
+  staged and applied under one lock. A process interrupted midway through a
+  batch leaves a journal that the next writer finishes; readers can see a
+  partial batch before that recovery completes.
 
 ### Team policy patterns
 
@@ -85,8 +87,40 @@ permissions are trusted. WhyKit never asks for elevated rights.
   `.`, `..` or `.git` components, and never writes outside that directory.
 - Git output is read in its NUL-separated form; a listing that does not parse
   fails the command rather than being half-read.
+- Moving an approved decision's review date requires new confirmed events in
+  the same diff, with matching target and previous/next dates. An event records
+  a reviewer assertion; an editable reviewer name does not authenticate a person.
+
+### Local decision approval
+
+`review approve` is a two-step local operation: a read-only preview followed by
+`--write --expect-hash` for that exact preview. It refuses incomplete reasoning,
+missing/retired evidence and stale inputs, and atomically writes the record and
+ledgers. `history` requires new matching approval events for new acceptances.
+These editable events and reviewer labels are not authenticated signatures;
+protect repository review independently. Referenced source bytes are not fetched
+or frozen. An actor who controls all vault files can fabricate a consistent
+assertion, so do not treat the local hash as proof that a person reviewed it.
 
 ### MCP server
+
+Authorized HTTP requests have a shared per-process burst/refill budget, eight
+active-request slots, a 1 MiB pre-parse body budget and a 30-second body receive
+deadline. Authentication/Host guards precede these budgets. They do not cap
+vault size, the cost of every SDK operation or multi-process traffic; remote
+hosting still requires operator-controlled TLS/proxy limits. Query pagination
+materializes only the selected result summaries, while retaining full visible
+ranking to verify its cursor.
+
+Stdio reads at most 1 MiB plus one detection byte per line and closes after an
+oversized frame. Request IDs are limited to 1024 bytes of compact UTF-8 JSON;
+JSON-RPC success/error envelopes have a separate 2 MiB budget, with stdio
+checking its actual serialized output and newline. Invalid input is rejected
+without echoing SDK validation details. Diverted stdout is flushed before its
+descriptor is restored, so buffered diagnostic prints stay off the protocol.
+These guards exclude HTTP/SSE framing, cumulative stream traffic and the memory
+needed to materialize reports; they are not a whole-process DoS guarantee.
+
 
 - **Nothing above the ceiling is visible.** Every tool, resource, prompt,
   completion and change notification is computed from a view of the vault
@@ -96,9 +130,14 @@ permissions are trusted. WhyKit never asks for elevated rights.
 - **Unreadable labels fail closed.** A note whose front matter does not parse,
   or that spells the key differently (`Sensitivity:`), is treated as above
   every ceiling. A note with valid front matter and no label is `internal`.
-- **Evidence follows the register's label.** Register rows, counts and `E-NNN`
-  completions are shown only when `00-context/evidence-register.md` itself is
-  within the ceiling.
+- **Evidence has a register floor and optional row labels.** A row can tighten,
+  never lower, `00-context/evidence-register.md`'s label. Retired sources inherit
+  their replacement's ceiling; invalid explicit labels and duplicate IDs are
+  withheld. MCP readers share one captured filtered register for metadata,
+  counts, traces, completions and resources. Raw labeled registers are withheld;
+  public Explorer exports contain only permitted rows and withhold dependent
+  notes. Local full-access CLI/private exports retain all data. Labels are
+  editable policy data, not authentication or encryption.
 - **Cursors cannot count hidden rows.** They are bound to the call, the
   ceiling and the visible ordering with a per-process key.
 - **No writes.** No tool modifies the vault, runs Git or reaches the network.
@@ -141,16 +180,24 @@ permissions are trusted. WhyKit never asks for elevated rights.
 - **The secret scan is a safety net.** It catches common credential shapes in
   text files, not encoded or novel secrets, and does not inspect binary files.
   Use your Git host's secret scanning as well.
-- **A pull request can change its own policy.** `whykit check` reads
-  `whykit.toml` from the checked-out change. A pull request that edits it can
-  relax its own gate (switch a profile's history check off, demote a rule)
-  in the same change. Security-relevant overrides are printed with every run
-  and need a written reason, but they are not refused. Protect `whykit.toml`
-  with a CODEOWNERS entry and required review, as you would a CI workflow.
-- **Explorer exports include every label.** `npm run index` writes confidential
-  and restricted notes into the static build and only warns. Do not publish an
-  Explorer build of a vault that is not public. The Explorer server binds to
-  loopback unless you pass `--allow-sensitive-network`.
+- **The base revision must be trusted externally.** With `--base`, `whykit check`
+  evaluates current vault content under both the base and current policies.
+  Disabling a check or removing a rule in the change cannot bypass the base
+  policy. Without `--base`, only the current policy applies and the report says
+  history is unchecked. Pin the protected base SHA in trusted CI; a contributor
+  who controls that input, the executable or the workflow still controls the
+  gate. CODEOWNERS needs enforced review to protect future policy changes.
+- **Public exports use a conservative closure.** `explorer-index` and npm builds
+  default to public notes. Non-public, unreadable and unknown labels are withheld;
+  notes referring to withheld records, their identifiers or private titles are
+  withheld as whole notes, including indirect references and code examples.
+  Local attachments have no labels and their referring notes are withheld too.
+  Ledger rows, findings, search bodies and counts follow the surviving notes.
+  This can withhold a public hub that links to a private note. It does not infer
+  secrets from prose deliberately copied into a public note; labels and the
+  secret scan still need human review. `--private` / `WHYKIT_EXPLORER_PRIVATE=1`
+  includes every label and must never be published. `serve` explicitly uses this
+  private mode with the existing loopback/network guard.
 - **Bodies are untrusted data for agents.** The MCP server marks returned
   content as untrusted, but it cannot stop an agent from following
   instructions written in a note.
@@ -174,3 +221,43 @@ permissions are trusted. WhyKit never asks for elevated rights.
 - `tests/test_adversarial_inputs.py` pins each crash, hang and injection the
   harness or review found, and `tests/test_mcp_security.py` the sensitivity
   and transport rules above.
+
+## Claim-bound material
+
+Claim support is a deterministic view of locally captured, human-attributed relationships. It is not truth or authenticated reviewer identity. [Claim integrity and privacy](claims.md#integrity-and-privacy) describes receipts, trusted-base history, source/snapshot floors and whole-record withholding. Missing and stale counterevidence remain uncertainty; they are never silently converted into support. MCP retains its read-only boundary.
+
+## Transaction reads and journal lifecycle
+
+Complete CLI reports, Explorer projections and MCP requests hold a shared
+advisory lock against WhyKit's governed writers. A pristine vault is checked for
+its first writer before returning a report; a racing request fails and can be
+retried. Readers do not create a mutation lock or replay interrupted writes.
+READY journals left by a crash block reads until `whykit recover` completes.
+Nested reads reuse the lock; upgrading a read lock to a write lock is refused.
+External editors that ignore the lock remain outside this guarantee.
+
+Lock ownership and request caches are bound to the process, thread and async
+task. Copied contexts cannot reuse a released lock, expired evidence register
+or filtered MCP view. Captured views expire when their own scope ends, even
+inside a longer path-cache scope. Fresh requests revalidate filesystem paths
+and sensitivity before answering; LSP no longer retains path resolutions across
+requests.
+
+A durable COMMITTED journal is renamed to a garbage-collection directory before
+any staged bytes or markers are deleted. Recovery can therefore resume cleanup
+without replaying already committed targets, even if cleanup lost its markers.
+Pre-READY journals never wrote targets and are collected under the writer lock
+only after 24 hours. Journal state is not an approval audit log; the Markdown
+review log and Git history remain the persistent ledger.
+
+The private `explorer-index --publication-preview` contains withheld paths and
+reasons. It is separate from the public index and must remain private. Its hash
+binds captured Markdown, config and claim snapshots; it is not a human signature,
+authority attestation or proof that deliberately public prose contains no secrets.
+
+CLI read scopes include policy selection and output formatting. Large rendered
+reports spill into a private temporary file outside the vault and are emitted
+only when the read scope succeeds, preserving UTF-8 machine output. Graph and
+snapshot `--output` operations use the writer lock; exports refuse Git state,
+transaction state, mutation locks and parse-cache paths. Explicit snapshot files
+such as `.whykit/snapshot.json` remain supported.

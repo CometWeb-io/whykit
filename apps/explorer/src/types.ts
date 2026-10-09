@@ -1,6 +1,26 @@
+export type ClaimVerificationStatus = "supported" | "disputed" | "unsupported" | "unknown";
+export interface ClaimRelation {
+  evidence_id: string; relation: "supports" | "contradicts"; snapshot: string; source_snapshot_hash: string;
+  fragment: string; observed_at: string; rationale: string; usable: boolean; reasons: string[];
+  fragment_text?: string; fragment_truncated?: boolean;
+}
+
 export type DocStatus = "template" | "draft" | "in_review" | "approved" | "superseded" | "archived";
 
 export interface VaultDoc {
+  claimId?: string;
+  claimIds?: string[];
+  statement?: string;
+  scope?: string;
+  validFrom?: string;
+  validTo?: string | null;
+  lastVerified?: string | null;
+  verificationStatus?: ClaimVerificationStatus;
+  verificationReasons?: string[];
+  claimRelations?: ClaimRelation[];
+  historyReconstructed?: false;
+  assessmentAsOf?: string;
+  requiresReview?: boolean;
   id: string;
   title: string;
   aliases: string[];
@@ -44,6 +64,7 @@ export interface EvidenceRow {
   accessed: string;
   location: string;
   claims: string;
+  sensitivity?: string;
   retiredOn?: string;
   why?: string;
   replacedBy?: string | null;
@@ -61,6 +82,7 @@ export interface ReviewRow {
 }
 export interface Finding { path: string; line?: number | null; level: "error" | "warning"; code: string; message: string; }
 export interface VaultIndex {
+  exportMode?: "public" | "private";
   /** Machine contract version (see docs/automation.md); absent in indexes built by older releases. */
   contract_version?: number;
   generatedAt: string;

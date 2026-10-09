@@ -21,7 +21,7 @@ const PYTHON = process.env.PYTHON || "python3";
 const OUT = resolve(APP, "e2e/.build");
 
 function run(cmd, args, env = {}) {
-  execFileSync(cmd, args, { cwd: APP, stdio: "inherit", env: { ...process.env, ...env } });
+  execFileSync(cmd, args, { cwd: APP, stdio: "inherit", env: { ...process.env, WHYKIT_EXPLORER_PRIVATE: "1", ...env } });
 }
 
 function build(name, vaultDir) {
@@ -39,11 +39,35 @@ function buildSynthetic(name, vaultDir) {
     "from synthetic_vault import AS_OF, generate",
     "from whykit.explorer_index import build_explorer_index",
     `root = generate(Path(${JSON.stringify(vaultDir)}), ${SYNTHETIC_NOTES}).resolve()`,
-    "payload = build_explorer_index(root, today=dt.date.fromisoformat(AS_OF))",
+    "from whykit.scaffold import _with_evidence_sensitivity",
+    "register = root / '00-context/evidence-register.md'",
+    "text = _with_evidence_sensitivity(register.read_text(encoding='utf-8'), 'active', 'internal')",
+    "text = '\\n'.join(line.rsplit('internal', 1)[0] + 'restricted |' if line.startswith('| E-001 |') else line for line in text.splitlines()) + '\\n'",
+    "register.write_text(text, encoding='utf-8')",
+    "payload = build_explorer_index(root, today=dt.date.fromisoformat(AS_OF), private=True)",
     `Path(${JSON.stringify(join(vaultDir, "..", "synthetic-index.json"))}).write_text(json.dumps(payload), encoding='utf-8')`,
   ].join("\n");
   run(PYTHON, ["-c", code]);
   run(process.execPath, ["scripts/build-vault-index.mjs", "--from", join(vaultDir, "..", "synthetic-index.json")]);
+  run(process.execPath, [resolve(APP, "node_modules/vite/bin/vite.js"), "build", "--outDir", join(OUT, name), "--emptyOutDir"]);
+}
+
+function buildClaims(name, vaultDir, hidden = false) {
+  const code = [
+    "import json, sys",
+    "from pathlib import Path",
+    `sys.path[:0] = [${JSON.stringify(resolve(REPO, "src"))}, ${JSON.stringify(resolve(REPO, "tests"))}]`,
+    "from _claims import TODAY, approved_claim_vault",
+    "from whykit.explorer_index import build_explorer_index",
+    "from whykit.scaffold import _frontmatter_replace",
+    `root = Path(${JSON.stringify(vaultDir)}).resolve()`,
+    "cid, cpath, did, dpath = approved_claim_vault(root)",
+    ...(hidden ? ["cpath.write_text(_frontmatter_replace(cpath.read_text(encoding='utf-8'), 'sensitivity', 'restricted'), encoding='utf-8')"] : []),
+    "payload = build_explorer_index(root, today=TODAY)",
+    `Path(${JSON.stringify(join(vaultDir, "..", name + "-index.json"))}).write_text(json.dumps(payload), encoding='utf-8')`,
+  ].join("\n");
+  run(PYTHON, ["-c", code]);
+  run(process.execPath, ["scripts/build-vault-index.mjs", "--from", join(vaultDir, "..", name + "-index.json")]);
   run(process.execPath, [resolve(APP, "node_modules/vite/bin/vite.js"), "build", "--outDir", join(OUT, name), "--emptyOutDir"]);
 }
 
@@ -52,6 +76,8 @@ try {
   const fresh = join(scratch, "fresh");
   run(PYTHON, [resolve(REPO, "scripts/whykit.py"), "init", "--minimal", fresh]);
   build("empty", fresh);
+  buildClaims("claims", join(scratch, "claims"));
+  buildClaims("claims-hidden", join(scratch, "claims-hidden"), true);
   buildSynthetic("synthetic", join(scratch, "synthetic"));
   build("northline", resolve(REPO, "examples/northline"));
   // Same index as the northline site, which is still in src/generated.

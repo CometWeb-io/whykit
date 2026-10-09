@@ -14,6 +14,35 @@
     "candidates"
   ],
   "properties": {
+    "preservation": {
+      "type": "object",
+      "required": ["target", "passed", "files", "scope"],
+      "properties": {
+        "target": {"type": "string"},
+        "passed": {"type": "boolean"},
+        "scope": {"type": "string"},
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "source_sha256", "target_sha256", "unchanged", "missing_wikilinks", "missing_ids", "review_history", "issues"],
+            "properties": {
+              "path": {"type": "string"},
+              "source_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+              "target_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+              "unchanged": {"type": "boolean"},
+              "missing_wikilinks": {"type": "array", "items": {"type": "string"}},
+              "missing_ids": {"type": "array", "items": {"type": "string", "pattern": "^(?:D|E)-[0-9]{3,}$"}},
+              "review_history": {"enum": ["not_checked", "not_present", "unchanged", "unrecognized", "changed", "preserved"]},
+              "issues": {
+                "type": "array",
+                "items": {"enum": ["unreadable_source", "source_changed", "unsafe_target", "missing_file", "wikilinks_lost", "ids_lost", "decision_id_changed", "source_ids_lost", "history_unrecognized", "history_changed", "unreadable_file"]}
+              }
+            }
+          }
+        }
+      }
+    },
     "contract_version": {
       "const": 1
     },

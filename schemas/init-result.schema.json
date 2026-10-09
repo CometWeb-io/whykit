@@ -24,6 +24,7 @@
         "full"
       ]
     },
+    "profile": {"enum": ["minimal", "gtm"]},
     "preserved": {
       "type": "integer",
       "minimum": 0

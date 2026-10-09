@@ -134,6 +134,36 @@ class TargetValidationTests(unittest.TestCase):
 
 
 class QueryToolTests(VaultToolsTestCase):
+    def test_metadata_change_invalidates_a_cursor_even_when_order_is_unchanged(self) -> None:
+        first, failed = self.tools.call("query", {"limit": 1})
+        self.assertFalse(failed)
+        self.assertIsNotNone(first["next_cursor"])
+        path = self.vault / "notes/public-note.md"
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("owner: Tester", text)
+        path.write_text(text.replace("owner: Tester", "owner: Different reviewer"), encoding="utf-8")
+        result, failed = self.tools.call("query", {"limit": 1, "cursor": first["next_cursor"]})
+        self.assertTrue(failed)
+        self.assertEqual(result["error"]["code"], "invalid_cursor")
+
+    def test_only_the_selected_page_is_materialized(self) -> None:
+        from whykit import query
+
+        with patch.object(query, "_summary", wraps=query._summary) as summaries:
+            first = self.tools.query(limit=1)
+            self.assertGreater(first["total"], 1)
+            self.assertEqual(summaries.call_count, 1)
+            summaries.reset_mock()
+            second = self.tools.query(limit=1, cursor=first["next_cursor"])
+            self.assertEqual(summaries.call_count, 1)
+            self.assertNotEqual(first["results"][0]["path"], second["results"][0]["path"])
+            summaries.reset_mock()
+            self.assertEqual(self.tools.query(limit=0)["returned"], 0)
+            self.assertEqual(summaries.call_count, 0)
+            with self.assertRaises(ToolFailure):
+                self.tools.query(limit=1, cursor="invalid-cursor")
+            self.assertEqual(summaries.call_count, 0)
+
     def test_query_returns_only_records_within_the_ceiling(self) -> None:
         report = self.tools.query("needle-alpha", 50)
         paths = {item["path"] for item in report["results"]}

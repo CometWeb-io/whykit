@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CometWeb-io/whykit/blob/main/schemas/publication-preview.schema.json",
+  "title": "Private WhyKit publication preview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "format",
+    "private",
+    "source_manifest_sha256",
+    "publication_ready",
+    "total_docs",
+    "public_docs",
+    "withheld"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "format": {
+      "const": "whykit.publication-preview/v1"
+    },
+    "private": {
+      "const": true
+    },
+    "source_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "publication_ready": {
+      "type": "boolean"
+    },
+    "total_docs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "public_docs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "withheld": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "reasons"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          }
+        }
+      }
+    }
+  }
+}

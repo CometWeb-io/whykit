@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/claim-receipt.schema.json",
+  "title": "WhyKit claim review receipt",
+  "type": "object",
+  "required": [
+    "format",
+    "claim_id",
+    "record_sha256",
+    "relations",
+    "previous_review",
+    "next_review"
+  ],
+  "properties": {
+    "format": {
+      "const": "claim-receipt/v1"
+    },
+    "claim_id": {
+      "type": "string",
+      "pattern": "^C-[0-9]{3,}$"
+    },
+    "record_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "evidence_id",
+          "evidence_sha256",
+          "source_snapshot_hash",
+          "fragment",
+          "relation"
+        ],
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "pattern": "^E-[0-9]{3,}$"
+          },
+          "evidence_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "source_snapshot_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "fragment": {
+            "type": "string",
+            "pattern": "^lines:[1-9][0-9]*-[1-9][0-9]*$"
+          },
+          "relation": {
+            "enum": [
+              "supports",
+              "contradicts"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "uniqueItems": true
+    },
+    "previous_review": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "next_review": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/review-event-v2.schema.json",
+  "title": "WhyKit opt-in review event",
+  "type": "object",
+  "required": [
+    "date",
+    "target",
+    "reviewer",
+    "outcome"
+  ],
+  "properties": {
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reviewer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "outcome": {
+      "enum": [
+        "confirmed",
+        "update-required",
+        "supersede-required",
+        "archived",
+        "approved"
+      ]
+    },
+    "previous_review": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "next_review": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

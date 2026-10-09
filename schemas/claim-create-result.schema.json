@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CometWeb-io/whykit/raw/main/schemas/claim-create-result.schema.json",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "kind",
+    "id",
+    "path"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "kind": {
+      "const": "claim"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^C-[0-9]{3,}$"
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^00-context/claims/c-[0-9]{3,}-.+\\.md$"
+    }
+  },
+  "additionalProperties": false
+}

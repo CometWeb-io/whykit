@@ -43,14 +43,16 @@ and obtain maintainer approval before proceeding.
 After the repository is public, enable private vulnerability reporting and
 configure a `main` ruleset: require pull requests, block force-pushes and branch
 deletion, and require the checks from a successful run of the release
-candidate's CI workflow. Keep the optional
-Explorer check non-blocking. Verify the saved ruleset in GitHub; do not infer
+candidate's CI workflow. Require the Explorer and Explorer end-to-end checks.
+Verify the saved ruleset in GitHub; do not infer
 that protection is active from this checklist.
 
 Before changing visibility, confirm that the README and usage guide contain no
 private-preview or access-required notice. Until the first PyPI release, keep
 the source-checkout install path and do not recommend a package-index install.
-Do not claim real-vault use before that trial has happened.
+Do not claim real-vault use before that trial has happened. Keep a local
+[source-bound dogfood record](../docs/dogfood.md) without copying operating
+notes into this repository.
 
 ## Verify a release candidate
 
@@ -62,7 +64,8 @@ Run the checks in `CONTRIBUTING.md` from a clean checkout. The CI workflow also
 tests Python 3.11–3.14, Windows portability, the optional MCP client, wheel and
 source-distribution installs, example-vault policies, and secret scanning. The
 release workflow reuses those gates against the exact tag and publishes only if
-every required gate passes. Explorer remains optional and non-blocking.
+every required gate passes. Explorer build, renderer, end-to-end and
+accessibility checks also block the product release.
 
 Before tagging, confirm all of the following:
 

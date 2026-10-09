@@ -5,12 +5,14 @@ documents can also cite evidence and decisions can supersede one another.
 """
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
-import json
 import re
 from collections.abc import Iterator
 from pathlib import Path
 
+from .claim_readers import claim_reader
 from .contract import emit_error, vault_not_found
 from .lint import (
     path_cache,
@@ -22,7 +24,7 @@ from .lint import (
     rel,
 )
 from .vault_index import VaultIndex
-from .console import emit_machine
+from .console import emit_machine, emit_json
 
 
 def document_node(note, node_id: str) -> dict:
@@ -49,7 +51,9 @@ def wikilink_resolutions(note, vault_index: VaultIndex) -> Iterator[tuple[str, P
         yield target, resolved, ambiguous
 
 
+@consistent_read
 @path_cache()
+@claim_reader("graph")
 def build_graph(
     root: Path,
     *,
@@ -280,20 +284,17 @@ def main(argv: list[str] | None = None) -> int:
     if root is None or not is_vault_root(root):
         return vault_not_found(args.root, json_mode=args.format == "json")
     graph = build_graph(root, canonical_only=args.canonical_only)
+    json_payload = None
     if args.format == "dot":
         rendered = as_dot(graph)
-        text_mode = True
     elif args.format == "mermaid":
         rendered = as_mermaid(graph)
-        text_mode = True
     elif args.format == "obsidian":
-        rendered = json.dumps(as_obsidian(graph), ensure_ascii=False, indent=2)
-        text_mode = True
+        json_payload = as_obsidian(graph)
     else:
-        rendered = json.dumps(graph, ensure_ascii=False, indent=2)
-        text_mode = True
+        json_payload = graph
     if args.output:
-        from .io import atomic_write_text, safe_vault_target
+        from .io import atomic_write_text, atomic_write_json, safe_export_target
         target = Path(args.output).expanduser()
         try:
             if target.is_absolute():
@@ -303,15 +304,21 @@ def main(argv: list[str] | None = None) -> int:
                     relative = target.relative_to(requested_root)
             else:
                 relative = target
-            target = safe_vault_target(root, relative)
+            target = safe_export_target(root, relative)
         except (OSError, RuntimeError, ValueError) as exc:
             return emit_error(
                 "unsafe_path",
                 f"--output must be a safe path inside the vault: {exc}",
                 json_mode=args.format == "json",
             )
-        atomic_write_text(target, rendered + ("\n" if text_mode else ""))
+        if json_payload is not None:
+            atomic_write_json(target, json_payload)
+        else:
+            atomic_write_text(target, rendered + "\n")
         print(f"wrote {rel(root, target)}")
     else:
-        emit_machine(rendered)
+        if json_payload is not None:
+            emit_json(json_payload)
+        else:
+            emit_machine(rendered)
     return 0

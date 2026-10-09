@@ -1,11 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ChevronRight, X } from "lucide-react";
-import { docs, linksFor, backlinksFor } from "../lib/vault.ts";
+import { docs, linksFor, backlinksFor, resolveDoc } from "../lib/vault.ts";
 import { hrefFor, type Params } from "../lib/route.ts";
 import { layoutGraph, moveFocus, neighbourhood, typeahead, NODE_H, NODE_W, LINE_H, type GraphNode } from "../lib/graph.ts";
 import { canvasMeasure, fitLabel, type FittedLabel } from "../lib/label.ts";
 import { go, setParams } from "../nav.ts";
-import { Empty, FacetSelect, StatusBadge } from "../ui.tsx";
+import { Empty, FacetSelect, StatusBadge, ClaimAssessment } from "../ui.tsx";
 
 // Must match `.graph-node text` in styles.css: labels are measured in the font they are drawn in.
 const LABEL_FONT = "11px ui-sans-serif, system-ui, sans-serif";
@@ -28,7 +28,7 @@ const GraphNodeView = memo(function GraphNodeView({ node, label, links, state, s
   const cls = ["graph-node", state === "normal" ? "" : state, selected ? "selected" : ""].filter(Boolean).join(" ");
   // Keyboard handling lives on the listbox (see onGraphKey); options only report focus.
   return <g transform={`translate(${x},${y})`} role="option" aria-selected={selected} tabIndex={tabbable ? 0 : -1} data-id={d.id}
-    aria-label={`${d.title}, ${links} link${links === 1 ? "" : "s"}`}
+    aria-label={`${d.title}${d.verificationStatus ? `, ${d.verificationStatus}` : ""}, ${links} link${links === 1 ? "" : "s"}`}
     onMouseEnter={() => onHover(d.id)} onMouseLeave={() => onHover(null)} onFocus={() => onFocusNode(d.id)} onBlur={() => onHover(null)}
     onClick={() => onSelect(d.id)} onDoubleClick={() => go("doc", d.id)} className={cls}>
     <title>{`${d.title}\n${d.id} · ${links} link${links === 1 ? "" : "s"}`}</title>
@@ -116,7 +116,7 @@ export function GraphPage({ params }: { params: Params }) {
   const cx = NODE_W / 2, cy = NODE_H / 2;
   const baseEdges = useMemo(() => <g className="edges" aria-hidden="true">{layout.edges.map((e, i) => {
     const a = byId.get(e.from), b = byId.get(e.to);
-    return a && b ? <line key={i} x1={a.x + cx} y1={a.y + cy} x2={b.x + cx} y2={b.y + cy} className="edge"/> : null;
+    return a && b ? <line key={i} x1={a.x + cx} y1={a.y + cy} x2={b.x + cx} y2={b.y + cy} className="edge"><title>{e.type === "claim" ? "Claim dependency" : "Document link"}</title></line> : null;
   })}</g>, [layout, byId, cx, cy]);
   const activeEdges = active ? layout.edges.filter(e => e.from === active || e.to === active) : [];
 
@@ -139,6 +139,7 @@ export function GraphPage({ params }: { params: Params }) {
         {focusDoc ? <>
           <div className="inspector-head"><StatusBadge status={focusDoc.status}/><span className="mono small muted">{focusDoc.id}</span>{selected ? <button className="text-button" onClick={() => setParams({ node: null })}><X size={14} aria-hidden="true"/>Clear selection</button> : null}</div>
           <strong className="inspector-title">{focusDoc.title}</strong>
+          <ClaimAssessment claims={focusDoc.claimId ? [focusDoc] : (focusDoc.claimIds ?? []).flatMap(cid => { const c = resolveDoc(cid); return c ? [c] : []; })}/>
           <span className="muted small">{focusDoc.owner || "No owner"} · links to {linksFor(focusDoc).length} · referenced by {backlinksFor(focusDoc).length}</span>
           <a className="text-button" href={hrefFor("doc", focusDoc.id)}>Open note <ChevronRight size={14} aria-hidden="true"/></a>
         </> : <span className="muted small">Hover, focus or select a note to see its details. The selection is kept in the page address, so it survives a reload and can be shared.</span>}

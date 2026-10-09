@@ -134,6 +134,13 @@ block. See `schemas/` for machine-readable contracts.
 
 ## Lint modes
 
+`whykit check --base <protected-ref>` evaluates the current vault under both
+the base policy and the current policy. A rule removed or disabled by the
+change still applies from the base. CI must choose that ref from a trusted
+source; neither a configurable ref nor the current checkout authenticates it.
+The JSON report includes the separate `baseline` result and `history_checked`.
+Without a base, optional history is explicitly reported as SKIP / unchecked.
+
 ```bash
 whykit lint                     # errors fail; warnings are reported
 whykit lint --strict            # warnings fail too
@@ -162,7 +169,7 @@ Two `[defaults]` keys drive the review cycle:
 
 | Key | Used by |
 |---|---|
-| `decision_review_days` | `new decision --status approved` without `--review-by`, and a `confirmed` review without `--next-review`, set `review_by` this many days ahead. |
+| `decision_review_days` | `review approve` without `--next-review`, and a `confirmed` review without `--next-review`, set `review_by` this many days ahead. |
 | `status_due_days` | `whykit status` and `whykit review list` show reviews due within this many days unless you pass `--due-days`. |
 
 ```bash

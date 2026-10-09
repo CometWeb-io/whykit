@@ -92,11 +92,27 @@ function splitRow(line: string): string[] {
   const cells: string[] = [];
   let buf = "";
   let depth = 0;
+  const lastClose = trimmed.lastIndexOf("]]");
   for (let i = 0; i < trimmed.length; i++) {
     const ch = trimmed[i]!;
     const next = trimmed[i + 1];
-    if (ch === "[" && next === "[") depth += 1;
-    if (ch === "]" && next === "]") depth = Math.max(0, depth - 1);
+    if (ch === "\\" && next === "|") {
+      buf += "|";
+      i += 1;
+      continue;
+    }
+    if (ch === "[" && next === "[" && lastClose >= i + 2) {
+      depth += 1;
+      buf += "[[";
+      i += 1;
+      continue;
+    }
+    if (ch === "]" && next === "]" && depth) {
+      depth -= 1;
+      buf += "]]";
+      i += 1;
+      continue;
+    }
     if (ch === "|" && depth === 0) {
       cells.push(buf.trim());
       buf = "";
@@ -104,7 +120,7 @@ function splitRow(line: string): string[] {
       buf += ch;
     }
   }
-  if (buf.length || cells.length) cells.push(buf.trim());
+  cells.push(buf.trim());
   return cells;
 }
 

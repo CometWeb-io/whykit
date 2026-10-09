@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/review-queue-v2.schema.json",
+  "title": "WhyKit review queue (claims opt-in v2)",
+  "description": "Output of `whykit review list --json`.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "due_days",
+    "count",
+    "reviews"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 2
+    },
+    "due_days": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "title",
+          "owner",
+          "review_by",
+          "days",
+          "state"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "review_by": {
+            "type": "string"
+          },
+          "days": {
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "overdue",
+              "due",
+              "requires_review"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

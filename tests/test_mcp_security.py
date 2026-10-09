@@ -180,6 +180,7 @@ class McpSensitivityTests(unittest.TestCase):
             def __init__(self, name: str, **kwargs: object) -> None:
                 self.name = name
                 self.instructions = kwargs.get("instructions")
+                self.middleware = []
 
             def tool(self, **kwargs: object):
                 def register(function):
@@ -218,11 +219,17 @@ class McpSensitivityTests(unittest.TestCase):
         server_package = types.ModuleType("mcp.server")
         server_package.__path__ = []  # type: ignore[attr-defined]
         server_package.MCPServer = SDKServer  # type: ignore[attr-defined]
+        runner = types.ModuleType('mcp.server.runner')
+        runner.serve_dual_era_loop = lambda: None
+        stdio = types.ModuleType('mcp.server.stdio')
+        for name in ('_claim_fd', '_open_stdin_diversion', '_open_stdout_diversion'):
+            setattr(stdio, name, lambda: None)
         mcp_types = types.ModuleType("mcp_types")
         for name in ("CallToolResult", "TextContent", "ToolAnnotations", "Completion", "ListResourcesResult", "Resource"):
             setattr(mcp_types, name, type(name, (Model,), {}))
         mcp_types.INTERNAL_ERROR = -32603  # type: ignore[attr-defined]
         mcp_types.INVALID_PARAMS = -32602  # type: ignore[attr-defined]
+        mcp_types.jsonrpc_message_adapter = types.SimpleNamespace(validate_python=lambda value, **kwargs: value)  # type: ignore[attr-defined]
         exceptions = types.ModuleType("mcp.server.mcpserver.exceptions")
         for name in ("ResourceError", "ResourceNotFoundError", "ToolError"):
             setattr(exceptions, name, type(name, (Exception,), {}))
@@ -246,6 +253,8 @@ class McpSensitivityTests(unittest.TestCase):
         with patch.dict(sys.modules, {
             "mcp": package,
             "mcp.server": server_package,
+            "mcp.server.runner": runner,
+            "mcp.server.stdio": stdio,
             "mcp.server.mcpserver": types.ModuleType("mcp.server.mcpserver"),
             "mcp.server.mcpserver.exceptions": exceptions,
             "mcp.server.subscriptions": subscriptions,
@@ -269,6 +278,7 @@ class McpSensitivityTests(unittest.TestCase):
         self.assertEqual(set(registered_resources), {"whykit://decisions", "whykit://record/{+target}"})
         self.assertEqual(set(registered_prompts), {"summarize_decision", "review_evidence_gaps"})
         self.assertEqual(len(registered_completions), 1)
+        self.assertEqual(len(server.middleware), 1)
         for name, (_, options) in registered_tools.items():
             with self.subTest(tool=name):
                 annotations = options["annotations"]

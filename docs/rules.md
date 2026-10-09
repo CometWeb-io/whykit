@@ -12,6 +12,14 @@ the test suite fails if it drifts.
 <!-- rules:start -->
 | Code | Level | What it means | Default fix |
 |---|---|---|---|
+| <a name="claim.invalid_metadata"></a>`claim.invalid_metadata` | error | Claim metadata/path is malformed. | Use the explicit claim format and remove writable verification_status. |
+| <a name="claim.requires_opt_in"></a>`claim.requires_opt_in` | error | Claim records or references need explicit opt-in. | Preview and apply claims enable, or remove unaccepted claim references deliberately. |
+| <a name="claim.duplicate_id"></a>`claim.duplicate_id` | error | Claim identifier is duplicated. | Allocate one historical identifier per claim record. |
+| <a name="claim.invalid_relation"></a>`claim.invalid_relation` | error | Evidence relation table is malformed. | Use the exact columns, unique E/fragment relationships and meaningful rationale. |
+| <a name="claim.invalid_snapshot"></a>`claim.invalid_snapshot` | error | Local claim snapshot is invalid. | Restore a regular UTF-8 snapshot with its normalized hash; accepted snapshots are immutable. |
+| <a name="claim.invalid_fragment"></a>`claim.invalid_fragment` | error | Claim fragment is invalid. | Use an existing inclusive lines:N-M range. |
+| <a name="claim.capture_changed"></a>`claim.capture_changed` | error | Claim dependencies changed while reading. | Retry from unchanged captured inputs; never accept stale previews. |
+| <a name="claim.invalid_receipt"></a>`claim.invalid_receipt` | error | Claim review log/receipt is malformed. | Restore append-only review history and perform a fresh reviewed approval. |
 | <a name="agents.absent"></a>`agents.absent` | warning | No AGENTS.md contract is present. | Add AGENTS.md and state what agents may read, write, commit and escalate. |
 | <a name="agents.unconfigured"></a>`agents.unconfigured` | warning | AGENTS.md still contains an unanswered TODO. | Replace every contract TODO with an explicit operating rule. |
 | <a name="canonical.owner"></a>`canonical.owner` | warning | A canonical document has no real owner. | Set owner to a person or accountable role. |
@@ -25,6 +33,7 @@ the test suite fails if it drifts.
 | <a name="decision.id_missing"></a>`decision.id_missing` | error | A decision record has no D-NNN identifier. | Add decision_id and a matching d-NNN-*.md filename. |
 | <a name="decision.placeholder"></a>`decision.placeholder` | warning | A draft, in-review or approved decision record still holds template placeholder text. | Replace the prompt with the real context, decision and rationale, fill the alternatives table or say there was one option, and list the consequences. |
 | <a name="decision.review_missing"></a>`decision.review_missing` | warning | An approved decision has no review_by date. | Set a realistic review_by date. |
+| <a name="decision.unreviewed"></a>`decision.unreviewed` | warning | An approved decision's provenance denies human review. | Keep the record draft or in_review until an authorized person reviews it; changing a boolean is not authentication. |
 | <a name="decision.superseded_by_missing"></a>`decision.superseded_by_missing` | warning | A superseded decision has no newer record pointing back to it. | Create or fix the newer decision's supersedes field. |
 | <a name="decision.superseded_by_format"></a>`decision.superseded_by_format` | warning | superseded_by is not a D-NNN identifier. | Use a D-NNN identifier or remove the convenience field. |
 | <a name="decision.superseded_by_mismatch"></a>`decision.superseded_by_mismatch` | warning | superseded_by disagrees with the approved reverse supersedes edge. | Align superseded_by with the approved record whose supersedes field points here. |
@@ -45,6 +54,7 @@ the test suite fails if it drifts.
 | <a name="delivery_status.invalid"></a>`delivery_status.invalid` | error | delivery_status has an unsupported value. | Use draft, ready_to_send or sent. |
 | <a name="delivery_status.sent_at"></a>`delivery_status.sent_at` | error | A sent document has no sent_at timestamp/date field. | Record sent_at when setting delivery_status: sent. |
 | <a name="evidence.date"></a>`evidence.date` | error | An evidence date or accessed date is invalid. | Use real YYYY-MM-DD dates. |
+| <a name="evidence.sensitivity"></a>`evidence.sensitivity` | warning | An explicit evidence Sensitivity cell is empty or invalid. | Use public, internal, confidential or restricted; omit the column only for legacy inheritance. |
 | <a name="evidence.access_missing"></a>`evidence.access_missing` | warning | An active source covered by an access-age policy has no Accessed date. | Record when the source was last accessed, or remove the policy for historical source types. |
 | <a name="evidence.access_future"></a>`evidence.access_future` | warning | An active source has an Accessed date after the lint date. | Correct the Accessed date or run lint with the intended --today date. |
 | <a name="evidence.access_stale"></a>`evidence.access_stale` | warning | An active source has not been accessed within its configured age window. | Revisit the source and update Accessed after review; do not treat access alone as claim approval. |
@@ -106,6 +116,7 @@ override is printed with each `lint` and `check` run, listed in the JSON
 `overrides` array with the findings it suppressed, kept in SARIF as a
 suppressed result, and annotated as a `::notice` in GitHub format:
 
+- `decision.unreviewed`
 - `markdown_link.outside`
 - `secret.detected`
 - `secret.scan_non_utf8`

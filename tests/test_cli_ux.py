@@ -288,7 +288,7 @@ t whykit lint --today 2026 ""
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.splitlines()
         self.assertEqual(lines[0], "lint")
-        self.assertEqual(lines[1].split(), ["decision", "evidence", "note"])
+        self.assertEqual(lines[1].split(), ["claim", "decision", "evidence", "note"])
         self.assertIn("in_review", lines[2].split())
         self.assertEqual(lines[3], "dot")
         self.assertEqual(lines[4].split(), ["bash", "zsh", "fish"])

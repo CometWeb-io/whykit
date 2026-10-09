@@ -55,16 +55,22 @@ class OfflineTests(unittest.TestCase):
             vault, docs = base / "vault", base / "docs"
             docs.mkdir()
             (docs / "note.md").write_text("# Imported\n\nSome words.\n", encoding="utf-8")
+            shutil.copytree(docs, base / "migrated")
             r = str(vault)
             steps: list[tuple[str, ...]] = [
                 ("init", r),
+                ("claims", "enable", "--root", r),
+                ("claims", "disable", "--root", r),
+                ("init", str(base / "other")),
                 ("new", "--root", r, "evidence", "--source", "Example export", "--type", "dataset",
                  "--location", "https://example.com/export.csv", "--claims", "Example claim"),
                 ("new", "--root", r, "decision", "Example decision", "--owner", "Team",
-                 "--status", "approved", "--source", "E-001"),
+                 "--status", "draft", "--source", "E-001"),
                 ("new", "--root", r, "note", "Example note", "--workstream", "notes", "--link-from", "Home.md"),
                 ("lint", "--root", r),
                 ("status", "--root", r),
+                ("recover", "--root", r, "--json"),
+                ("workspace", r, str(base / "other")),
                 ("graph", "--root", r),
                 ("backlinks", "D-001", "--root", r),
                 ("impact", "E-001", "--root", r),
@@ -81,6 +87,7 @@ class OfflineTests(unittest.TestCase):
                 ("rules",),
                 ("rules", "agents.unconfigured"),
                 ("adopt", str(docs), "--into", r),
+                ("adopt", str(docs), "--into", r, "--compare", str(base / "migrated")),
                 ("explorer-index", "--root", r),
                 ("completion", "bash"),
                 ("completion", "zsh"),
@@ -89,6 +96,14 @@ class OfflineTests(unittest.TestCase):
             for argv in steps:
                 with self.subTest(command=argv[0]):
                     self.assertEqual(self._run(*argv), 0, argv)
+                    if argv[:4] == ("new", "--root", r, "decision"):
+                        from _vaults import fill_decision
+                        from whykit.review import approve_decision
+                        fill_decision(next((vault / "06-decisions").glob("d-001-*.md")))
+                        with _no_network():
+                            plan = approve_decision(vault, "D-001", reviewer="Team")
+                            approve_decision(vault, "D-001", reviewer="Team", write=True,
+                                             expected_sha256=plan["expected_sha256"])
 
             subprocess.run(["git", "init", "-q", r], check=True, capture_output=True)
             subprocess.run(["git", "-C", r, "add", "-A"], check=True, capture_output=True)
@@ -145,10 +160,10 @@ class OfflineTests(unittest.TestCase):
         parser = build_parser()
         subparsers = next(a for a in parser._actions if a.dest == "command")
         covered = {
-            "init", "new", "lint", "status", "graph", "backlinks", "impact", "query", "context",
+            "init", "new", "lint", "status", "workspace", "graph", "backlinks", "impact", "query", "context",
             "pack", "review", "evidence", "snapshot", "verify-snapshot", "policy", "rules",
-            "adopt", "explorer-index", "history", "check", "install-hooks", "doctor",
-            "trace", "completion", "diff", "lsp",
+            "adopt", "explorer-index", "history", "check", "install-hooks", "doctor", "recover",
+            "trace", "completion", "diff", "lsp", "claims",
         }
         excluded = {"serve"}  # starts the optional Explorer dev server
         self.assertEqual(set(subparsers.choices), covered | excluded)

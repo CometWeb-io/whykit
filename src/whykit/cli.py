@@ -75,6 +75,87 @@ def _resolve_vault(explicit: str | None) -> Path | None:
     return find_vault_root()
 
 
+def set_claims_enabled(root: Path, enabled: bool, *, write: bool = False, expected_sha256: str | None = None) -> dict:
+    """Preview a config-only opt-in; apply the unchanged inventory under the vault lock."""
+    import base64
+    import hashlib
+    import json
+    from .config import parse_config
+    from .io import apply_transaction, safe_vault_target, vault_mutation_lock
+    from .claims import CLAIM_PATH_RE, claims_enabled
+
+    root = root.resolve(strict=True)
+    if not is_vault_root(root):
+        raise ValueError("claims configuration requires a WhyKit vault")
+    if write and (not isinstance(expected_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None):
+        raise ValueError("--write requires --expect-hash from a reviewed preview")
+
+    def plan() -> tuple[dict, dict[Path, bytes | None], str]:
+        index = VaultIndex.load(root)
+        config_path = safe_vault_target(root, "whykit.toml", create_parents=False)
+        before = config_path.read_bytes() if config_path.exists() else None
+        text = before.decode("utf-8") if before is not None else ""
+        config = parse_config(text)
+        current = claims_enabled(config)
+        if not enabled and any(note.front_error or note.front.get("type") == "claim" or "claim_id" in note.front
+                               or "claim_ids" in note.front or CLAIM_PATH_RE.fullmatch(index.relative(note.path)) for note in index.notes):
+            raise ValueError("cannot disable claims while claims, claim references or unreadable records remain")
+        updated = text
+        if enabled and not current:
+            ending = "\r\n" if "\r\n" in text else "\n"
+            updated = text + ("" if not text or text.endswith("\n") else ending) + ending + "[claims]" + ending + "format_version = 1" + ending
+        elif not enabled and current:
+            headers = list(re.finditer(r"(?m)^[ \t]*\[(?:claims|\"claims\"|'claims')\][ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)", text))
+            if len(headers) != 1:
+                raise ValueError("cannot safely remove claims configuration; use one explicit [claims] section")
+            start, stop = headers[0].span()
+            next_header = re.search(r"(?m)^[ \t]*\[", text[stop:])
+            stop = stop + next_header.start() if next_header else len(text)
+            updated = text[:start] + text[stop:]
+        after_config = parse_config(updated)
+        expected_config = {key: value for key, value in config.items() if key != "claims"}
+        if enabled:
+            expected_config["claims"] = {"format_version": 1}
+        if after_config != expected_config:
+            raise ValueError("configuration edit would change unrelated settings")
+        paths = {note.path for note in index.notes}
+        snapshots = root / "00-context/claim-snapshots"
+        if snapshots.exists():
+            paths.update(snapshots.glob("*.txt"))
+        inputs: dict[Path, bytes | None] = {config_path: before}
+        for path in paths:
+            safe = safe_vault_target(root, path.relative_to(root), create_parents=False)
+            inputs[safe] = safe.read_bytes()
+        inventory = {path.relative_to(root).as_posix(): hashlib.sha256(data).hexdigest() if data is not None else None for path, data in inputs.items()}
+        binding = {"enabled": enabled, "inventory": inventory, "after": hashlib.sha256(updated.encode("utf-8")).hexdigest()}
+        expected = hashlib.sha256(json.dumps(binding, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        from .sensitivity import classified_evidence
+        active, retired, _, _ = classified_evidence(index)
+        result = {"contract_version": 1, "applied": False, "expected_sha256": expected, "enabled": enabled,
+                  "before_sha256": hashlib.sha256(before).hexdigest() if before is not None else None,
+                  "after_sha256": binding["after"], "original_config_base64": base64.b64encode(before).decode("ascii") if before is not None else None,
+                  "from_format": 1 if current else 0, "to_format": 1 if enabled else 0,
+                  "manual_claim_authoring_required": True, "unchanged_decisions": sum(bool(re.fullmatch(r"D-[0-9]{3,}", str(n.front.get("decision_id", "")))) for n in index.notes),
+                  "unchanged_evidence": len(active) + len(retired),
+                  "changed": updated != text}
+        return result, inputs, updated
+
+    if not write:
+        from .io import vault_read_lock
+        with vault_read_lock(root):
+            return plan()[0]
+    with vault_mutation_lock(root):
+        result, inputs, updated = plan()
+        if result["expected_sha256"] != expected_sha256:
+            raise ValueError("claims preview is stale; review a fresh preview")
+        for path, before in inputs.items():
+            if (path.read_bytes() if path.exists() else None) != before:
+                raise ValueError("claims inputs changed during apply")
+        if result["changed"]:
+            apply_transaction(root, {root / "whykit.toml": updated})
+        return {**result, "applied": True}
+
+
 def _absolute_without_following_symlinks(raw: str) -> Path:
     """Expand ``~`` and make the path absolute without resolving symlinks."""
     return Path(os.path.abspath(os.path.expanduser(raw)))
@@ -154,8 +235,10 @@ def cmd_init(args: argparse.Namespace) -> int:
     json_mode = bool(getattr(args, "json", False))
     if getattr(args, "minimal", False) and getattr(args, "full", False):
         return emit_error("usage", "--minimal and --full cannot be used together", json_mode=json_mode)
-
-    minimal_layout = not getattr(args, "full", False)
+    profile = getattr(args, "profile", None)
+    if (getattr(args, "minimal", False) and profile == "gtm") or (getattr(args, "full", False) and profile == "minimal"):
+        return emit_error("usage", "--profile conflicts with the requested layout alias", json_mode=json_mode)
+    minimal_layout = not (getattr(args, "full", False) or profile == "gtm")
     # Do not Path.resolve(): that follows symlinks and can write outside the
     # path the user named. Expand ~ and absolutize only.
     target = _absolute_without_following_symlinks(args.target)
@@ -243,6 +326,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             "contract_version": CONTRACT_VERSION,
             "root": str(target),
             "layout": "minimal" if minimal_layout else "full",
+            "profile": "minimal" if minimal_layout else "gtm",
             "preserved": preserved,
         }, ensure_ascii=False, indent=2))
         return 0
@@ -252,7 +336,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     if minimal_layout:
         print("Layout: vendor-neutral (default)")
     else:
-        print("Layout: full starter with optional workstreams (--full)")
+        print("Layout: optional GTM workstreams (--profile gtm; --full is a legacy alias)")
     print()
     print("Next, in order:")
     print("  1. Answer every TODO in AGENTS.md - that file is the contract agents work under.")
@@ -301,6 +385,8 @@ def cmd_new(args: argparse.Namespace) -> int:
             argv += ["--owner", args.owner]
         if args.sensitivity:
             argv += ["--sensitivity", args.sensitivity]
+        for cid in args.claim_ids:
+            argv += ["--claim", cid]
         for source_id in args.source_ids:
             argv += ["--source", source_id]
         if args.review_by:
@@ -309,12 +395,22 @@ def cmd_new(args: argparse.Namespace) -> int:
             argv += ["--supersedes", args.supersedes]
         if args.json:
             argv.append("--json")
+    elif args.new_kind == "claim":
+        argv += [args.title, "--statement", args.statement, "--scope", args.scope, "--valid-from", args.valid_from]
+        for field in ("valid_to", "owner", "sensitivity", "supersedes", "today"):
+            value = getattr(args, field)
+            if value:
+                argv += ["--" + field.replace("_", "-"), value]
+        if args.json:
+            argv.append("--json")
     elif args.new_kind == "evidence":
         argv += ["--source", args.source_name, "--location", args.location, "--type", args.evidence_type, "--claims", args.claims]
         if args.date:
             argv += ["--date", args.date]
         if args.accessed:
             argv += ["--accessed", args.accessed]
+        if args.sensitivity:
+            argv += ["--sensitivity", args.sensitivity]
         if args.json:
             argv.append("--json")
     else:
@@ -328,6 +424,20 @@ def cmd_new(args: argparse.Namespace) -> int:
         if args.json:
             argv.append("--json")
     return new_main(argv)
+
+
+def cmd_claims(args: argparse.Namespace) -> int:
+    import json
+    root = _resolve_vault(args.root)
+    if root is None:
+        return vault_not_found(args.root, json_mode=args.json)
+    result = set_claims_enabled(root, args.claims_kind == "enable", write=args.write, expected_sha256=args.expect_hash)
+    if args.json:
+        emit_machine(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(f"claims {'enabled' if result['enabled'] else 'disabled'}: {'applied' if result['applied'] else 'preview'}")
+        print(f"expected_sha256: {result['expected_sha256']}")
+    return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -344,6 +454,35 @@ def cmd_status(args: argparse.Namespace) -> int:
     if args.strict:
         argv.append("--strict")
     return status_main(argv)
+
+
+def cmd_workspace(args: argparse.Namespace) -> int:
+    import json
+    from .status import build_workspace_status
+
+    try:
+        today = dt.date.fromisoformat(args.today) if args.today else dt.date.today()
+        report = build_workspace_status([Path(root) for root in args.roots], today=today,
+                                        due_days=args.due_days, strict=args.strict)
+    except ValueError:
+        return emit_error("invalid_argument", "use a real ISO --today and non-negative --due-days", json_mode=args.json)
+    if args.json:
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(f"WhyKit workspace — {report['as_of']}")
+        for entry in report["vaults"]:
+            print(f"  {entry['root']}")
+            if "error" in entry:
+                print(f"    {entry['error']['code']}: {entry['error']['message']}")
+                continue
+            status = entry["status"]
+            print(f"    lint: {status['errors']} error(s), {status['warnings']} warning(s)")
+            print(f"    reviews: {len(status['review_queue'])} due within {entry['due_days']} day(s), {status['review_overdue']} overdue")
+            for item in status["review_queue"][:20]:
+                print(f"      {item['state'].upper()} {item['review_by']} {item['path']}")
+            if len(status["review_queue"]) > 20:
+                print(f"      … {len(status['review_queue']) - 20} more")
+    return report["exit_code"]
 
 
 def _json_format(args: argparse.Namespace, command: str) -> str | None:
@@ -480,10 +619,16 @@ def cmd_review(args: argparse.Namespace) -> int:
             argv.append("--json")
     else:
         argv.append(args.target)
-        argv += ["--reviewer", args.reviewer, "--outcome", args.outcome]
+        argv += ["--reviewer", args.reviewer]
+        if args.review_command == "record":
+            argv += ["--outcome", args.outcome]
+        if args.write:
+            argv.append("--write")
+        if args.expected_sha256:
+            argv += ["--expect-hash", args.expected_sha256]
         if args.next_review:
             argv += ["--next-review", args.next_review]
-        if args.note_text:
+        if getattr(args, "note_text", None):
             argv += ["--note", args.note_text]
         if args.today:
             argv += ["--today", args.today]
@@ -595,6 +740,8 @@ def cmd_adopt(args: argparse.Namespace) -> int:
         argv += ["--owner", args.owner]
     if args.profile:
         argv += ["--profile", args.profile]
+    if args.compare:
+        argv += ["--compare", args.compare]
     if args.write:
         argv.append("--write")
     if args.json:
@@ -802,49 +949,52 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 print(f"{marker:<4} {str(item['name']):<20} {item['detail']}")
         return 1
 
-    record("vault_root", True, str(vault))
-    record("evidence_register", (vault / "00-context/evidence-register.md").exists(), "00-context/evidence-register.md")
-    record("decision_log", (vault / "06-decisions/decision-log.md").exists(), "06-decisions/decision-log.md")
-    record("review_log", (vault / "00-context/review-log.md").exists(), "00-context/review-log.md", required=False)
-    record("agent_contract", (vault / "AGENTS.md").exists(), "AGENTS.md")
-    try:
-        _config, config_path = load_config(vault)
-    except ConfigError as exc:
-        record("policy", False, str(exc))
-    else:
-        record("policy", True, rel(vault, config_path) if config_path else "built-in defaults")
+    from .io import vault_read_lock
 
-    git = shutil.which("git")
-    record("git", bool(git), git or "not found")
-    tracked = False
-    if git:
-        inside = subprocess.run(["git", "-C", str(vault), "rev-parse", "--git-dir"], capture_output=True, text=True, encoding="utf-8", errors="replace")
-        tracked = inside.returncode == 0
-        record("git_repository", tracked, "tracked" if tracked else "not a git repository yet - `git init`", required=False)
-        located = _git_hooks_location(vault) if tracked else None
-        hook_installed = bool(located and (located[0] / "pre-commit").exists())
-        record("pre_commit_hook", hook_installed, "installed" if hook_installed else "not installed - `whykit install-hooks`", required=False)
+    with vault_read_lock(vault):
+        record("vault_root", True, str(vault))
+        record("evidence_register", (vault / "00-context/evidence-register.md").exists(), "00-context/evidence-register.md")
+        record("decision_log", (vault / "06-decisions/decision-log.md").exists(), "06-decisions/decision-log.md")
+        record("review_log", (vault / "00-context/review-log.md").exists(), "00-context/review-log.md", required=False)
+        record("agent_contract", (vault / "AGENTS.md").exists(), "AGENTS.md")
+        try:
+            _config, config_path = load_config(vault)
+        except ConfigError as exc:
+            record("policy", False, str(exc))
+        else:
+            record("policy", True, rel(vault, config_path) if config_path else "built-in defaults")
 
-    record("node_explorer", bool(shutil.which("node")), shutil.which("node") or "not found (only needed for `serve`)", required=False)
+        git = shutil.which("git")
+        record("git", bool(git), git or "not found")
+        tracked = False
+        if git:
+            inside = subprocess.run(["git", "-C", str(vault), "rev-parse", "--git-dir"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+            tracked = inside.returncode == 0
+            record("git_repository", tracked, "tracked" if tracked else "not a git repository yet - `git init`", required=False)
+            located = _git_hooks_location(vault) if tracked else None
+            hook_installed = bool(located and (located[0] / "pre-commit").exists())
+            record("pre_commit_hook", hook_installed, "installed" if hook_installed else "not installed - `whykit install-hooks`", required=False)
 
-    # Same findings as `whykit lint` and `whykit status`, so the counts agree.
-    files, findings = run_lint(vault, [], today=today)
-    errors = [f for f in findings if f.level == "error"]
-    warnings = [f for f in findings if f.level == "warning"]
-    record("vault_lint", not errors, f"{len(files)} files, {len(errors)} errors, {len(warnings)} warnings")
+        record("node_explorer", bool(shutil.which("node")), shutil.which("node") or "not found (only needed for `serve`)", required=False)
 
-    overdue = [f for f in findings if f.code in ("review_by.overdue", "decision.review_missing")]
-    record(
-        "review_hygiene",
-        not overdue,
-        "every approved decision has a live review date" if not overdue else f"{len(overdue)} document(s) need a review date or re-check",
-        required=False,
-    )
-    sensitive = _sensitive_docs(vault)
-    record("sensitive_docs", True, f"{len(sensitive)} confidential/restricted document(s)", required=False)
+        # Same findings as `whykit lint` and `whykit status`, so the counts agree.
+        files, findings = run_lint(vault, [], today=today)
+        errors = [f for f in findings if f.level == "error"]
+        warnings = [f for f in findings if f.level == "warning"]
+        record("vault_lint", not errors, f"{len(files)} files, {len(errors)} errors, {len(warnings)} warnings")
 
-    passed = all(bool(item["passed"]) for item in checks if item["required"])
-    payload = {"contract_version": CONTRACT_VERSION, "root": str(vault), "passed": passed, "checks": checks}
+        overdue = [f for f in findings if f.code in ("review_by.overdue", "decision.review_missing")]
+        record(
+            "review_hygiene",
+            not overdue,
+            "every approved decision has a live review date" if not overdue else f"{len(overdue)} document(s) need a review date or re-check",
+            required=False,
+        )
+        sensitive = _sensitive_docs(vault)
+        record("sensitive_docs", True, f"{len(sensitive)} confidential/restricted document(s)", required=False)
+
+        passed = all(bool(item["passed"]) for item in checks if item["required"])
+        payload = {"contract_version": CONTRACT_VERSION, "root": str(vault), "passed": passed, "checks": checks}
     if args.json:
         emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
@@ -871,12 +1021,31 @@ def _sensitive_docs(vault: Path) -> list[str]:
 
 def _non_public_docs(vault: Path) -> list[str]:
     index = VaultIndex.load(vault)
+    from .sensitivity import note_sensitivity_level, classified_evidence
+
     result: list[str] = []
     for note in index.notes:
-        sensitivity = str(note.front.get("sensitivity", "internal")).lower()
-        if sensitivity != "public":
+        if note_sensitivity_level(note) != 0:
             result.append(index.relative(note.path))
+    active, retired, _, _ = classified_evidence(index)
+    result.extend(f"evidence:{key}" for key, row in (*active.items(), *retired.items()) if row["sensitivity"] != "public")
     return result
+
+
+def cmd_recover(args: argparse.Namespace) -> int:
+    import json
+    from .io import vault_mutation_lock
+
+    root = _resolve_vault(args.root)
+    if root is None:
+        return vault_not_found(args.root, json_mode=args.json)
+    with vault_mutation_lock(root):
+        pass  # Recovery and terminal-journal collection finish before the lock yields.
+    if args.json:
+        emit_machine(json.dumps({"contract_version": 1, "recovery_completed": True}))
+    else:
+        print("Vault recovery completed.")
+    return 0
 
 
 def cmd_explorer_index(args: argparse.Namespace) -> int:
@@ -885,6 +1054,10 @@ def cmd_explorer_index(args: argparse.Namespace) -> int:
         argv += ["--root", args.root]
     if getattr(args, "today", None):
         argv += ["--today", args.today]
+    if getattr(args, "private", False):
+        argv += ["--private"]
+    if getattr(args, "publication_preview", False):
+        argv += ["--publication-preview"]
     from .explorer_index import main as explorer_index_main
     return explorer_index_main(argv)
 
@@ -1003,6 +1176,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         return 2
     env = os.environ.copy()
     env["WHYKIT_VAULT_DIR"] = str(vault)
+    env["WHYKIT_EXPLORER_PRIVATE"] = "1"
     return subprocess.run([npm, "run", "dev", "--", "--host", args.host, "--port", str(args.port)],
                           cwd=explorer, env=env).returncode
 
@@ -1027,11 +1201,11 @@ Docs: https://github.com/CometWeb-io/whykit#readme"""
 # as five verbs rather than one flat list. Every command belongs to exactly one
 # group; tests/test_cli_consistency.py holds this table to the parser.
 COMMAND_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("author", "create and change records", ("init", "adopt", "new", "review", "evidence")),
-    ("check", "gate a vault or a change", ("lint", "check", "status", "trace", "history", "diff", "snapshot", "verify-snapshot")),
+    ("author", "create and change records", ("init", "adopt", "new", "review", "evidence", "claims")),
+    ("check", "gate a vault or a change", ("lint", "check", "status", "workspace", "trace", "history", "diff", "snapshot", "verify-snapshot")),
     ("explore", "find and hand over context", ("query", "context", "pack", "graph", "backlinks", "impact")),
     ("integrate", "connect hooks, viewers and shells", ("install-hooks", "explorer-index", "serve", "lsp", "completion")),
-    ("maintain", "inspect policy, rules and setup", ("policy", "rules", "doctor")),
+    ("maintain", "inspect policy, rules and setup", ("policy", "rules", "doctor", "recover")),
 )
 
 COMMANDS_PREAMBLE = (
@@ -1072,9 +1246,9 @@ class _Parser(argparse.ArgumentParser):
 
 def _usage_hint(message: str, command_path: str = "") -> str | None:
     """A next step for argparse errors where the message alone misleads."""
-    if "invalid choice: 'accepted'" in message and "approved" in message:
+    if "invalid choice: 'accepted'" in message and "--status" in message and command_path == "new decision":
         # Decision logs render the approved state as "Accepted", so people type it.
-        return "decision logs display approved decisions as \"Accepted\"; on the command line use --status approved"
+        return "decision logs display approved decisions as \"Accepted\"; create a draft, complete it and use `whykit review approve`"
     if message.startswith("unrecognized arguments") and command_path:
         # argparse reports these from the top-level parser, whose usage line
         # lists no subcommand options at all.
@@ -1180,11 +1354,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-cache", action="store_true",
         help="do not read or update the parse cache in .whykit/cache/ (same as WHYKIT_NO_CACHE=1)",
     )
-    sub = parser.add_subparsers(dest="command", metavar="<command>", title="commands")
+    sub = parser.add_subparsers(dest="command", metavar="<command>", title="commands", parser_class=_Parser)
 
     init = sub.add_parser("init", help="create a new vault", description="Create a new WhyKit vault from the bundled template.")
     init.add_argument("target", help="directory to create (must be empty unless --force)")
     init.add_argument("--force", action="store_true", help="add missing template files in a non-empty directory without replacing existing files")
+    init.add_argument("--profile", choices=("minimal", "gtm"), help="starter profile: minimal (default) or optional GTM workstreams")
     init.add_argument(
         "--minimal",
         action="store_true",
@@ -1193,7 +1368,7 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument(
         "--full",
         action="store_true",
-        help="also create the optional starter workstreams (strategy, website, automation, operations, research) and their templates",
+        help="legacy alias for --profile gtm",
     )
     init.add_argument("--json", action="store_true", help=JSON_HELP)
     init.set_defaults(func=cmd_init)
@@ -1213,14 +1388,36 @@ def build_parser() -> argparse.ArgumentParser:
     new = sub.add_parser("new", help="create a decision, evidence row or note", description="Create a record and keep the vault indexes in sync.")
     new.add_argument("--root", help=ROOT_HELP)
     new_sub = new.add_subparsers(dest="new_kind", required=True, metavar="<kind>", title="kinds")
+    new_claim = new_sub.add_parser("claim", help="create an unreviewed claim draft")
+    new_claim.add_argument("title", help="claim title")
+    for field in ("statement", "scope", "valid-from"):
+        new_claim.add_argument("--" + field, required=True, help="claim " + field.replace("-", " "))
+    for field in ("valid-to", "owner", "supersedes", "today"):
+        new_claim.add_argument("--" + field, help="optional " + field.replace("-", " "))
+    new_claim.add_argument("--sensitivity", choices=SENSITIVITIES, help="default: policy defaults.sensitivity")
+    new_claim.add_argument("--json", action="store_true", help=JSON_HELP)
+    _add_leaf_root(new_claim)
+    new_claim.set_defaults(func=cmd_new)
+
+    claims = sub.add_parser("claims", help="preview or apply explicit claim-format opt-in")
+    claim_sub = claims.add_subparsers(dest="claims_kind", required=True)
+    for kind in ("enable", "disable"):
+        toggle = claim_sub.add_parser(kind, help=f"{kind} the optional claim format")
+        _add_leaf_root(toggle)
+        toggle.add_argument("--write", action="store_true", help="apply a reviewed preview")
+        toggle.add_argument("--expect-hash", help="expected_sha256 from preview")
+        toggle.add_argument("--json", action="store_true", help=JSON_HELP)
+        toggle.set_defaults(func=cmd_claims)
+
     new_decision = new_sub.add_parser("decision", help="create a decision record and index row")
     new_decision.add_argument("title", nargs="?", help="decision title, e.g. \"Adopt usage-based pricing\" (optional with --from)")
     new_decision.add_argument("--from", dest="from_path", metavar="FILE", help="promote an existing ADR (MADR, Nygard, Y-statement or Polish headings), e.g. one staged by `adopt`; prints the mapping unless --write")
     new_decision.add_argument("--write", action="store_true", help="with --from: create the record and its decision-log row (default: dry run)")
     new_decision.add_argument("--owner", help="accountable person (default: policy defaults.owner)")
-    new_decision.add_argument("--status", choices=("draft", "in_review", "approved", "superseded", "archived"), default="draft", help="initial status (default: %(default)s)")
+    new_decision.add_argument("--status", choices=("draft", "in_review"), default="draft", help="initial status; approve a completed record with review approve (default: %(default)s)")
     new_decision.add_argument("--sensitivity", choices=SENSITIVITIES, help="default: policy defaults.sensitivity")
     new_decision.add_argument("--source", action="append", default=[], dest="source_ids", metavar="E-NNN", help="supporting evidence ID (repeatable)")
+    new_decision.add_argument("--claim", action="append", default=[], dest="claim_ids", metavar="C-NNN", help="claim reference (repeatable)")
     new_decision.add_argument("--review-by", metavar="YYYY-MM-DD", help="date by which the decision must be re-checked")
     new_decision.add_argument("--supersedes", metavar="D-NNN", help="decision this one replaces")
     new_decision.add_argument("--json", action="store_true", help=JSON_HELP)
@@ -1234,6 +1431,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_evidence.add_argument("--claims", required=True, help="what the source supports, in one line")
     new_evidence.add_argument("--date", metavar="YYYY-MM-DD", help="when the source was produced (default: today)")
     new_evidence.add_argument("--accessed", metavar="YYYY-MM-DD", help="when it was last checked (default: today)")
+    new_evidence.add_argument("--sensitivity", choices=SENSITIVITIES, help="optional row label; cannot lower the register's classification")
     new_evidence.add_argument("--json", action="store_true", help=JSON_HELP)
     _add_leaf_root(new_evidence)
     new_evidence.set_defaults(func=cmd_new)
@@ -1256,6 +1454,14 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--due-days", type=int, metavar="N", help="review window in days (default: policy defaults.status_due_days)")
     status.add_argument("--strict", action="store_true", help="exit 1 when anything needs attention")
     status.set_defaults(func=cmd_status)
+
+    workspace = sub.add_parser("workspace", help="report independent vault health and review queues")
+    workspace.add_argument("roots", nargs="+", metavar="ROOT", help="explicit vault roots (aliases counted once)")
+    workspace.add_argument("--json", action="store_true", help=JSON_HELP)
+    workspace.add_argument("--today", help=TODAY_HELP)
+    workspace.add_argument("--due-days", type=int, metavar="N", help="review window (default: each vault's policy)")
+    workspace.add_argument("--strict", action="store_true", help="exit 1 for warnings as well as errors")
+    workspace.set_defaults(func=cmd_workspace)
 
     graph = sub.add_parser("graph", help="export the vault wikilink graph")
     graph.add_argument("--root", help=ROOT_HELP)
@@ -1339,9 +1545,21 @@ def build_parser() -> argparse.ArgumentParser:
     review_record.add_argument("--next-review", metavar="YYYY-MM-DD", help="next review date")
     review_record.add_argument("--note", default="", dest="note_text", help="short note for the review log")
     review_record.add_argument("--today", help="record the review as of this YYYY-MM-DD date")
+    review_record.add_argument("--write", action="store_true", default=None, help="apply a reviewed claim-bound preview")
+    review_record.add_argument("--expect-hash", dest="expected_sha256", help="hash of the reviewed preview")
     review_record.add_argument("--json", action="store_true", help=JSON_HELP)
     _add_leaf_root(review_record)
     review_record.set_defaults(func=cmd_review)
+    review_approve = review_sub.add_parser("approve", help="preview approval, then apply the reviewed snapshot")
+    review_approve.add_argument("target", help="vault-relative decision path or D-NNN")
+    review_approve.add_argument("--reviewer", required=True, help="who reviewed the snapshot; an attribution, not authentication")
+    review_approve.add_argument("--next-review", metavar="YYYY-MM-DD", help="default: policy decision_review_days after approval")
+    review_approve.add_argument("--today", help="approval date as YYYY-MM-DD")
+    review_approve.add_argument("--write", action="store_true", help="apply only the snapshot identified by --expect-hash")
+    review_approve.add_argument("--expect-hash", dest="expected_sha256", help="expected_sha256 from a reviewed preview")
+    review_approve.add_argument("--json", action="store_true", help=JSON_HELP)
+    _add_leaf_root(review_approve)
+    review_approve.set_defaults(func=cmd_review)
 
     snapshot = sub.add_parser("snapshot", help="create a deterministic vault snapshot")
     snapshot.add_argument("--root", help=ROOT_HELP)
@@ -1401,6 +1619,7 @@ def build_parser() -> argparse.ArgumentParser:
     adopt.add_argument("--owner", default="TODO", help="owner for adopted notes (default: %(default)s)")
     adopt.add_argument("--profile", choices=("generic", "adr-only", "obsidian-loose"), default="generic", help="how to interpret the source (default: %(default)s)")
     adopt.add_argument("--write", action="store_true", help="write the staged files (default: dry run)")
+    adopt.add_argument("--compare", metavar="DIR", help="read-only preservation check of same-relative-path Markdown")
     adopt.add_argument("--json", action="store_true", help=JSON_HELP)
     adopt.set_defaults(func=cmd_adopt)
 
@@ -1446,6 +1665,11 @@ def build_parser() -> argparse.ArgumentParser:
     hooks.add_argument("--force", action="store_true", help="replace an existing pre-commit hook")
     hooks.set_defaults(func=cmd_install_hooks)
 
+    recover = sub.add_parser("recover", help="recover interrupted writes and collect completed transaction journals")
+    recover.add_argument("--root", help=ROOT_HELP)
+    recover.add_argument("--json", action="store_true", help=JSON_HELP)
+    recover.set_defaults(func=cmd_recover)
+
     explorer_index = sub.add_parser(
         "explorer-index",
         help="export the Explorer vault index from the canonical Python parser",
@@ -1453,6 +1677,8 @@ def build_parser() -> argparse.ArgumentParser:
     explorer_index.add_argument("--root", help=ROOT_HELP)
     explorer_index.add_argument("--today", help=TODAY_HELP)
     explorer_index.add_argument("--json", action="store_true", default=True, help="accepted for symmetry; output is always JSON")
+    explorer_index.add_argument("--private", action="store_true", help="include non-public content for a private local viewer")
+    explorer_index.add_argument("--publication-preview", action="store_true", help="private publication diagnostics; never publish this report")
     explorer_index.set_defaults(func=cmd_explorer_index)
 
     serve = sub.add_parser("serve", help="run the optional Explorer (source checkout only)")
@@ -1555,6 +1781,48 @@ def _silence_stdout() -> None:
         pass
 
 
+def _run_command(args: argparse.Namespace, func) -> int:
+    """Bind config, data and rendered output to one read; discard raced output."""
+    from contextlib import redirect_stdout
+    import tempfile
+    from .io import vault_read_lock, vault_mutation_lock
+
+    read_only = args.command in _CACHED_COMMANDS | {"policy", "rules", "history"}
+    read_only = read_only or (args.command == "evidence" and getattr(args, "evidence_command", None) == "list")
+    read_only = read_only or (args.command == "review" and args.review_command == "list")
+    root = _resolve_vault(getattr(args, "root", None)) if read_only else None
+    if args.command == "lint":
+        from .lint import resolve_root
+        resolved, _, _note = resolve_root(args.root, args.paths)
+        root = resolved if is_vault_root(resolved) else None
+    if root is None:
+        return func(args)
+    # Spill large reports to a private temporary file instead of doubling their RAM.
+    scope = vault_mutation_lock(root) if args.command in {"graph", "snapshot"} and args.output else vault_read_lock(root)
+    with tempfile.SpooledTemporaryFile(max_size=1024 * 1024, mode="w+", encoding="utf-8", errors="surrogateescape") as output:
+        with redirect_stdout(output), scope:
+            result = func(args)
+        output.seek(0)
+        stream = sys.stdout
+        machine = _wants_json(args) or args.command in {"graph", "pack"} or (args.command in {"lint", "check"} and args.format in {"sarif", "github"})
+        from .console import is_utf
+        reconfigure = getattr(stream, "reconfigure", None)
+        switch = machine and not is_utf(stream) and reconfigure is not None
+        if switch:
+            assert reconfigure is not None
+            encoding, errors = stream.encoding, stream.errors
+            stream.flush()
+            reconfigure(encoding="utf-8", errors="surrogateescape")
+        try:
+            shutil.copyfileobj(output, stream)
+        finally:
+            if switch:
+                assert reconfigure is not None
+                stream.flush()
+                reconfigure(encoding=encoding, errors=errors)
+        return result
+
+
 def main(argv: list[str] | None = None) -> int:
     # Before any output: an ASCII or legacy code-page console must degrade
     # glyphs, not abort the report with UnicodeEncodeError.
@@ -1577,7 +1845,7 @@ def main(argv: list[str] | None = None) -> int:
         from .parse_cache import persistent
 
         with persistent(_uses_parse_cache(args)):
-            code = func(args)
+            code = _run_command(args, func)
         # Flush here, not at interpreter exit: a short report sits in the buffer
         # until then, and a reader that already left (`| head -1`) would turn
         # into an "Exception ignored" message and exit status 120.

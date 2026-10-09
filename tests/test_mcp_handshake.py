@@ -175,6 +175,16 @@ class ClassicHandshakeTests(unittest.TestCase):
         self.server.send(initialize(1, "2025-06-18"))
         self.assert_handshake_session(self.server.response(1), "2025-06-18", first_id=2)
 
+    def test_probe_burst_over_the_queue_limit_still_falls_back(self) -> None:
+        from whykit.mcp_server import NEGOTIATION_BUFFER_SIZE
+
+        count = NEGOTIATION_BUFFER_SIZE * 3
+        for request_id in range(count):
+            self.server.send(discover(request_id))
+        self.server.send(initialize(count, "2025-06-18"))
+        reply = self.server.response(count, stale=frozenset(range(count)))
+        self.assert_handshake_session(reply, "2025-06-18", first_id=count + 1)
+
     def test_initialize_pipelined_behind_a_timed_out_probe_connects(self) -> None:
         # The host's probe timed out while the server was still starting, so
         # both frames are already queued when the server reads its first line.
@@ -220,6 +230,7 @@ class SupportedSdkRangeTests(unittest.TestCase):
         assert loop is not None
         self.assertEqual(loop.group(1).split(), expected)
         self.assertIn("-p 'test_mcp_handshake.py'", workflow)
+        self.assertIn("-p 'test_mcp_frames.py'", workflow)
 
 
 if __name__ == "__main__":

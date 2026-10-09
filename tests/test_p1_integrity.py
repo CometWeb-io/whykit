@@ -84,8 +84,7 @@ class JournaledTransactionTests(unittest.TestCase):
             self.assertEqual(a.read_text(encoding="utf-8"), "# A\n")
             self.assertEqual(b.read_text(encoding="utf-8"), "# B\n")
             txs = list((vault / ".whykit" / "transactions").iterdir())
-            self.assertTrue(txs)
-            self.assertTrue((txs[0] / "COMMITTED").exists())
+            self.assertEqual(txs, [])
 
     def test_recover_finishes_ready_but_uncommitted_journal(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -101,7 +100,7 @@ class JournaledTransactionTests(unittest.TestCase):
             recovered = recover_pending_transactions(vault)
             self.assertEqual(recovered, [tx])
             self.assertEqual(target.read_text(encoding="utf-8"), "# recovered\n")
-            self.assertTrue((tx / "COMMITTED").exists())
+            self.assertFalse(tx.exists())
 
     def test_mutation_lock_recovers_pending_before_yield(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -112,7 +111,7 @@ class JournaledTransactionTests(unittest.TestCase):
             with vault_mutation_lock(vault):
                 pass
             self.assertEqual(target.read_text(encoding="utf-8"), "# auto\n")
-            self.assertTrue((tx / "COMMITTED").exists())
+            self.assertFalse(tx.exists())
 
 
 class SecretScanFailClosedTests(unittest.TestCase):
@@ -178,7 +177,7 @@ class ExplorerIndexTests(unittest.TestCase):
         self.assertEqual(payload["lint"]["errors"], 0)
 
     def test_explorer_index_bodies_exclude_front_matter(self) -> None:
-        result = run("explorer-index", "--root", str(ROOT / "examples" / "northline"), "--today", "2026-09-17")
+        result = run("explorer-index", "--private", "--root", str(ROOT / "examples" / "northline"), "--today", "2026-09-17")
         self.assertEqual(result.returncode, 0, result.stderr)
         docs = json.loads(result.stdout)["docs"]
         self.assertGreater(len(docs), 1)

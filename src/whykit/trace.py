@@ -13,12 +13,15 @@ than the vault's ``[evidence_access_age_days]`` policy for its source type.
 """
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import datetime as dt
 import json
 import sys
 from pathlib import Path
 
+from .claim_readers import claim_reader
 from .config import ConfigError, load_config
 from .contract import emit_error
 from .graph import build_graph
@@ -80,7 +83,9 @@ def _evidence_state(
     }
 
 
+@consistent_read
 @path_cache()
+@claim_reader("trace")
 def build_trace(
     root: Path,
     *,
@@ -243,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     found = bool(report["decisions"])
     if args.gaps_only:
-        report["decisions"] = [record for record in report["decisions"] if record["live"] and record["gaps"]]
+        report["decisions"] = [record for record in report["decisions"] if record["live"] and (record["gaps"] or record.get("claim_gaps"))]
     if args.json:
         emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
     else:
@@ -254,6 +259,10 @@ def main(argv: list[str] | None = None) -> int:
             )
             gaps = f"  [{', '.join(gap.replace('_', ' ') for gap in record['gaps'])}]" if record["gaps"] else ""
             print(f"  {record['decision_id']}  {record['path']}  ({state}){gaps}")
+            for claim in record.get("claims", []):
+                print(f"      {claim['claim_id']}: {claim['verification_status']} ({', '.join(claim['reasons']) or 'reviewed'})")
+            if record.get("claim_gaps"):
+                print(f"      Claim gaps: {', '.join(record['claim_gaps'])}")
             for item in record["evidence"]:
                 print(f"      {_describe(item)}")
         summary = report["summary"]

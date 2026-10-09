@@ -68,6 +68,7 @@ _TOP_LEVEL_KEYS = {
     "defaults",
     "profiles",
     "rules",
+    "claims",
 }
 _DEFAULT_KEYS = {
     "owner",
@@ -100,6 +101,11 @@ def _validate(config: dict[str, Any]) -> None:
     unknown_top = set(config) - _TOP_LEVEL_KEYS
     if unknown_top:
         raise ConfigError("unknown top-level keys: " + ", ".join(sorted(unknown_top)))
+
+    if "claims" in config:
+        claims = config["claims"]
+        if not isinstance(claims, dict) or set(claims) != {"format_version"} or type(claims.get("format_version")) is not int or claims["format_version"] != 1:
+            raise ConfigError("[claims] requires format_version = 1 and no other keys")
 
     version = config.get("format_version")
     if version != FORMAT_VERSION:
@@ -168,10 +174,17 @@ def load_config(root: Path) -> tuple[dict[str, Any], Path | None]:
         _validate(config)
         return config, None
     try:
-        # utf-8-sig: Windows editors (Notepad) save a byte-order mark, which TOML
-        # itself rejects at line 1, column 1. Markdown readers already accept it.
-        raw = tomllib.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        text = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ConfigError(f"cannot read {CONFIG_FILE}: {exc}") from exc
+    return parse_config(text), path
+
+
+def parse_config(text: str) -> dict[str, Any]:
+    """Validate policy from a file or a pinned Git blob through the same path."""
+    try:
+        raw = tomllib.loads(text.removeprefix("\ufeff"))
+    except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"cannot read {CONFIG_FILE}: {exc}") from exc
     if not isinstance(raw, dict):
         raise ConfigError(f"{CONFIG_FILE} must contain a TOML table")
@@ -186,7 +199,7 @@ def load_config(root: Path) -> tuple[dict[str, Any], Path | None]:
             raise ConfigError("unknown [defaults] keys: " + ", ".join(sorted(unknown_raw_defaults)))
     config = _merge(DEFAULT_CONFIG, raw)
     _validate(config)
-    return config, path
+    return config
 
 
 def configuration_readiness(config: dict[str, Any], config_path: Path | None) -> tuple[bool, list[str]]:

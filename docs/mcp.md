@@ -72,9 +72,20 @@ A note whose label WhyKit cannot read is treated as above every ceiling: front
 matter that does not parse (a tab, an unclosed bracket, a duplicate key) or a
 label spelt differently (`Sensitivity:`) hides the note rather than defaulting
 it to `internal`. A note with valid front matter and no `sensitivity` key is
-`internal`. Evidence-register entries do not carry their own sensitivity field;
-they inherit the label of `00-context/evidence-register.md` itself, so a
-register above the ceiling withholds every row, count and `E-NNN` completion.
+`internal`. Evidence entries inherit that register floor and may tighten it with an optional
+final `Sensitivity` column (`public`, `internal`, `confidential`, `restricted`).
+A row cannot lower the register's classification. A retired source also inherits
+the classification of its replacement. Empty/invalid explicit cells and duplicate
+IDs are withheld at every ceiling. Counts, completions, context, trace, pack and
+resource reads use the same captured filtered register. Hidden IDs have the same
+lookup result as missing IDs; citations already written in visible note bodies
+are still visible and carry no proof that their source exists.
+
+The raw body of a register with row labels is withheld in filtered readers; use
+`context E-NNN` for a visible entry. Source row offsets are omitted because they
+can reveal hidden rows. The local CLI and explicit private Explorer export retain
+full filesystem-owner access. Legacy tables without the column keep inheritance;
+see [migration](migration-0.3.md#evidence-row-sensitivity).
 
 ## Protocol versions
 
@@ -177,9 +188,9 @@ adds or withholds:
 | `query` | `query-result.schema.json` | adds `max_sensitivity` and `next_cursor`; `query.limit` is the page size |
 | `context` | `context-pack.schema.json` | adds `content_trust` |
 | `impact` | `impact-report.schema.json` | none |
-| `status` | `status-report.schema.json` | no `root`; adds `max_sensitivity` and `review_due_days`; `evidence_active` and `evidence_retired` are `null` under a `public` ceiling |
+| `status` | `status-report.schema.json` | no `root`; adds `max_sensitivity` and `review_due_days`; `evidence_active` and `evidence_retired` count visible rows, or are `null` when the register floor exceeds the ceiling |
 | `pack` | `context-bundle.schema.json` | adds `max_sensitivity` |
-| `trace` | `trace-report.schema.json` | adds `matched`, `truncated`, `next_cursor`, `max_sensitivity`, and under a `public` ceiling `evidence_details: "withheld"` with evidence items reduced to `{id, via, state: "withheld"}` |
+| `trace` | `trace-report.schema.json` | adds `matched`, `truncated`, `next_cursor`, `max_sensitivity`, and when the register floor exceeds the ceiling `evidence_details: "withheld"` with evidence items reduced to `{id, via, state: "withheld"}` |
 | `backlinks` | `backlinks-report.schema.json` | adds `truncated`, `max_sensitivity` and `next_cursor` |
 
 Error results (`isError: true`) carry the error body described under
@@ -204,6 +215,8 @@ ceiling or another server process (the key is random per process), when it
 was altered, and when the visible results changed since it was issued, so a
 client never silently skips or repeats an item. Restart from the first page
 in every case. Changes to hidden records leave cursors valid.
+Query also binds its cursor to the content of every visible matching note;
+changing metadata or prose invalidates it even when rank order stays the same.
 
 Document bodies returned by `context`, `pack`, the `record` resource and the
 prompts are untrusted data. A note can contain text written to look like
@@ -313,6 +326,45 @@ machines. Sensitivity remains a response filter, not an access-control
 boundary, so the token decides who can ask and the ceiling decides what they
 see.
 
+HTTP requests are bounded before SDK JSON parsing: a 1 MiB body budget
+(including chunked bodies), 30 seconds to receive the complete body, and eight
+active authorized requests, including open streams. One shared token bucket per
+server process permits a burst of 60 requests and refills two requests per
+second. Authentication/Host checks run first; invalid callers do not consume
+this authorized budget. Uvicorn also caps concurrent connections/tasks at 32.
+Rate/busy responses include `Retry-After: 1`. Limits apply to one process and
+are shared across clients, not per-IP quotas. A remote multi-process deployment
+still needs a TLS proxy and its own connection/rate controls.
+
+Every successful MCP result has a separate **1 MiB compact UTF-8 JSON budget**,
+checked after the SDK shapes it for the negotiated protocol. This includes all
+metadata, JSON escaping, the text and `structuredContent` copies of a tool
+result, and resource/prompt/list/completion results. It applies equally to
+stdio and HTTP. `max_chars` still means document body characters; setting it to
+zero does not exempt metadata from the byte budget.
+
+An oversized tool result is replaced with `isError: true` and code
+`response_too_large`. Other oversized results raise JSON-RPC error `-32603`
+with that code in `error.data.error.code`. No partial success or truncated
+metadata is returned. Reduce a page/body limit where available; an individual
+oversized metadata field must be reviewed in the vault. The fixed limit is
+not a per-call option clients can increase.
+
+The result budget covers the serialized **result object**. Separate transport
+guards limit request IDs to 1024 bytes of compact UTF-8 JSON (including quotes
+and escaping) and successful/error JSON-RPC envelopes to 2 MiB. Stdio checks
+the exact serialized output, including its final newline. Its input limit is
+1 MiB per line, also including the newline. An oversized input receives a fixed
+error with `id: null` and code `request_too_large`, then the connection closes
+without draining an unbounded line. Reconnect before sending another request.
+Invalid JSON, schema violations and rejected IDs receive fixed errors without
+echoing peer data; HTTP preflight returns HTTP 400 for these failures.
+
+These limits exclude HTTP headers, SSE framing and cumulative stream traffic.
+They do not bound the memory or time needed to build an index or materialize a
+report before checking its result. Request/queue/concurrency limits address
+separate resource costs.
+
 ## Errors
 
 A tool call the server cannot answer comes back as a tool result with
@@ -332,6 +384,12 @@ A tool call the server cannot answer comes back as a tool result with
 | `unknown_tool` | No tool has this name |
 | `unauthorized` | Streamable HTTP only: the request lacks the bearer token (HTTP 401, before any MCP processing) |
 | `forbidden_host` | Streamable HTTP without a token only: the `Host` or `Origin` header does not name this machine (HTTP 421, before any MCP processing) |
+| `rate_limited` | HTTP 429: the process request bucket is exhausted; retry after the response's `Retry-After` delay |
+| `server_busy` | HTTP 503: eight authorized requests are already active |
+| `request_too_large` | HTTP 413 for a body over 1 MiB; stdio rejects a line over 1 MiB and closes the connection |
+| `request_timeout` | HTTP 408: the complete request body did not arrive within 30 seconds; connection closes |
+| `response_too_large` | The MCP result exceeds 1 MiB or its JSON-RPC frame exceeds 2 MiB; no partial result is returned |
+| `invalid_request_id` | Request ID exceeds 1024 bytes of compact UTF-8 JSON or has an unsupported type; reply uses `id: null` |
 | `internal_error` | Anything unexpected; the message is fixed and never carries exception text |
 
 The body is the same whether the SDK rejects arguments against the advertised
@@ -356,12 +414,24 @@ CLI's `whykit status --json` includes.
 
 ## Freshness
 
+The stdio protocol negotiator queues at most 32 frames while its consumer is
+busy, then applies backpressure. Discovery bookkeeping is also bounded and is
+discarded once the protocol era is settled. This is not an HTTP rate limit or
+a bound on the total cost of processing a large vault. HTTP has separate
+request/body/concurrency budgets described above. Query still scans and ranks
+the visible matches to preserve exact totals and cursor ordering, but builds
+result summaries only for the requested page, never for all matches.
+
 Every call reads the vault as it is on disk at that moment. The server keeps
 the parsed notes between calls and reuses a note only while its file's
 modification time, change time, size and inode are all unchanged, so an edit,
 an atomic save, a rename or a deletion is seen by the next call. A file written
 in the last two seconds is always read again. Link resolution, findings and
-every other answer are computed fresh for each call. See
+every other answer are computed fresh for each call. A copied Python context
+cannot extend a completed call's path cache or filtered view, or share them
+with another thread or async task. Disposable terms/metadata candidates are
+reused only for the same validated visible generation; the original matcher
+still verifies and ranks them, preserving exact totals. See
 [Performance](performance.md#mcp-server) for the measured effect.
 
 ## Sensitivity
@@ -394,3 +464,7 @@ Ambiguity between two *visible* records is still reported as `ambiguous`.
 
 The SDK is an optional extra (`mcp>=2.2,<2.4`). See the [security policy](../SECURITY.md)
 before connecting an MCP host to a real vault.
+
+## Claims opt-in and parallel schemas
+
+The same seven read tools support C-NNN targets and [current claim assessments](claims.md). Server tool output schemas accept v1/v2; each result declares its actual version. Published schemas are bundled and inlined offline. Floors are computed from the complete captured vault before confinement. Hidden C, snapshots and receipts are withheld; source text is untrusted data. Visible raw snapshot/config changes invalidate cursors. Reviewer attribution is not authenticated identity, and --today is not a Git reconstruction.

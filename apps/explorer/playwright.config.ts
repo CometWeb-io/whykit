@@ -30,5 +30,5 @@ export default defineConfig({
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1360, height: 900 } }, testIgnore: /mobile\.spec\.ts/ },
     { name: "mobile", use: { ...devices["Pixel 7"] }, testMatch: /mobile\.spec\.ts/ },
   ],
-  webServer: [preview("northline", NORTHLINE_PORT), preview("empty", EMPTY_PORT), preview("synthetic", SYNTHETIC_PORT)],
+  webServer: [preview("northline", NORTHLINE_PORT), preview("empty", EMPTY_PORT), preview("synthetic", SYNTHETIC_PORT), preview("claims", 4320), preview("claims-hidden", 4321)],
 });

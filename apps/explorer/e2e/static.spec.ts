@@ -120,6 +120,16 @@ test("a build without them shows no warning", async ({ page }) => {
   await expect(page.getByRole("note", { name: "Sensitive content in this build" })).toHaveCount(0);
 });
 
+test("private evidence keeps its row classification visible in the private viewer", async ({ page }) => {
+  await page.goto(`${SYNTHETIC_URL}#view=evidence`);
+  const table = page.getByRole("region", { name: "Evidence register" });
+  await expect(table.getByRole("columnheader", { name: "Sensitivity", exact: true })).toBeVisible();
+  const row = table.getByRole("row").filter({ has: page.getByRole("cell", { name: "E-001", exact: true }) });
+  await expect(row.getByText("restricted", { exact: true })).toBeVisible();
+  await page.getByRole("searchbox", { name: "Filter evidence" }).fill("restricted");
+  await expect(row).toBeVisible();
+});
+
 test("the lint findings are a separate file, loaded only by Health", async ({ page }) => {
   const build = resolve(import.meta.dirname, ".build/synthetic");
   const entry = readFileSync(join(build, "index.html"), "utf8").match(/<script[^>]+src="\.\/(assets\/[^"]+\.js)"/i)?.[1];

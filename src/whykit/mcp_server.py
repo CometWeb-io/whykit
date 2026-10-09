@@ -20,8 +20,11 @@ a loopback port (a non-loopback address requires a bearer token).
 # closures whose ``Annotated[..., Field(...)]`` metadata must be real objects.
 
 import argparse
+import asyncio
 import base64
 import copy
+import contextvars
+import contextlib
 import datetime as dt
 import functools
 import hashlib
@@ -35,16 +38,16 @@ import secrets
 import sys
 import time
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-SENSITIVITY_LEVEL = {
-    "public": 0,
-    "internal": 1,
-    "confidential": 2,
-    "restricted": 3,
-}
+from .sensitivity import SENSITIVITY_LEVEL, _sensitivity_level, note_sensitivity_level, classified_evidence
+
 MAX_MCP_CONTEXT = 50_000
+MAX_MCP_RESULT_BYTES = 1_048_576
+MAX_RPC_FRAME_BYTES = 2_097_152
+MAX_RPC_ID_BYTES = 1_024
 MAX_MCP_RESULTS = 100
 MAX_MCP_PACK_DOCS = 20
 MAX_TARGET_CHARS = 512
@@ -67,6 +70,11 @@ DEFAULT_HTTP_HOST = "127.0.0.1"
 DEFAULT_HTTP_PORT = 8000
 TOKEN_ENV = "WHYKIT_MCP_TOKEN"
 MIN_TOKEN_CHARS = 32
+MAX_HTTP_REQUEST_BYTES = 1_048_576
+MAX_HTTP_INFLIGHT = 8
+HTTP_REQUEST_BURST = 60
+HTTP_REQUESTS_PER_SECOND = 2
+HTTP_BODY_TIMEOUT_SECONDS = 30
 
 TOOL_NAMES = ("query", "context", "impact", "status", "pack", "trace", "backlinks")
 RECORD_TEMPLATE = "whykit://record/{+target}"
@@ -104,6 +112,118 @@ class ToolFailure(Exception):
         return {"error": {"code": self.code, "message": self.message}}
 
 
+def _result_fits_budget(payload: Any, *, max_bytes: int | None = None) -> bool:
+    """Count the complete compact UTF-8 JSON result, including escaped text."""
+    # shortcut: reports are already materialized; use incremental builders if vault memory becomes limiting.
+    remaining = MAX_MCP_RESULT_BYTES if max_bytes is None else max_bytes
+    for chunk in json.JSONEncoder(ensure_ascii=False, separators=(",", ":")).iterencode(payload):
+        if len(chunk) > remaining:
+            return False
+        remaining -= len(chunk.encode("utf-8"))
+        if remaining < 0:
+            return False
+    return True
+
+
+def _validate_rpc_id(message: object) -> None:
+    if not isinstance(message, dict):
+        raise ToolFailure("invalid_argument", "JSON-RPC messages must be objects")
+    if "id" not in message or message["id"] is None:
+        return
+    value = message["id"]
+    if type(value) not in (str, int) or not _result_fits_budget(value, max_bytes=MAX_RPC_ID_BYTES):
+        raise ToolFailure("invalid_request_id", "request ID must fit 1024 bytes of UTF-8 JSON")
+
+
+def _rpc_error(failure: ToolFailure, code: int, request_id: object = None) -> dict:
+    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": failure.message, "data": failure.payload()}}
+
+
+@contextlib.asynccontextmanager
+async def bounded_stdio_server():  # type: ignore[no-untyped-def]
+    """Binary line budgets with the SDK's native standard-descriptor isolation."""
+    import anyio
+    import mcp_types
+    from mcp.shared.message import SessionMessage
+    from mcp.server.stdio import _claim_fd, _open_stdin_diversion, _open_stdout_diversion
+
+    # shortcut: SDK 2.x descriptor claims are private; the SDK matrix must cover upgrades.
+    restore_stdin = restore_stdout = None
+    try:
+        stdin_buffer, restore_stdin = _claim_fd(0, sys.stdin, "rb", _open_stdin_diversion)
+        stdout_buffer, restore_stdout = _claim_fd(1, sys.stdout, "wb", _open_stdout_diversion)
+        incoming, read_stream = anyio.create_memory_object_stream(0)
+        write_stream, outgoing = anyio.create_memory_object_stream(0)
+        writer_done = anyio.Event()
+
+        async def reject(failure: ToolFailure, code: int) -> None:
+            error = mcp_types.JSONRPCError.model_validate(_rpc_error(failure, code))
+            await write_stream.send(SessionMessage(error))
+
+        async def read() -> None:
+            async with incoming:
+                while True:
+                    line = await anyio.to_thread.run_sync(stdin_buffer.readline, MAX_HTTP_REQUEST_BYTES + 1, abandon_on_cancel=True)
+                    if not line:
+                        return
+                    if len(line) > MAX_HTTP_REQUEST_BYTES:
+                        await reject(ToolFailure("request_too_large", "stdio frame exceeds 1 MiB; reconnect"), -32600)
+                        return  # Do not drain an unbounded line or wait for its newline.
+                    try:
+                        raw = json.loads(line)
+                    except (ValueError, UnicodeError, RecursionError):
+                        await reject(ToolFailure("invalid_argument", "invalid JSON frame"), -32700)
+                        continue
+                    try:
+                        _validate_rpc_id(raw)
+                    except ToolFailure as failure:
+                        await reject(failure, -32600)
+                        continue
+                    try:
+                        message = mcp_types.jsonrpc_message_adapter.validate_json(line, by_name=False)
+                    except Exception:  # noqa: BLE001 - schema errors can contain peer data
+                        await reject(ToolFailure("invalid_argument", "invalid JSON-RPC frame"), -32600)
+                        continue
+                    await incoming.send(SessionMessage(message))
+
+        async def write() -> None:
+            try:
+                async with outgoing:
+                    async for item in outgoing:
+                        message = item.message
+                        encoded = message.model_dump_json(by_alias=True, exclude_unset=True).encode("utf-8") + b"\n"
+                        if len(encoded) > MAX_RPC_FRAME_BYTES:
+                            request_id = getattr(message, "id", None)
+                            if not _result_fits_budget(request_id, max_bytes=MAX_RPC_ID_BYTES):
+                                request_id = None
+                            failure = ToolFailure("response_too_large", "JSON-RPC frame exceeds 2 MiB")
+                            encoded = (json.dumps(_rpc_error(failure, -32603, request_id), ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+                        await anyio.to_thread.run_sync(stdout_buffer.write, encoded, abandon_on_cancel=True)
+                        await anyio.to_thread.run_sync(stdout_buffer.flush, abandon_on_cancel=True)
+            finally:
+                writer_done.set()
+
+        async with anyio.create_task_group() as group:
+            group.start_soon(read)
+            group.start_soon(write)
+            try:
+                yield read_stream, write_stream
+            finally:
+                await write_stream.aclose()
+                await read_stream.aclose()
+                with anyio.move_on_after(5, shield=True):
+                    await writer_done.wait()
+                group.cancel_scope.cancel()
+    finally:
+        if restore_stdout is not None:
+            # Flush diverted text before restoring the protocol descriptor.
+            with contextlib.suppress(OSError, ValueError):
+                sys.stdout.flush()
+            restore_stdout()
+        if restore_stdin is not None:
+            restore_stdin()
+
+
 MISSING_EXTRA_MESSAGE = (
     "whykit-mcp needs the optional MCP extra, which is not installed.\n"
     "  From a WhyKit checkout:  uv sync --extra mcp && uv run whykit-mcp --root /path/to/vault\n"
@@ -120,6 +240,16 @@ def _require_mcp():
         # `pip install 'whykit[mcp]'` would not work.
         print(MISSING_EXTRA_MESSAGE, file=sys.stderr)
         raise SystemExit(2) from exc
+    try:
+        from mcp.server import runner, stdio
+        required = ((stdio, "_claim_fd"), (stdio, "_open_stdin_diversion"),
+                    (stdio, "_open_stdout_diversion"), (runner, "serve_dual_era_loop"))
+        supported = all(callable(getattr(module, name, None)) for module, name in required)
+    except ImportError:
+        supported = False
+    if not supported:
+        print("Unsupported MCP SDK transport contract; install the locked whykit[mcp] extra.", file=sys.stderr)
+        raise SystemExit(2)
     return MCPServer
 
 
@@ -213,32 +343,6 @@ def _validate_policy(value: str) -> str:
 # Sensitivity filtering
 # ---------------------------------------------------------------------------
 
-UNREADABLE_LEVEL = 99
-
-
-def _sensitivity_level(value: object) -> int:
-    key = str(value or "internal").lower() or "internal"
-    return SENSITIVITY_LEVEL.get(key, 99)
-
-
-def note_sensitivity_level(note: Any) -> int:
-    """The level a note is filtered at, failing closed when its label is unreadable.
-
-    A note without front matter, or with valid front matter that omits the
-    key, is `internal` (the documented default). Front matter that does not
-    parse, or a label spelt with different case or spacing (`Sensitivity:`),
-    may hide a stricter label WhyKit cannot read, so such a note is treated as
-    above every ceiling.
-    """
-    if note.front_error:
-        return UNREADABLE_LEVEL
-    front = note.front
-    level = _sensitivity_level(front.get("sensitivity"))
-    for key, value in front.items():
-        if key != "sensitivity" and str(key).strip().casefold() == "sensitivity":
-            level = max(level, _sensitivity_level(value), SENSITIVITY_LEVEL["restricted"])
-    return level
-
 
 def _visible(item: dict, policy: str) -> bool:
     return _sensitivity_level(item.get("sensitivity")) <= SENSITIVITY_LEVEL[policy]
@@ -276,6 +380,8 @@ def _filter_nested(value: object, policy: str, register_visible: bool | None = N
             return None
         out: dict = {}
         for key, child in value.items():
+            if key == "line" and {"source", "sensitivity"}.issubset(value):
+                continue  # Raw row offsets reveal hidden rows and are not filtered-view locations.
             filtered = _filter_nested(child, policy, register_visible)
             if filtered is None and isinstance(child, dict):
                 continue
@@ -347,9 +453,9 @@ def _withhold_register_details(report: dict) -> dict:
     }
 
 
-def _missing_context(target: str, kind: object) -> dict:
+def _missing_context(target: str, kind: object, *, contract_version: int = 1) -> dict:
     return {
-        "contract_version": 1,
+        "contract_version": contract_version,
         "target": target,
         "exists": False,
         "ambiguous": False,
@@ -357,10 +463,10 @@ def _missing_context(target: str, kind: object) -> dict:
     }
 
 
-def _missing_impact(target: str, kind: object) -> dict:
+def _missing_impact(target: str, kind: object, *, contract_version: int = 1) -> dict:
     if kind == "evidence":
         return {
-            "contract_version": 1,
+            "contract_version": contract_version,
             "target": target,
             "kind": "evidence",
             "exists": False,
@@ -372,7 +478,7 @@ def _missing_impact(target: str, kind: object) -> dict:
         }
     if kind == "decision":
         return {
-            "contract_version": 1,
+            "contract_version": contract_version,
             "target": target,
             "kind": "decision",
             "exists": False,
@@ -381,7 +487,7 @@ def _missing_impact(target: str, kind: object) -> dict:
             "reference_count": 0,
         }
     return {
-        "contract_version": 1,
+        "contract_version": contract_version,
         "target": target,
         "kind": "document",
         "exists": False,
@@ -408,6 +514,8 @@ TOOL_BASE_SCHEMAS: dict[str, str] = {
     "trace": "trace-report.schema.json",
     "backlinks": "backlinks-report.schema.json",
 }
+TOOL_V2_BASE_SCHEMAS = {tool: name.replace(".schema.json", "-v2.schema.json") for tool, name in TOOL_BASE_SCHEMAS.items()}
+BUNDLED_SCHEMA_FILES = frozenset({*TOOL_BASE_SCHEMAS.values(), *TOOL_V2_BASE_SCHEMAS.values(), "claim-assessment.schema.json"})
 
 _CEILING_SCHEMA = {
     "description": "The server's sensitivity ceiling; records above it are treated as nonexistent.",
@@ -425,8 +533,23 @@ _TRUNCATED_SCHEMA = {
 
 
 def _load_contract_schema(name: str) -> dict[str, Any]:
+    if name not in BUNDLED_SCHEMA_FILES:
+        raise ValueError("unbundled contract reference")
     path = Path(__file__).with_name("contract_schemas") / name
-    return json.loads(path.read_text(encoding="utf-8"))
+    def inline(value):
+        if isinstance(value, list):
+            return [inline(item) for item in value]
+        if isinstance(value, dict):
+            if "$ref" in value:
+                ref = value["$ref"].removeprefix("https://cometweb.io/schemas/whykit/")
+                if ref not in BUNDLED_SCHEMA_FILES or ref == name:
+                    raise ValueError("unsupported bundled contract reference")
+                nested = _load_contract_schema(ref)
+                nested.pop("$id", None)
+                return {**nested, **{key:inline(item) for key,item in value.items() if key != "$ref"}}
+            return {key:inline(item) for key,item in value.items()}
+        return value
+    return inline(json.loads(path.read_text(encoding="utf-8")))
 
 
 def _extend(schema: dict[str, Any], title: str, required: Iterable[str] = (), **properties: Any) -> dict[str, Any]:
@@ -438,9 +561,12 @@ def _extend(schema: dict[str, Any], title: str, required: Iterable[str] = (), **
 
 
 @functools.cache
-def _output_schemas() -> dict[str, dict[str, Any]]:
+def _output_schemas(contract_version: int = 1) -> dict[str, dict[str, Any]]:
     schemas: dict[str, dict[str, Any]] = {}
-    for tool, name in TOOL_BASE_SCHEMAS.items():
+    mapping = TOOL_BASE_SCHEMAS if contract_version == 1 else TOOL_V2_BASE_SCHEMAS if contract_version == 2 else None
+    if mapping is None:
+        raise ValueError("unsupported report contract version")
+    for tool, name in mapping.items():
         schema = _load_contract_schema(name)
         # The `$id` names the CLI contract; this is a derived document.
         schema.pop("$id", None)
@@ -495,9 +621,9 @@ def _output_schemas() -> dict[str, dict[str, Any]]:
     return schemas
 
 
-def output_schema(tool: str) -> dict[str, Any]:
+def output_schema(tool: str, *, contract_version: int = 1) -> dict[str, Any]:
     """The JSON Schema a successful ``tool`` result's ``structuredContent`` follows."""
-    return copy.deepcopy(_output_schemas()[tool])
+    return copy.deepcopy(_output_schemas(contract_version)[tool])
 
 
 # ---------------------------------------------------------------------------
@@ -589,6 +715,24 @@ def _validate_cursor(value: object) -> str | None:
 # Tool handlers (SDK-free)
 # ---------------------------------------------------------------------------
 
+@dataclass
+class _ToolView:
+    tools: Any
+    index: Any
+    request: Any
+    active: bool = True
+
+
+_TOOL_VIEW: contextvars.ContextVar[_ToolView | None] = contextvars.ContextVar("whykit_tool_view", default=None)
+
+
+def _vault_request(handler):  # type: ignore[no-untyped-def]
+    @functools.wraps(handler)
+    def read(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return self.scoped(handler, self, *args, **kwargs)
+    return read
+
+
 class VaultTools:
     """Read-only tool handlers bound to one vault root and sensitivity ceiling.
 
@@ -607,8 +751,8 @@ class VaultTools:
         self.allowed = _allowed_sensitivities(self.policy)
         from whykit.vault_index import NoteCache
 
-        # Parsed notes survive between calls while their files are unchanged;
-        # everything derived from them is recomputed per call.
+        # Parsed notes and lookup maps survive validated unchanged files;
+        # filesystem resolution and policy projections are request-scoped.
         self.notes = NoteCache()
         self.cursors = CursorCodec(self.policy)
 
@@ -621,8 +765,55 @@ class VaultTools:
         """
         from whykit.vault_index import VaultIndex
 
+        from .lint import _request_cache
+        request = _request_cache()
+        current = _TOOL_VIEW.get()
+        if current is not None and current.active and request is not None and current.request is request and current.tools is self and current.index is not None:
+            return current.index
         ceiling = SENSITIVITY_LEVEL[self.policy]
-        return VaultIndex.load(self.vault).subset(lambda note: note_sensitivity_level(note) <= ceiling)
+        index = VaultIndex.load(self.vault)
+        from .claims import capture_claims, claims_enabled
+        from .config import ConfigError, load_config
+        from .sensitivity import visible_claim_view
+        try:
+            config, _ = load_config(self.vault)
+        except ConfigError:
+            raise ToolFailure("invalid_config", "the vault configuration does not validate; run `whykit policy`") from None
+        active, retired, occurrences, per_row = classified_evidence(index)
+        register = self.vault / "00-context/evidence-register.md"
+        visible = index.subset(lambda note: note_sensitivity_level(note) <= ceiling and not (per_row and note.path == register))
+        active = {key: row for key, row in active.items() if _visible(row, self.policy)}
+        retired = {key: row for key, row in retired.items() if _visible(row, self.policy)}
+        visible.derived["evidence_register"] = (active, retired, [(key, line) for key, line in occurrences if key in active or key in retired])
+        note = index.note_for(register)
+        visible.derived["register_visible"] = note is None or note_sensitivity_level(note) <= ceiling
+        visible.derived["full_index"] = index
+        if claims_enabled(config) or any(n.front.get("claim_id") or n.front.get("claim_ids") for n in index.notes):
+            captured = capture_claims(index, config)
+            visible, projected = visible_claim_view(index, captured, ceiling=self.policy)
+            # A per-row register is exposed through classified rows, never its raw body.
+            if per_row:
+                visible = visible.subset(lambda n: n.path != register)
+                visible.derived["claims_view"] = projected
+                visible.derived["evidence_register"] = ({eid: row for eid,row in projected["evidence"].items() if row["state"] == "active"},
+                                                         {eid: row for eid,row in projected["evidence"].items() if row["state"] == "retired"},
+                                                         [(eid,n+1) for n,eid in enumerate(sorted(projected["evidence"]))])
+            visible.derived["register_visible"] = note is None or note_sensitivity_level(note) <= ceiling
+            visible.derived["full_index"] = index
+            bound = {"config": hashlib.sha256((self.vault / "whykit.toml").read_bytes()).hexdigest() if (self.vault / "whykit.toml").exists() else None,
+                     "evidence": projected["evidence"],
+                     "claims": {cid: hashlib.sha256(record["text"].encode("utf-8")).hexdigest() for cid,record in projected["records"].items()},
+                     "snapshots": {path: hashlib.sha256(captured["raw_inputs"].get(self.vault / path) or b"").hexdigest() for path in projected["snapshots"]},
+                     "reviews": projected["review_rows"]}
+            if claims_enabled(config):
+                visible.derived["claim_cursor_stamp"] = hashlib.sha256(json.dumps(bound, sort_keys=True).encode("utf-8")).hexdigest()
+        if current is not None and current.active and request is not None and current.request is request and current.tools is self:
+            current.index = visible
+        return visible
+
+    def _cursor_binding(self, values: list) -> list:
+        stamp = self.visible_index().derived.get("claim_cursor_stamp")
+        return values + [stamp] if stamp is not None else values
 
     def register_visible(self) -> bool:
         """Whether the evidence register's own label is within the ceiling.
@@ -630,16 +821,7 @@ class VaultTools:
         Register rows have no label of their own; they are exactly as
         sensitive as the register note that holds them.
         """
-        from whykit.lint import load_note
-
-        path = self.vault / "00-context" / "evidence-register.md"
-        try:
-            note = load_note(path)
-        except FileNotFoundError:
-            return True
-        except (OSError, UnicodeDecodeError):
-            return False
-        return note_sensitivity_level(note) <= SENSITIVITY_LEVEL[self.policy]
+        return bool(self.visible_index().derived["register_visible"])
 
     def _check_vault(self) -> None:
         from whykit.lint import is_vault_root
@@ -648,6 +830,7 @@ class VaultTools:
         if not is_vault_root(self.vault):
             raise ToolFailure("vault_unavailable", "the configured vault is no longer a WhyKit vault")
 
+    @_vault_request
     def query(
         self,
         text: str | None = None,
@@ -675,6 +858,17 @@ class VaultTools:
             raise ToolFailure("invalid_argument", "source_id must be an E-NNN identifier")
         canonical_only = _validate_bool(canonical_only, "canonical_only")
         self._check_vault()
+        binding = self._cursor_binding([text, doc_type, status, owner, tag, source_id, canonical_only, limit])
+        next_cursor = None
+
+        def select(matches: list[tuple[int, str, Any]]) -> list[tuple[int, str, Any]]:
+            nonlocal next_cursor
+            page, next_cursor, _ = self.cursors.page(
+                matches, scope="query", binding=binding,
+                keys=((item[1], item[2].content_sha256) for item in matches), cursor=cursor, limit=limit,
+            )
+            return page
+
         report = query_vault(
             self.vault,
             text=text,
@@ -684,25 +878,18 @@ class VaultTools:
             tag=tag,
             source_id=source_id,
             canonical_only=canonical_only,
-            # Rank every visible match; the page is cut below.
-            limit=1_000_000_000,
+            limit=limit,
             allowed_sensitivities=self.allowed,
             vault=self.visible_index(),
-        )
-        binding = [text, doc_type, status, owner, tag, source_id, canonical_only, limit]
-        results, next_cursor, _ = self.cursors.page(
-            report["results"], scope="query", binding=binding,
-            keys=(item["path"] for item in report["results"]), cursor=cursor, limit=limit,
+            _select=select,
         )
         return {
             **report,
-            "query": {**report["query"], "limit": limit},
-            "returned": len(results),
-            "results": results,
             "next_cursor": next_cursor,
             "max_sensitivity": self.policy,
         }
 
+    @_vault_request
     def context(self, target: str, max_chars: int = 4000) -> dict:
         from whykit.context import build_context
 
@@ -719,10 +906,11 @@ class VaultTools:
         except PermissionError:
             # Match the ordinary missing-target contract so a caller cannot
             # confirm the existence or sensitivity of a filtered document.
-            return _missing_context(target, report.get("kind"))
+            return _missing_context(target, report.get("kind"), contract_version=report["contract_version"])
         filtered["content_trust"] = "untrusted_data"
         return filtered
 
+    @_vault_request
     def impact(self, target: str) -> dict:
         from whykit.impact import analyze_impact
 
@@ -731,23 +919,23 @@ class VaultTools:
         report = analyze_impact(self.vault, target, vault=self.visible_index())
         kind = report.get("kind", "document")
         if not report.get("exists"):
-            return report
+            return _missing_impact(target, kind, contract_version=report["contract_version"]) if kind == "evidence" else report
         # A path that resolves to a file the vault index skips (for example
         # under `.obsidian/`) has no metadata to classify; treat it as absent
         # rather than confirming that the file exists.
         if kind == "document" and "sensitivity" not in (report.get("record") or {}):
-            return _missing_impact(target, kind)
+            return _missing_impact(target, kind, contract_version=report["contract_version"])
         try:
             return filter_report(report, self.policy, self.register_visible())
         except PermissionError:
             # Return the same shape as an absent target of this kind. In
             # particular, do not reveal a hidden record's sensitivity label.
-            return _missing_impact(target, kind)
+            return _missing_impact(target, kind, contract_version=report["contract_version"])
 
+    @_vault_request
     def status(self, today: str | None = None, due_days: int | None = None) -> dict:
         from whykit.config import ConfigError, load_config
         from whykit.status import build_status, is_decision_record
-        from whykit.vault_index import VaultIndex
 
         as_of = _validate_today(today)
         if due_days is not None:
@@ -763,9 +951,9 @@ class VaultTools:
         # Lint the confined view: a link to a hidden note is then reported
         # exactly like a link to a note that does not exist, and a hidden
         # duplicate of a visible decision ID is never mentioned.
-        index = VaultIndex.load(self.vault)
+        visible = self.visible_index()
+        index = visible.derived["full_index"]
         ceiling = SENSITIVITY_LEVEL[self.policy]
-        visible = index.subset(lambda note: note_sensitivity_level(note) <= ceiling)
         report = build_status(self.vault, today=as_of, due_days=due_days, vault=visible)
         visible_notes = visible.notes
         hidden_paths = {index.relative(note.path) for note in index.notes} - {
@@ -811,7 +999,8 @@ class VaultTools:
                 ownership_gaps += 1
 
         return {
-            "contract_version": 1,
+            "contract_version": report["contract_version"],
+            **({"claims": report["claims"]} if "claims" in report else {}),
             "as_of": report["as_of"],
             "max_sensitivity": self.policy,
             "documents": len(visible_notes),
@@ -833,6 +1022,7 @@ class VaultTools:
             "findings": findings,
         }
 
+    @_vault_request
     def pack(
         self,
         targets: list[str] | None = None,
@@ -875,6 +1065,7 @@ class VaultTools:
         assert isinstance(filtered, dict)
         return {**filtered, "max_sensitivity": self.policy}
 
+    @_vault_request
     def trace(
         self,
         decision: str | None = None,
@@ -899,10 +1090,10 @@ class VaultTools:
             report = _withhold_register_details(report)
         records = report["decisions"]
         if gaps_only:
-            records = [record for record in records if record["live"] and record["gaps"]]
+            records = [record for record in records if record["live"] and (record["gaps"] or record.get("claim_gaps"))]
         page, next_cursor, more = self.cursors.page(
-            records, scope="trace", binding=[decision, as_of.isoformat(), gaps_only, limit],
-            keys=((record["decision_id"], record["path"]) for record in records), cursor=cursor, limit=limit,
+            records, scope="trace", binding=self._cursor_binding([decision, as_of.isoformat(), gaps_only, limit]),
+            keys=((record["decision_id"], record["path"], hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()) for record in records), cursor=cursor, limit=limit,
         )
         filtered = _filter_nested({
             **report,
@@ -915,6 +1106,7 @@ class VaultTools:
         assert isinstance(filtered, dict)
         return filtered
 
+    @_vault_request
     def backlinks(self, target: str, limit: int = 100, cursor: str | None = None) -> dict:
         from whykit.backlinks import build_backlinks
 
@@ -922,10 +1114,11 @@ class VaultTools:
         limit = _validate_int(limit, "limit", minimum=0, maximum=MAX_MCP_BACKLINKS)
         cursor = _validate_cursor(cursor)
         self._check_vault()
-        if _EVIDENCE_RE.fullmatch(target) and not self.register_visible():
+        if _EVIDENCE_RE.fullmatch(target) and target not in self._evidence_ids():
+            from .claim_readers import report_version
             # Evidence inherits the register's own label.
             report: dict[str, Any] = {
-                "contract_version": 1,
+                "contract_version": report_version(self.vault),
                 "target": target,
                 "id": f"evidence:{target}",
                 "kind": "evidence",
@@ -937,7 +1130,7 @@ class VaultTools:
             report = build_backlinks(self.vault, target, vault=self.visible_index())
         links = report["backlinks"]
         page, next_cursor, more = self.cursors.page(
-            links, scope="backlinks", binding=[report["id"], limit],
+            links, scope="backlinks", binding=self._cursor_binding([report["id"], limit]),
             keys=((link["type"], link["from"], link["to"]) for link in links), cursor=cursor, limit=limit,
         )
         return {
@@ -950,6 +1143,7 @@ class VaultTools:
 
     # -- resources and prompts (SDK-free) ------------------------------------
 
+    @_vault_request
     def read_record(self, target: str) -> dict | None:
         """Body of the ``whykit://record/{+target}`` resource, or ``None``.
 
@@ -959,6 +1153,7 @@ class VaultTools:
         report = self.context(target, max_chars=RESOURCE_BODY_CHARS)
         return report if report.get("exists") else None
 
+    @_vault_request
     def decision_index(self, limit: int | None = MAX_RESOURCE_ROWS, *, index: Any = None) -> dict:
         """Body of the ``whykit://decisions`` resource: visible decisions only."""
         self._check_vault()
@@ -985,6 +1180,7 @@ class VaultTools:
             "truncated": len(shown) < len(rows),
         }
 
+    @_vault_request
     def resource_page(self, cursor: str | None = None) -> tuple[list[dict], str | None]:
         """One page of ``resources/list``: the decision index, then each visible decision.
 
@@ -1000,6 +1196,7 @@ class VaultTools:
         )
         return page, next_cursor
 
+    @_vault_request
     def resource_rows(self, *, index: Any = None) -> list[dict]:
         """Every row ``resources/list`` pages through, in order."""
         self._check_vault()
@@ -1022,6 +1219,7 @@ class VaultTools:
             })
         return rows
 
+    @_vault_request
     def complete(self, ref_type: str, ref_name: str, argument: str, value: object) -> dict:
         """Completion values for a prompt or resource-template argument.
 
@@ -1066,6 +1264,7 @@ class VaultTools:
         index = self.visible_index()
         return sorted(index.relative(note.path) for note in index.notes)
 
+    @_vault_request
     def summarize_decision_prompt(self, decision_id: str) -> str:
         """Text of the ``summarize_decision`` prompt for one visible decision."""
         decision_id = _validate_text(decision_id, "decision_id", max_chars=MAX_FILTER_CHARS) or ""
@@ -1093,6 +1292,7 @@ class VaultTools:
             "</whykit-data>"
         )
 
+    @_vault_request
     def evidence_gaps_prompt(self, today: str | None = None) -> str:
         """Text of the ``review_evidence_gaps`` prompt: live decisions with gaps."""
         trace = self.trace(today=today, gaps_only=True, limit=PROMPT_TRACE_DECISIONS)
@@ -1139,14 +1339,29 @@ class VaultTools:
 
     def scoped(self, handler: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Run one request with a fresh resolve cache and the shared note cache."""
-        from whykit.lint import path_cache
+        from whykit.lint import path_cache, evidence_view, _request_cache
         from whykit.vault_index import reuse_notes
 
         # One resolve cache per request, never per process: the vault may change
         # on disk between requests and the next one must see it.  Parsed notes
         # are reused only after their stat signature is re-checked.
-        with path_cache(), reuse_notes(self.notes):
-            return handler(*args, **kwargs)
+        from .io import vault_read_lock
+
+        self._check_vault()
+        request = _request_cache()
+        current = _TOOL_VIEW.get()
+        nested = current is not None and current.active and request is not None and current.request is request and current.tools is self
+        with vault_read_lock(self.vault), path_cache(fresh=not nested), reuse_notes(self.notes):
+            if nested:
+                return handler(*args, **kwargs)
+            view = _ToolView(self, None, _request_cache())
+            token = _TOOL_VIEW.set(view)
+            try:
+                with evidence_view(self.vault, lambda: self.visible_index().derived["evidence_register"]):
+                    return handler(*args, **kwargs)
+            finally:
+                view.active = False
+                _TOOL_VIEW.reset(token)
 
 
 class VaultWatcher:
@@ -1194,6 +1409,7 @@ class VaultWatcher:
             path for path in iter_markdown(root)
             if not any(part in CONTENT_SKIP_DIRS for part in path.parts[depth:])
         )
+        paths.extend((root / "00-context/claim-snapshots").glob("*.txt"))
         for path in (*paths, root / "whykit.toml"):
             try:
                 info = os.stat(path)
@@ -1206,6 +1422,9 @@ class VaultWatcher:
         return signature
 
     def _snapshot(self) -> tuple[dict[str, str], str]:
+        return self.tools.scoped(self._scoped_snapshot)
+
+    def _scoped_snapshot(self) -> tuple[dict[str, str], str]:
         from whykit.lint import evidence_register, path_cache
         from whykit.vault_index import reuse_notes
 
@@ -1217,6 +1436,9 @@ class VaultWatcher:
             if not self.tools.vault.is_dir():
                 return {}, ""
             index = self.tools.visible_index()
+            active, retired, _ = evidence_register(self.tools.vault)
+            evidence = {key: {field: value for field, value in row.items() if field != "line"}
+                        for key, row in (*active.items(), *retired.items())}
             for note in index.notes:
                 relative = index.relative(note.path)
                 uris = {f"whykit://record/{relative}"}
@@ -1225,13 +1447,13 @@ class VaultWatcher:
                 decision_id = str(note.front.get("decision_id") or "").strip()
                 if _DECISION_RE.fullmatch(decision_id):
                     uris.add(f"whykit://record/{decision_id}")
-                text_digest = digest([relative, note.text])
+                text_digest = digest([relative, note.text, [(key, evidence.get(key)) for key in note.cited_evidence]])
                 for uri in uris:
                     state.setdefault(uri, []).append(text_digest)
             if self.tools.register_visible():
                 active, retired, _ = evidence_register(self.tools.vault)
                 for evidence_id, row in (*active.items(), *retired.items()):
-                    state.setdefault(f"whykit://record/{evidence_id}", []).append(digest(row))
+                    state.setdefault(f"whykit://record/{evidence_id}", []).append(digest({key: value for key, value in row.items() if key != "line"}))
             state[DECISIONS_URI] = [digest(self.tools.decision_index(index=index))]
             listing = digest(self.tools.resource_rows(index=index))
         flat = {uri: digest(sorted(parts)) for uri, parts in state.items()}
@@ -1297,6 +1519,7 @@ PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion"
 DISCOVER_METHOD = "server/discover"
 # How long a handover to the handshake era waits for in-flight probe replies.
 PROBE_DRAIN_SECONDS = 5.0
+NEGOTIATION_BUFFER_SIZE = 32
 
 
 async def serve_negotiated_stream(lowlevel, read_stream, write_stream, *, lifespan_state, init_options) -> None:  # type: ignore[no-untyped-def]
@@ -1316,8 +1539,6 @@ async def serve_negotiated_stream(lowlevel, read_stream, write_stream, *, lifesp
     connection the probe opened. Both loops are the SDK's own
     ``serve_dual_era_loop`` and share the server's lifespan state.
     """
-    import math
-
     import anyio
     from mcp.server.runner import serve_dual_era_loop
     from mcp_types import JSONRPCError, JSONRPCRequest, JSONRPCResponse
@@ -1327,12 +1548,13 @@ async def serve_negotiated_stream(lowlevel, read_stream, write_stream, *, lifesp
 
         def __init__(self) -> None:
             self.answered: set[Any] = set()
+            self.awaited: set[Any] = set()
             self.progress = anyio.Event()
 
         async def send(self, item):  # type: ignore[no-untyped-def]
             await write_stream.send(item)
             message = getattr(item, "message", None)
-            if isinstance(message, (JSONRPCResponse, JSONRPCError)):
+            if isinstance(message, (JSONRPCResponse, JSONRPCError)) and message.id in self.awaited:
                 self.answered.add(message.id)
                 self.progress.set()
                 self.progress = anyio.Event()
@@ -1362,7 +1584,7 @@ async def serve_negotiated_stream(lowlevel, read_stream, write_stream, *, lifesp
     async with anyio.create_task_group() as group:
 
         async def start_loop():  # type: ignore[no-untyped-def]
-            send, receive = anyio.create_memory_object_stream(math.inf)
+            send, receive = anyio.create_memory_object_stream(NEGOTIATION_BUFFER_SIZE)
             finished = anyio.Event()
 
             async def run() -> None:
@@ -1385,7 +1607,13 @@ async def serve_negotiated_stream(lowlevel, read_stream, write_stream, *, lifesp
                     message = getattr(item, "message", None)
                     if open_era and isinstance(message, JSONRPCRequest):
                         if is_probe(message):
+                            if len(probes) >= NEGOTIATION_BUFFER_SIZE:
+                                await drain(probes)
+                                probes.clear()
+                                outbound.awaited.clear()
+                                outbound.answered.clear()
                             probes.append(message.id)
+                            outbound.awaited.add(message.id)
                         elif message.method == "initialize" and probes:
                             # The client gave up on its probe: finish answering
                             # it, then serve the handshake on a fresh loop.
@@ -1396,6 +1624,10 @@ async def serve_negotiated_stream(lowlevel, read_stream, write_stream, *, lifesp
                             open_era = False
                         else:
                             open_era = False
+                        if not open_era:
+                            probes.clear()
+                            outbound.awaited.clear()
+                            outbound.answered.clear()
                     await send.send(item)
         finally:
             await send.aclose()
@@ -1432,6 +1664,7 @@ def build_server(
         Resource,
         TextContent,
         ToolAnnotations,
+        jsonrpc_message_adapter,
     )
     from pydantic import Field, ValidationError
 
@@ -1465,6 +1698,9 @@ def build_server(
     )
 
     def result(payload: dict, is_error: bool):
+        if not _result_fits_budget(payload):
+            payload = ToolFailure("response_too_large", "result exceeds the 1 MiB response budget").payload()
+            is_error = True
         return CallToolResult(
             content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))],
             structured_content=payload,
@@ -1488,7 +1724,7 @@ def build_server(
             # follows; error results keep the shared `{"error": ...}` body.
             listed = await super().list_tools()
             return [
-                tool.model_copy(update={"output_schema": output_schema(tool.name)})
+                tool.model_copy(update={"description": (tool.description or "") + " Claims opt-in returns contract v2 assessments; supported is reviewed support, not truth or authenticated identity.", "output_schema": {"type": "object", "anyOf": [output_schema(tool.name), output_schema(tool.name, contract_version=2)]}})
                 if tool.name in TOOL_NAMES else tool
                 for tool in listed
             ]
@@ -1513,10 +1749,8 @@ def build_server(
         async def run_stdio_async(self) -> None:
             # Same as the SDK's stdio runner, except that a `server/discover`
             # probe does not lock the connection out of the classic handshake.
-            from mcp.server.stdio import stdio_server
-
             lowlevel = self._lowlevel_server
-            async with stdio_server() as (read_stream, write_stream):
+            async with bounded_stdio_server() as (read_stream, write_stream):
                 async with lowlevel.lifespan(lowlevel) as lifespan_state:
                     await serve_negotiated_stream(
                         lowlevel, read_stream, write_stream,
@@ -1587,6 +1821,37 @@ def build_server(
     mcp = WhyKitServer(
         "whykit", version=__version__, instructions=SERVER_INSTRUCTIONS, subscriptions=bus, lifespan=lifespan,
     )
+    mcp.validate_transport_message = jsonrpc_message_adapter.validate_python
+
+    async def bound_result(ctx, call_next):  # type: ignore[no-untyped-def]
+        try:
+            payload = await call_next(ctx)
+        except MCPError as exc:
+            error = {"jsonrpc": "2.0", "id": ctx.request_id, "error": exc.error.model_dump(by_alias=True, exclude_none=True)}
+            if _result_fits_budget(error, max_bytes=MAX_RPC_FRAME_BYTES):
+                raise
+            failure = ToolFailure("response_too_large", "JSON-RPC frame exceeds 2 MiB")
+            raise MCPError(code=INTERNAL_ERROR, message=failure.message, data=failure.payload()) from None
+        except Exception as exc:  # noqa: BLE001 - never echo validation input/exception text
+            code = INVALID_PARAMS if isinstance(exc, ValidationError) else INTERNAL_ERROR
+            failure = ToolFailure("invalid_argument" if code == INVALID_PARAMS else "internal_error", "request could not be processed")
+            raise MCPError(code=code, message=failure.message, data=failure.payload()) from None
+        frame = {"jsonrpc": "2.0", "id": ctx.request_id, "result": payload}
+        if _result_fits_budget(payload) and _result_fits_budget(frame, max_bytes=MAX_RPC_FRAME_BYTES):
+            return payload
+        failure = ToolFailure("response_too_large", "result exceeds the 1 MiB response budget")
+        if ctx.method == "tools/call":
+            bounded = result(failure.payload(), True).model_dump(by_alias=True, mode="json", exclude_none=True)
+            # Keep the SDK's negotiated result envelope, never the rejected data.
+            for key in ("resultType", "_meta"):
+                if key in payload:
+                    bounded[key] = payload[key]
+            if not _result_fits_budget(bounded):
+                raise MCPError(code=INTERNAL_ERROR, message=failure.message, data=failure.payload())
+            return bounded
+        raise MCPError(code=INTERNAL_ERROR, message=failure.message, data=failure.payload())
+
+    mcp.middleware.append(bound_result)
 
     @mcp.tool(title="Search the vault", annotations=read_only)
     def query(
@@ -1910,9 +2175,110 @@ def require_local_host(app: Callable[..., Any], host: str, port: int) -> Callabl
     return guarded
 
 
+def limit_http_requests(app: Callable[..., Any], *, validate_message: Callable[..., Any] | None = None) -> Callable[..., Any]:
+    """Bound authenticated HTTP work and buffer size before the SDK parses JSON."""
+    # shortcut: one shared budget per process; use a gateway for multi-process hosting.
+    tokens = float(HTTP_REQUEST_BURST)
+    updated = time.monotonic()
+    inflight = 0
+
+    async def limited(scope: dict[str, Any], receive: Callable[..., Any], send: Callable[..., Any]) -> None:
+        nonlocal tokens, updated, inflight
+        if scope.get("type") != "http":
+            await app(scope, receive, send)
+            return
+
+        async def reject(status: int, failure: ToolFailure) -> None:
+            body = json.dumps(failure.payload()).encode("ascii")
+            headers = [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode("ascii"))]
+            if status in {429, 503}:
+                headers.append((b"retry-after", b"1"))
+            if status in {400, 408, 413}:
+                headers.append((b"connection", b"close"))
+            await send({"type": "http.response.start", "status": status, "headers": headers})
+            await send({"type": "http.response.body", "body": body})
+
+        now = time.monotonic()
+        tokens = min(float(HTTP_REQUEST_BURST), tokens + max(0, now - updated) * HTTP_REQUESTS_PER_SECOND)
+        updated = now
+        if tokens < 1:
+            await reject(429, ToolFailure("rate_limited", "request budget exhausted; retry later"))
+            return
+        tokens -= 1
+        if inflight >= MAX_HTTP_INFLIGHT:
+            await reject(503, ToolFailure("server_busy", "too many active requests; retry later"))
+            return
+        inflight += 1
+        try:
+            lengths = [value.strip() for name, value in scope.get("headers") or () if name.lower() == b"content-length"]
+            if len(lengths) > 1 or (lengths and (not lengths[0].isdigit() or len(lengths[0]) > 10)):
+                await reject(400, ToolFailure("invalid_argument", "invalid content length"))
+                return
+            if lengths and int(lengths[0]) > MAX_HTTP_REQUEST_BYTES:
+                await reject(413, ToolFailure("request_too_large", "request exceeds the body budget"))
+                return
+            body = bytearray()
+            try:
+                async with asyncio.timeout(HTTP_BODY_TIMEOUT_SECONDS):
+                    while True:
+                        event = await receive()
+                        if event["type"] == "http.disconnect":
+                            return
+                        if event["type"] != "http.request":
+                            await reject(400, ToolFailure("invalid_argument", "invalid request body"))
+                            return
+                        chunk = event.get("body", b"")
+                        if len(body) + len(chunk) > MAX_HTTP_REQUEST_BYTES:
+                            await reject(413, ToolFailure("request_too_large", "request exceeds the body budget"))
+                            return
+                        body.extend(chunk)
+                        if not event.get("more_body", False):
+                            break
+            except TimeoutError:
+                await reject(408, ToolFailure("request_timeout", "request body did not arrive in time"))
+                return
+            if body:
+                failure: ToolFailure | None = None
+                code = -32600
+                try:
+                    raw = json.loads(body)
+                except (ValueError, UnicodeError, RecursionError):
+                    failure = ToolFailure("invalid_argument", "invalid JSON frame")
+                    code = -32700
+                else:
+                    try:
+                        _validate_rpc_id(raw)
+                        if validate_message is not None:
+                            validate_message(raw, by_name=False)
+                    except ToolFailure as exc:
+                        failure = exc
+                    except Exception:  # noqa: BLE001 - validation errors may echo request bodies
+                        failure = ToolFailure("invalid_argument", "invalid JSON-RPC frame")
+                if failure is not None:
+                    encoded = json.dumps(_rpc_error(failure, code), separators=(",", ":")).encode("utf-8")
+                    await send({"type": "http.response.start", "status": 400,
+                                "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(encoded)).encode("ascii"))]})
+                    await send({"type": "http.response.body", "body": encoded})
+                    return
+            pending = True
+
+            async def buffered_receive() -> dict[str, Any]:
+                nonlocal pending
+                if pending:
+                    pending = False
+                    return {"type": "http.request", "body": bytes(body), "more_body": False}
+                return await receive()
+
+            await app(scope, buffered_receive, send)
+        finally:
+            inflight -= 1
+
+    return limited
+
+
 def http_app(server: Any, host: str, port: int, token: str | None) -> Callable[..., Any]:
     """The ASGI app ``--http`` serves: bearer-guarded with a token, host-guarded without."""
-    app = server.streamable_http_app(host=host)
+    app = limit_http_requests(server.streamable_http_app(host=host), validate_message=getattr(server, "validate_transport_message", None))
     if token is not None:
         return require_bearer(app, token)
     return require_local_host(app, host, port)
@@ -1984,7 +2350,7 @@ def main(argv: list[str] | None = None) -> int:
     app = http_app(server, host, port, token)
     shown = f"[{host}]" if ":" in host else host
     print(f"whykit-mcp: serving streamable HTTP at http://{shown}:{port}/mcp", file=sys.stderr, flush=True)
-    config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning", limit_concurrency=32)
     anyio.run(uvicorn.Server(config).serve)
     return 0
 

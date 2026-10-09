@@ -1,0 +1,318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/trace-report-v2.schema.json",
+  "title": "WhyKit decision trace (claims opt-in v2)",
+  "description": "Output of `whykit trace --json`. An unknown `--decision` yields an empty `decisions` list and exit 1.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "as_of",
+    "decision",
+    "decisions",
+    "summary"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 2
+    },
+    "as_of": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "decision": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^D-[0-9]{3,}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "decision_id",
+          "path",
+          "status",
+          "live",
+          "evidence",
+          "gaps"
+        ],
+        "properties": {
+          "decision_id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "sensitivity": {
+            "type": "string"
+          },
+          "superseded_by": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "live": {
+            "type": "boolean"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "state",
+                "stale"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "via": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "active",
+                    "retired",
+                    "missing"
+                  ]
+                },
+                "source": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "type": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "accessed": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "age_days": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "max_age_days": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "stale": {
+                  "type": "boolean"
+                },
+                "replaced_by": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "gaps": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "no_evidence",
+                "missing_evidence",
+                "retired_evidence",
+                "stale_evidence"
+              ]
+            }
+          },
+          "claims": {
+            "type": "array",
+            "items": {
+              "$ref": "https://cometweb.io/schemas/whykit/claim-assessment.schema.json"
+            }
+          },
+          "direct_evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "state",
+                "stale"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "via": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "active",
+                    "retired",
+                    "missing"
+                  ]
+                },
+                "source": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "type": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "accessed": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "age_days": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "max_age_days": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "stale": {
+                  "type": "boolean"
+                },
+                "replaced_by": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "claim_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "claim_id",
+                "verification_status",
+                "reasons"
+              ],
+              "properties": {
+                "claim_id": {
+                  "type": "string",
+                  "pattern": "^C-[0-9]{3,}$"
+                },
+                "verification_status": {
+                  "enum": [
+                    "supported",
+                    "disputed",
+                    "unsupported",
+                    "unknown"
+                  ]
+                },
+                "reasons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "decisions",
+        "live",
+        "live_with_gaps",
+        "gaps"
+      ],
+      "properties": {
+        "decisions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "live": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "live_with_gaps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "gaps": {
+          "type": "object",
+          "required": [
+            "no_evidence",
+            "missing_evidence",
+            "retired_evidence",
+            "stale_evidence"
+          ],
+          "properties": {
+            "no_evidence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "missing_evidence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retired_evidence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "stale_evidence": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

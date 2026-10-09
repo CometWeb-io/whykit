@@ -59,7 +59,7 @@ class McpRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(tool.annotations.open_world_hint)
                 for name, schema in tool.input_schema["properties"].items():
                     self.assertTrue(schema.get("description"), f"{tool.name}.{name} has no description")
-                self.assertEqual(tool.output_schema, output_schema(tool.name))
+                self.assertEqual(tool.output_schema, {"type": "object", "anyOf": [output_schema(tool.name), output_schema(tool.name, contract_version=2)]})
 
     async def test_in_process_errors_are_structured_tool_results(self) -> None:
         from whykit.mcp_server import build_server
@@ -467,7 +467,7 @@ class McpStdioConformanceTests(unittest.IsolatedAsyncioTestCase):
 
         listed = await self.client.list_tools()
         self.assertEqual({tool.name: tool.output_schema for tool in listed.tools},
-                         {name: output_schema(name) for name in TOOL_NAMES})
+                         {name: {"type": "object", "anyOf": [output_schema(name), output_schema(name, contract_version=2)]} for name in TOOL_NAMES})
         # The SDK client validates every successful structuredContent against
         # the declared schema and raises on a mismatch.
         for name, arguments in (

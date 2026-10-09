@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/context-pack-v2.schema.json",
+  "title": "WhyKit bounded context pack (claims opt-in v2)",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "target",
+    "exists"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 2
+    },
+    "target": {
+      "type": "string"
+    },
+    "exists": {
+      "type": "boolean"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "content": {
+      "type": "string"
+    },
+    "content_truncated": {
+      "type": "boolean"
+    },
+    "front_matter_omitted": {
+      "const": true,
+      "description": "Present when the body did not fit max_chars: the front matter was left out first (its fields are in `record`), so the content starts with the summary or the body."
+    },
+    "evidence": {
+      "description": "Evidence rows cited by a document or decision; for an E-NNN target, that entry's own register row.",
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        {
+          "type": "object"
+        }
+      ]
+    },
+    "incoming": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "outgoing": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "supersession": {
+      "type": "object"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "claim": {
+      "$ref": "https://cometweb.io/schemas/whykit/claim-assessment.schema.json"
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "$ref": "https://cometweb.io/schemas/whykit/claim-assessment.schema.json"
+      }
+    }
+  },
+  "additionalProperties": true
+}

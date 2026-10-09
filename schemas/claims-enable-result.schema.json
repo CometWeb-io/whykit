@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CometWeb-io/whykit/raw/main/schemas/claims-enable-result.schema.json",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "applied",
+    "expected_sha256",
+    "enabled",
+    "before_sha256",
+    "after_sha256",
+    "original_config_base64",
+    "from_format",
+    "to_format",
+    "manual_claim_authoring_required",
+    "unchanged_decisions",
+    "unchanged_evidence",
+    "changed"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "applied": {
+      "type": "boolean"
+    },
+    "expected_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "before_sha256": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "after_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "original_config_base64": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "from_format": {
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "to_format": {
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "manual_claim_authoring_required": {
+      "const": true
+    },
+    "unchanged_decisions": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "unchanged_evidence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "changed": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}

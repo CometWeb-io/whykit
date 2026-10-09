@@ -1,0 +1,9 @@
+[
+  {"row": "| a\\|b | c |", "cells": ["a|b", "c"]},
+  {"row": "| [[notes/a|label]] | c |", "cells": ["[[notes/a|label]]", "c"]},
+  {"row": "| a\\\\|b | c |", "cells": ["a\\|b", "c"]},
+  {"row": "| a [[ unclosed | c |", "cells": ["a [[ unclosed", "c"]},
+  {"row": "| Zażółć\\|日本 | ü |", "cells": ["Zażółć|日本", "ü"]},
+  {"row": "| one | |", "cells": ["one", ""]},
+  {"row": "| | |", "cells": ["", ""]}
+]

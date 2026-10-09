@@ -58,8 +58,11 @@ Exact behaviour, checked against the code by the test suite.
 |---|---|
 | [Troubleshooting and FAQ](troubleshooting.md) | Error messages, surprising results and quick answers |
 | [Performance](performance.md) | Measured times on large vaults and how to reproduce them |
+| [Private-vault dogfood](dogfood.md) | A source-bound local acceptance record without publishing vault contents |
 | [Migrating to 0.3](migration-0.3.md) | Upgrading a vault, scripts and CI from 0.2.0 or the 0.3.0 preview |
 | [Releasing](releasing.md) | The package release checklist and reproducible builds |
 | [Security model](security-model.md) | What WhyKit protects, the trust boundaries, and what it does not guarantee |
 | [Security policy](../SECURITY.md) | Reporting a vulnerability and keeping a real vault private |
 | [Contributing](../CONTRIBUTING.md) | Repository layout, checks to run and how docs are tested |
+
+- [Optional reviewed claims](claims.md): opt-in C records, local fragments, four assessment states, receipts and parallel v2 reports.
