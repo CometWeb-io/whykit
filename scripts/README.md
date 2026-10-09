@@ -49,6 +49,23 @@ python3 scripts/bench.py --notes 5000 --mcp                # MCP tool latency, c
 python3 scripts/bench.py --notes 5000 --memory             # peak traced memory per command
 ```
 
+## `bench_transactions.py`
+
+Run `uv run python scripts/bench_transactions.py --count 100000` to measure
+fsync-backed journal retention and windowed p50/p95 latency. It uses a disposable
+vault and asserts no terminal journals survive each checkpoint.
+
+## `bench_query.py`
+
+Run `uv run python scripts/bench_query.py --notes 1000 --clients 1 8 32` for
+shared in-process MCP handler contention. It reports p50/p95 and cumulative
+process peak RSS where available. Each client/query group starts a fresh tool
+instance; fixture timestamps settle before measurement. Every answer is checked
+against an uncached query. Use `--vault PATH --src CHECKOUT/src` to compare two
+implementations over identical files, and repeat `--text` for broad and selective
+substrings. Run sizes in separate processes. It does not qualify network clients
+or models.
+
 ## `check_dist.py`
 
 Checks the archives from `uv build` against the project's packaging promises:

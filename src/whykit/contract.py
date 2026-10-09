@@ -76,10 +76,14 @@ class TargetNotFound(ValueError):
 # test walks the argument parser to keep this table complete.
 OUTPUT_SCHEMAS: dict[str, str] = {
     "init": "init-result.schema.json",
+    "recover": "recovery-result.schema.json",
     "lint": "lint-report.schema.json",
     "new decision": "record-create.schema.json",
     "new evidence": "record-create.schema.json",
     "new note": "record-create.schema.json",
+    "new claim": "claim-create-result.schema.json",
+    "claims enable": "claims-enable-result.schema.json",
+    "claims disable": "claims-enable-result.schema.json",
     "status": "status-report.schema.json",
     "workspace": "workspace-report.schema.json",
     "graph": "graph.schema.json",
@@ -107,6 +111,19 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "explorer-index": "explorer-index.schema.json",
 }
 ERROR_SCHEMA = "error.schema.json"
+
+CLAIM_OUTPUT_SCHEMAS = {command: name.replace(".schema.json", "-v2.schema.json")
+                        for command, name in OUTPUT_SCHEMAS.items()
+                        if command in {"graph", "backlinks", "trace", "impact", "query", "context", "pack", "status",
+                                       "review list", "review record", "review approve", "history", "lint", "check", "explorer-index"}}
+
+
+def output_schema_name(command: str, *, contract_version: int = 1) -> str:
+    mapping = OUTPUT_SCHEMAS if contract_version == 1 else CLAIM_OUTPUT_SCHEMAS if contract_version == 2 else {}
+    try:
+        return mapping[command]
+    except KeyError:
+        raise ValueError("unsupported command or report contract version") from None
 
 # Non-default machine formats that are not the JSON contract itself (so they
 # carry no top-level ``contract_version``) but still have a published schema.

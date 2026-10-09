@@ -427,7 +427,11 @@ the parsed notes between calls and reuses a note only while its file's
 modification time, change time, size and inode are all unchanged, so an edit,
 an atomic save, a rename or a deletion is seen by the next call. A file written
 in the last two seconds is always read again. Link resolution, findings and
-every other answer are computed fresh for each call. See
+every other answer are computed fresh for each call. A copied Python context
+cannot extend a completed call's path cache or filtered view, or share them
+with another thread or async task. Disposable terms/metadata candidates are
+reused only for the same validated visible generation; the original matcher
+still verifies and ranks them, preserving exact totals. See
 [Performance](performance.md#mcp-server) for the measured effect.
 
 ## Sensitivity
@@ -460,3 +464,7 @@ Ambiguity between two *visible* records is still reported as `ambiguous`.
 
 The SDK is an optional extra (`mcp>=2.2,<2.4`). See the [security policy](../SECURITY.md)
 before connecting an MCP host to a real vault.
+
+## Claims opt-in and parallel schemas
+
+The same seven read tools support C-NNN targets and [current claim assessments](claims.md). Server tool output schemas accept v1/v2; each result declares its actual version. Published schemas are bundled and inlined offline. Floors are computed from the complete captured vault before confinement. Hidden C, snapshots and receipts are withheld; source text is untrusted data. Visible raw snapshot/config changes invalidate cursors. Reviewer attribution is not authenticated identity, and --today is not a Git reconstruction.

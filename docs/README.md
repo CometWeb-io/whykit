@@ -64,3 +64,5 @@ Exact behaviour, checked against the code by the test suite.
 | [Security model](security-model.md) | What WhyKit protects, the trust boundaries, and what it does not guarantee |
 | [Security policy](../SECURITY.md) | Reporting a vulnerability and keeping a real vault private |
 | [Contributing](../CONTRIBUTING.md) | Repository layout, checks to run and how docs are tested |
+
+- [Optional reviewed claims](claims.md): opt-in C records, local fragments, four assessment states, receipts and parallel v2 reports.

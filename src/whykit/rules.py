@@ -26,6 +26,14 @@ class Rule:
 
 
 _RULES = (
+    Rule("claim.invalid_metadata", "error", 'Claim metadata/path is malformed.', "Malformed claim data cannot establish reviewed support.", 'Use the explicit claim format and remove writable verification_status.', security=True),
+    Rule("claim.requires_opt_in", "error", 'Claim records or references need explicit opt-in.', "Malformed claim data cannot establish reviewed support.", 'Preview and apply claims enable, or remove unaccepted claim references deliberately.', security=True),
+    Rule("claim.duplicate_id", "error", 'Claim identifier is duplicated.', "Malformed claim data cannot establish reviewed support.", 'Allocate one historical identifier per claim record.', security=True),
+    Rule("claim.invalid_relation", "error", 'Evidence relation table is malformed.', "Malformed claim data cannot establish reviewed support.", 'Use the exact columns, unique E/fragment relationships and meaningful rationale.', security=True),
+    Rule("claim.invalid_snapshot", "error", 'Local claim snapshot is invalid.', "Malformed claim data cannot establish reviewed support.", 'Restore a regular UTF-8 snapshot with its normalized hash; accepted snapshots are immutable.', security=True),
+    Rule("claim.invalid_fragment", "error", 'Claim fragment is invalid.', "Malformed claim data cannot establish reviewed support.", 'Use an existing inclusive lines:N-M range.', security=True),
+    Rule("claim.capture_changed", "error", 'Claim dependencies changed while reading.', "Malformed claim data cannot establish reviewed support.", 'Retry from unchanged captured inputs; never accept stale previews.', security=True),
+    Rule("claim.invalid_receipt", "error", 'Claim review log/receipt is malformed.', "Malformed claim data cannot establish reviewed support.", 'Restore append-only review history and perform a fresh reviewed approval.', security=True),
     Rule("agents.absent", "warning", "No AGENTS.md contract is present.", "Agents otherwise invent operating rules from context.", "Add AGENTS.md and state what agents may read, write, commit and escalate."),
     Rule("agents.unconfigured", "warning", "AGENTS.md still contains an unanswered TODO.", "A placeholder contract looks authoritative while leaving a material choice undefined.", "Replace every contract TODO with an explicit operating rule."),
     Rule("canonical.owner", "warning", "A canonical document has no real owner.", "A source of truth without ownership has no accountable reviewer.", "Set owner to a person or accountable role."),

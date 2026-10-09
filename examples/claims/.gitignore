@@ -1,0 +1,18 @@
+# Raw exports, staged before normalization. Never commit these directly.
+.import-staging/
+
+# This repository holds knowledge, never credentials.
+.env
+*.key
+*.pem
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+
+# WhyKit's own write lock, crash-recovery journal and parse cache. Machine state, not knowledge.
+.whykit/mutation.lock
+.whykit/transactions/
+.whykit/cache/

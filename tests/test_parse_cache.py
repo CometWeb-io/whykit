@@ -551,6 +551,12 @@ class RobustnessTest(_VaultCase):
                 with open(path, "a+b") as handle:
                     fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
                     try:
+                        if lock.name == "mutation.lock":
+                            from whykit.io import vault_read_lock
+                            with mock.patch("whykit.vault_index.vault_read_lock", lambda root: vault_read_lock(root, timeout=0.01)):
+                                with self.assertRaises(OSError):
+                                    lint_once(self.vault)
+                            continue
                         findings, _ = lint_once(self.vault)
                     finally:
                         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)

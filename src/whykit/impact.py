@@ -1,11 +1,14 @@
 """Explain the reverse-dependency/blast radius of a WhyKit record."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import json
 import os
 from pathlib import Path
 
+from .claim_readers import claim_reader
 from .contract import vault_not_found
 from .graph import build_graph, document_node, wikilink_resolutions
 from .lint import (
@@ -118,7 +121,9 @@ def _wikilink_view(root: Path, vault_index: VaultIndex) -> _WikilinkView:
     return cached
 
 
+@consistent_read
 @path_cache()
+@claim_reader("impact")
 def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) -> dict:
     vault_index = vault or VaultIndex.load(root)
     notes = vault_index.notes

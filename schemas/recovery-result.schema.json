@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CometWeb-io/whykit/blob/main/schemas/recovery-result.schema.json",
+  "title": "WhyKit recovery result",
+  "type": "object",
+  "required": ["contract_version", "recovery_completed"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {"const": 1},
+    "recovery_completed": {"const": true}
+  }
+}

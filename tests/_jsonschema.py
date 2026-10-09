@@ -16,7 +16,7 @@ from typing import Any
 ANNOTATIONS = frozenset({"$schema", "$id", "title", "description", "$defs", "$comment", "examples", "default"})
 ASSERTIONS = frozenset({
     "type", "const", "enum", "required", "properties", "additionalProperties",
-    "items", "pattern", "minLength", "minimum", "anyOf", "allOf", "$ref",
+    "items", "minItems", "pattern", "minLength", "minimum", "anyOf", "allOf", "$ref",
     "if", "then", "else", "uniqueItems",
 })
 SUPPORTED_KEYWORDS = ANNOTATIONS | ASSERTIONS
@@ -105,6 +105,8 @@ def _check(value: Any, schema: Any, root: dict[str, Any], where: str, errors: li
             errors.append(f"{where}: {value!r} does not match {schema['pattern']}")
     if _TYPES["number"](value) and "minimum" in schema and value < schema["minimum"]:
         errors.append(f"{where}: {value} is below {schema['minimum']}")
+    if isinstance(value, list) and "minItems" in schema and len(value) < schema["minItems"]:
+        errors.append(f"{where}: fewer than {schema['minItems']} items")
     if isinstance(value, list) and schema.get("uniqueItems"):
         seen = [repr(item) for item in value]
         if len(seen) != len(set(seen)):

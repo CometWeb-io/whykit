@@ -407,3 +407,7 @@ bundle embeds document bodies; see
 describes. A system that writes Markdown can write to a vault and record itself
 in the optional `provenance` block; [Integrations](integrations.md) gives the
 design rule and a worked mapping.
+
+## Review a claim graph
+
+Use [the claim workflow](claims.md#author-and-review) to preview opt-in, author local fragments, approve C, explain disputed dependencies in D and apply the reviewed decision preview. `confirmed` on C or D with claims requires a fresh preview/hash; legacy D review behavior is preserved.

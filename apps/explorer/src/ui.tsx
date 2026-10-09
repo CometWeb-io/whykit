@@ -1,5 +1,7 @@
 import { useState, type ChangeEvent, type ReactNode } from "react";
 import { CheckCircle2, Inbox, ShieldAlert } from "lucide-react";
+import type { VaultDoc } from "./types.ts";
+import { hrefFor } from "./lib/route.ts";
 import type { Facet } from "./lib/timeline.ts";
 
 export function StatusBadge({ status, label }: { status: string; label?: string }) {
@@ -77,4 +79,22 @@ export function ExposureNotice({ counts }: { counts: ReturnType<typeof countExpo
     <ShieldAlert size={16} aria-hidden="true"/>
     <span><strong>This build includes {parts.join(" and ")} record{total === 1 ? "" : "s"}.</strong> Explorer has no access control: anyone who can open this page can read {total === 1 ? "it" : "them"}. Serve it only behind your own authentication.</span>
   </div></div>;
+}
+
+export function ClaimAssessment({ claims }: { claims: readonly VaultDoc[] }) {
+  if (!claims.length) return null;
+  return <section aria-label="Claim assessment"><h2>Claim assessment</h2>
+    {claims.map(c => <article className="card" key={c.id}>
+      <h3><a href={hrefFor("doc", c.id)}>{c.claimId}</a> · <StatusBadge status={c.verificationStatus ?? "unknown"} label={(c.verificationStatus ?? "unknown").replace(/^./, s => s.toUpperCase())}/></h3>
+      <p>{c.statement}</p><p><strong>Scope:</strong> {c.scope}</p>
+      <p className="small">Valid from {c.validFrom} {c.validTo ? `to ${c.validTo}` : "(no end date)"} · Last verified {c.lastVerified || "never"}</p>
+      <p className="muted small">Current assessment as of {c.assessmentAsOf || "the index date"}. Supported means reviewed supporting material; unknown means unresolved or stale. History is not reconstructed.</p>
+      {c.requiresReview ? <p>Requires review</p> : null}
+      {(c.claimRelations ?? []).length ? <div className="table-wrap" tabIndex={0} role="region" aria-label={`Evidence relations for ${c.claimId}`}><table>
+        <thead><tr><th scope="col">Relation</th><th scope="col">Evidence</th><th scope="col">Observed</th><th scope="col">Rationale</th></tr></thead>
+        <tbody>{c.claimRelations!.map((r, i) => <tr key={`${r.evidence_id}-${r.fragment}-${i}`}>
+          <td>{r.relation === "supports" ? "Supports" : "Contradicts"}{r.usable ? "" : " · unresolved"}</td><td className="mono">{r.evidence_id}</td><td>{r.observed_at}</td><td>{r.rationale}</td>
+        </tr>)}</tbody></table></div> : <p>No reviewed evidence relations.</p>}
+    </article>)}
+  </section>;
 }

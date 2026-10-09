@@ -1,12 +1,15 @@
 """Human and machine-readable vault status."""
 from __future__ import annotations
 
+from .io import consistent_read, vault_read_lock
+
 import argparse
 import datetime as dt
 import json
 from dataclasses import asdict
 from pathlib import Path
 
+from .claim_readers import claim_reader
 from .contract import ERROR_EXIT_CODES, emit_error, error_payload, vault_not_found
 from .config import ConfigError, load_config
 from .lint import DECISION_ID_RE, evidence_register, find_vault_root, is_vault_root, lint, path_cache
@@ -51,11 +54,31 @@ def build_review_queue(vault: VaultIndex, *, today: dt.date, due_days: int = 30)
                 "days": (date - today).days,
                 "state": "overdue" if date < today else "due",
             })
+    from .claim_readers import claim_view, assessments
+    from .claim_review import decision_claim_review_current
+    view = claim_view(vault)
+    if view is not None:
+        states = assessments(vault, today=today)
+        queue_by_path = {item["path"]:item for item in review_queue}
+        for note in vault.notes:
+            cid = note.front.get("claim_id")
+            ids = note.front.get("claim_ids", [])
+            needs = cid in states and states[cid]["verification_status"] == "unknown" or bool(ids) and not decision_claim_review_current({**view, "root": vault.root}, note, today=today)
+            path = vault.relative(note.path)
+            if needs and note.front.get("status") == "approved":
+                queue_by_path[path] = {"path":path,"title":str(note.front.get("title") or note.path.stem),"owner":str(note.front.get("owner") or ""),
+                                       "review_by":str(note.front.get("review_by") or today.isoformat()),"days":0,"state":"requires_review"}
+            if path in queue_by_path:
+                queue_by_path[path].update(record_kind="claim" if cid else "decision" if note.front.get("decision_id") else "document",
+                                          claim_id=cid,decision_id=note.front.get("decision_id"))
+        review_queue = list(queue_by_path.values())
     review_queue.sort(key=lambda item: (item["review_by"], item["path"]))
     return review_queue
 
 
+@consistent_read
 @path_cache()
+@claim_reader("status")
 def build_status(
     root: Path,
     *,
@@ -159,11 +182,12 @@ def build_workspace_status(
             ) for other in vault_roots):
                 entry["error"] = error_payload("invalid_target", "overlapping vault roots must be checked separately")["error"]
             else:
-                config, _ = load_config(root)
-                window = due_days if due_days is not None else int(config["defaults"]["status_due_days"])
-                status = build_status(root, today=today, due_days=window)
-                entry.update(status=status, due_days=window,
-                             exit_code=int(bool(status["errors"] or (strict and status["warnings"]))))
+                with vault_read_lock(root):
+                    config, _ = load_config(root)
+                    window = due_days if due_days is not None else int(config["defaults"]["status_due_days"])
+                    status = build_status(root, today=today, due_days=window)
+                    entry.update(status=status, due_days=window,
+                                 exit_code=int(bool(status["errors"] or (strict and status["warnings"]))))
         except ConfigError as exc:
             entry["error"] = error_payload("invalid_config", str(exc))["error"]
         except (OSError, ValueError):

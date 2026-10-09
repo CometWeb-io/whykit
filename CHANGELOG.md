@@ -18,6 +18,27 @@ hello@cometweb.io the contact; CometWeb is not the copyright holder.
 
 ### Highlights
 
+- Long-lived queries use a SHA-bound in-memory terms/metadata index, with
+  conservative scan fallback and the original exact substring ranking. Complete
+  confined views share validated lookup maps; privacy is selected afresh.
+- An SDK missing its transport modules now exits with the same actionable
+  compatibility error as an SDK missing required transport capabilities.
+- Request caches and captured MCP/evidence views expire with their scope and
+  reject copied contexts from another process, thread or async task. LSP path
+  resolution is refreshed for each request.
+- Concurrent reads share validated canonical-path maps and stat rows while
+  retaining fresh filesystem validation and sensitivity projections.
+- Graph JSON and Obsidian exports stream their serialization while preserving
+  output bytes and durable atomic file replacement, reducing export memory.
+- Governed reads now synchronize with multi-file writes and fail closed on pending
+  crash recovery. `whykit recover` explicitly replays and collects journals.
+  Committed journals are removed through a crash-safe cleanup rename; pre-READY
+  journals are retained for 24 hours. No read-only command creates a mutation lock.
+- Private publication previews explain withholding without adding private paths
+  to public indexes. MCP startup probes its SDK transport capabilities; CI tests
+  both supported SDK boundaries for stdio and HTTP.
+
+
 - **Every decision traced to its evidence.** `whykit trace` follows each
   decision to the sources it cites, through supersession, and flags missing,
   retired and stale ones; `--gaps-only --strict` makes it a CI gate.
@@ -125,6 +146,8 @@ Each entry says what an existing vault, script or pipeline has to change. The
   in [Lint rules](docs/rules.md).
 
 ### Added
+
+- Optional reviewed C claim records, explicit local snapshot relations, guarded C/D approval and confirmation, immutable-history checks, dependency privacy floors and parallel v2 CLI/MCP/Explorer reports. Existing E meanings and default v1 vaults remain unchanged; see [the claim guide](docs/claims.md).
 
 - Document the private-vault dogfood record: tool/vault revisions, dirty-state
   hashes, command/date, counts and PASS/FAIL, with raw operating notes kept out

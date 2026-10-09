@@ -27,6 +27,7 @@ from test_mcp_tools import VaultToolsTestCase, write_decision, write_doc  # noqa
 from whykit import mcp_server  # noqa: E402
 from whykit.mcp_server import (  # noqa: E402
     TOOL_BASE_SCHEMAS,
+    BUNDLED_SCHEMA_FILES,
     TOOL_NAMES,
     CursorCodec,
     ToolFailure,
@@ -74,8 +75,8 @@ class OutputSchemaTests(VaultToolsTestCase):
 
     def test_package_copies_of_the_contract_schemas_match_schemas_dir(self) -> None:
         packaged = ROOT / "src" / "whykit" / "contract_schemas"
-        self.assertEqual(sorted(path.name for path in packaged.glob("*.json")), sorted(set(TOOL_BASE_SCHEMAS.values())))
-        for name in TOOL_BASE_SCHEMAS.values():
+        self.assertEqual(sorted(path.name for path in packaged.glob("*.json")), sorted(BUNDLED_SCHEMA_FILES))
+        for name in BUNDLED_SCHEMA_FILES:
             with self.subTest(schema=name):
                 self.assertEqual((packaged / name).read_bytes(), (ROOT / "schemas" / name).read_bytes())
 

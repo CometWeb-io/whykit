@@ -12,6 +12,7 @@ import { hrefFor, type Params, type Route, type View } from "./lib/route.ts";
 import { describeDue, reviewQueue } from "./lib/reviews.ts";
 import { currentRoute, go, setParams, useRoute } from "./nav.ts";
 import { countExposed, Empty, ExposureNotice, Metric, Sensitivity, ShowMore, StatusBadge, useIncremental } from "./ui.tsx";
+import { ClaimAssessment } from "./ui.tsx";
 import { GraphPage } from "./views/GraphPage.tsx";
 import { TimelinePage } from "./views/TimelinePage.tsx";
 import { FreshnessPage } from "./views/FreshnessPage.tsx";
@@ -104,7 +105,7 @@ function MarkdownView({ source, skipH1 = true }: { source: string; skipH1?: bool
 }
 
 function DueList({ items, limit }: { items: ReturnType<typeof reviewQueue>; limit: number }) {
-  return <div className="doc-list">{items.slice(0, limit).map(({ d, days }) => <button key={d.id} onClick={() => go("doc", d.id)}><div><strong>{d.title}</strong><span>{describeDue(days)} · {d.owner || "no owner"}</span></div><span className={days < 0 ? "mono small overdue" : "mono small"}>{d.reviewBy}</span></button>)}</div>;
+  return <div className="doc-list">{items.slice(0, limit).map(({ d, days }) => <button key={d.id} onClick={() => go("doc", d.id)}><div><strong>{d.title}</strong><span>{d.requiresReview ? "requires review" : describeDue(days)} · {d.owner || "no owner"}</span></div><span className={days < 0 ? "mono small overdue" : "mono small"}>{d.reviewBy}</span></button>)}</div>;
 }
 
 function HomePage() {
@@ -246,11 +247,13 @@ function DocPage({ id }: { id: string }) {
   const doc = resolveDoc(id);
   if (!doc) return <div className="page"><h1>Document not found</h1><p className="lede">No note called <code>{id}</code> exists in the generated vault index. It may have been renamed, or the index may be older than the vault — rerun <code>npm run index</code>.</p><a className="button" href={hrefFor("home")}>Back home</a></div>;
   const links = linksFor(doc), backs = backlinksFor(doc);
+  const claims = doc.claimId ? [doc] : (doc.claimIds ?? []).map(resolveDoc).filter((d): d is NonNullable<typeof d> => Boolean(d?.claimId));
   const evidenceRows = doc.sourceIds.map(evidenceFor).filter((e): e is NonNullable<ReturnType<typeof evidenceFor>> => Boolean(e));
   const missing = doc.sourceIds.filter(sid => !evidenceFor(sid));
   return <div className="page doc-page"><nav aria-label="Breadcrumb"><a className="crumb" href={hrefFor("home")}>WhyKit <ChevronRight size={13} aria-hidden="true"/> <span>{doc.id}</span></a></nav>
     <div className="doc-meta"><StatusBadge status={doc.status}/><Sensitivity value={doc.sensitivity}/><span className="mono">{doc.type}</span>{doc.sourceOfTruth ? <span className="canonical">source of truth</span> : null}</div>
-    <h1>{doc.title}</h1><div className="doc-sub"><span>{doc.owner || "No owner"}</span><span>Updated {doc.lastUpdated || "—"}</span>{doc.reviewBy ? <span>Review by {doc.reviewBy}</span> : null}{doc.sourceIds.length ? <span>{doc.sourceIds.length} evidence ID{doc.sourceIds.length === 1 ? "" : "s"}</span> : null}</div>
+    <h1>{doc.title}</h1>
+    <ClaimAssessment claims={claims}/><div className="doc-sub"><span>{doc.owner || "No owner"}</span><span>Updated {doc.lastUpdated || "—"}</span>{doc.reviewBy ? <span>Review by {doc.reviewBy}</span> : null}{doc.sourceIds.length ? <span>{doc.sourceIds.length} evidence ID{doc.sourceIds.length === 1 ? "" : "s"}</span> : null}</div>
     {doc.decisionId ? <DecisionLineage decisionId={doc.decisionId}/> : null}
     <DocBody body={bodyOf(doc)} state={bodies}/>
     {(evidenceRows.length || missing.length) ? <section><h2>Registered evidence</h2>

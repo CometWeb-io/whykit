@@ -1,6 +1,8 @@
 """Policy-profile quality gates for local work, CI and releases."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import datetime as dt
 import json
@@ -134,6 +136,7 @@ def _run_profile(
     }
 
 
+@consistent_read
 @path_cache()
 def run_check(
     root: Path,
@@ -146,6 +149,8 @@ def run_check(
     """Check the working vault against both head and protected base policies."""
     config, path = load_config(root)
     report = _run_profile(root, config, path, profile_name=profile_name, base=base, head=head, today=today)
+    if config.get("claims") == {"format_version": 1}:
+        report["contract_version"] = 2
     if base is None:
         return report
     try:

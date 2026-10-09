@@ -18,8 +18,11 @@ Two rules keep output safe without changing what UTF-8 consumers receive:
 from __future__ import annotations
 
 import codecs
+import json
 import re
 import sys
+from contextlib import contextmanager
+from collections.abc import Iterator
 from typing import Any, TextIO
 
 ERROR_HANDLER = "whykit-ascii-fallback"
@@ -149,18 +152,12 @@ def harden_stdio() -> None:
     harden_stream(sys.stderr)
 
 
-def emit_machine(text: str, *, file: TextIO | None = None) -> None:
-    """Print machine-readable output (JSON, DOT, Mermaid) as UTF-8.
-
-    ``print`` is used whenever the stream is already UTF-8 or is an in-memory
-    buffer, so those bytes are identical to plain ``print``. Otherwise the
-    stream is switched to UTF-8 for this one write and switched back, which
-    keeps the platform's newline translation.
-    """
+@contextmanager
+def _machine_stream(file: TextIO | None) -> Iterator[TextIO]:
     stream = sys.stdout if file is None else file
     reconfigure = getattr(stream, "reconfigure", None)
     if reconfigure is None or is_utf(stream):
-        print(text, file=stream)
+        yield stream
         return
     encoding, errors = stream.encoding, stream.errors
     stream.flush()
@@ -168,10 +165,23 @@ def emit_machine(text: str, *, file: TextIO | None = None) -> None:
     # original (UTF-8) bytes, so the output matches a UTF-8 console byte for byte.
     reconfigure(encoding="utf-8", errors="surrogateescape")
     try:
-        print(text, file=stream)
+        yield stream
         stream.flush()
     finally:
         reconfigure(encoding=encoding, errors=errors)
+
+
+def emit_machine(text: str, *, file: TextIO | None = None) -> None:
+    """Print machine-readable text as UTF-8, keeping newline translation."""
+    with _machine_stream(file) as stream:
+        print(text, file=stream)
+
+
+def emit_json(value: object, *, file: TextIO | None = None) -> None:
+    """Write the usual pretty JSON without building another complete string."""
+    with _machine_stream(file) as stream:
+        json.dump(value, stream, ensure_ascii=False, indent=2)
+        stream.write("\n")
 
 
 # Line breaks (including the Unicode ones), other control characters and the
@@ -204,4 +214,3 @@ def one_line(value: object) -> str:
         return _DISPLAY_ESCAPES.get(char) or (f"\\x{code:02x}" if code <= 0xFF else f"\\u{code:04x}")
 
     return _UNSAFE_DISPLAY_RE.sub(escape, text)
-

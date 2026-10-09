@@ -6,7 +6,7 @@ import { hrefFor, type Params } from "../lib/route.ts";
 import { describeAge, evidenceFreshness, FRESHNESS_LABELS, FRESHNESS_ORDER, type Freshness, type FreshnessRow } from "../lib/freshness.ts";
 import { startOfDay } from "../lib/timeline.ts";
 import { setParams } from "../nav.ts";
-import { Empty, FacetSelect, Metric, ShowMore, StatusBadge, useIncremental } from "../ui.tsx";
+import { Empty, FacetSelect, Metric, ShowMore, StatusBadge, ClaimAssessment, useIncremental } from "../ui.tsx";
 
 const STEP = 100;
 
@@ -57,6 +57,7 @@ export function FreshnessPage({ params }: { params: Params }) {
   const stateFacets = FRESHNESS_ORDER.map(s => ({ value: s, label: FRESHNESS_LABELS[s], count: counts.get(s) ?? 0 }));
 
   return <div className="page wide"><div className="eyebrow">Provenance over time</div><h1>Evidence freshness</h1>
+    <ClaimAssessment claims={vault.docs.filter(d => Boolean(d.claimId))}/>
     <p className="lede">How long ago each active source was last checked, measured against the access-age windows in <code>whykit.toml</code>, and which notes still rely on retired sources.</p>
     {vault.evidence.length ? <>
       <div className="metrics">

@@ -1,14 +1,18 @@
 """Metadata-aware vault queries for humans and agents."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
+import heapq
 import json
 from collections.abc import Callable
 from pathlib import Path
 
+from .claim_readers import claim_reader
 from .contract import emit_error, vault_not_found
 from .lint import EVIDENCE_ID_RE, Note, find_vault_root, is_vault_root, path_cache
-from .vault_index import VaultIndex
+from .vault_index import VaultIndex, _NOTE_CACHE
 from .console import emit_machine
 
 
@@ -39,7 +43,9 @@ def _summary(index: VaultIndex, note) -> dict:
     }
 
 
+@consistent_read
 @path_cache()
+@claim_reader("query")
 def query_vault(
     root: Path,
     *,
@@ -61,7 +67,15 @@ def query_vault(
     owner_needle = (owner or "").casefold().strip()
     tag_needle = (tag or "").casefold().strip()
     matches: list[tuple[int, str, Note]] = []
-    for note in index.notes:
+    cache = _NOTE_CACHE.get()
+    metadata: dict[str, str | bool] = {}
+    for field, value in (('kind', doc_type), ('state', status), ('label', sensitivity)):
+        if value:
+            metadata[field] = value
+    if canonical_only:
+        metadata['canonical'] = True
+    candidates = cache.candidates(index, needle, metadata) if cache is not None and (len(needle) >= 3 or metadata) else index.notes
+    for note in candidates:
         front = note.front
         raw_sensitivity = str(front.get("sensitivity") or "")
         record_sensitivity = raw_sensitivity or "internal"
@@ -112,10 +126,15 @@ def query_vault(
             score += 2
         matches.append((score, path, note))
 
-    matches.sort(key=lambda item: (-item[0], item[1]))
     total = len(matches)
-    # MCP selects and verifies its page before materializing result metadata.
-    selected = _select(matches) if _select is not None else matches[:max(0, limit)]
+    def rank(item):
+        return -item[0], item[1]
+    # MCP needs the complete order to bind its cursor; one-shot queries need only top-K.
+    if _select is not None:
+        matches.sort(key=rank)
+        selected = _select(matches)
+    else:
+        selected = heapq.nsmallest(max(0, limit), matches, key=rank)
     limited = [_summary(index, note) for _, _, note in selected]
     return {
         "contract_version": 1,

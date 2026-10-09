@@ -59,6 +59,8 @@ class OfflineTests(unittest.TestCase):
             r = str(vault)
             steps: list[tuple[str, ...]] = [
                 ("init", r),
+                ("claims", "enable", "--root", r),
+                ("claims", "disable", "--root", r),
                 ("init", str(base / "other")),
                 ("new", "--root", r, "evidence", "--source", "Example export", "--type", "dataset",
                  "--location", "https://example.com/export.csv", "--claims", "Example claim"),
@@ -67,6 +69,7 @@ class OfflineTests(unittest.TestCase):
                 ("new", "--root", r, "note", "Example note", "--workstream", "notes", "--link-from", "Home.md"),
                 ("lint", "--root", r),
                 ("status", "--root", r),
+                ("recover", "--root", r, "--json"),
                 ("workspace", r, str(base / "other")),
                 ("graph", "--root", r),
                 ("backlinks", "D-001", "--root", r),
@@ -159,8 +162,8 @@ class OfflineTests(unittest.TestCase):
         covered = {
             "init", "new", "lint", "status", "workspace", "graph", "backlinks", "impact", "query", "context",
             "pack", "review", "evidence", "snapshot", "verify-snapshot", "policy", "rules",
-            "adopt", "explorer-index", "history", "check", "install-hooks", "doctor",
-            "trace", "completion", "diff", "lsp",
+            "adopt", "explorer-index", "history", "check", "install-hooks", "doctor", "recover",
+            "trace", "completion", "diff", "lsp", "claims",
         }
         excluded = {"serve"}  # starts the optional Explorer dev server
         self.assertEqual(set(subparsers.choices), covered | excluded)

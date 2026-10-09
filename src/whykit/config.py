@@ -68,6 +68,7 @@ _TOP_LEVEL_KEYS = {
     "defaults",
     "profiles",
     "rules",
+    "claims",
 }
 _DEFAULT_KEYS = {
     "owner",
@@ -100,6 +101,11 @@ def _validate(config: dict[str, Any]) -> None:
     unknown_top = set(config) - _TOP_LEVEL_KEYS
     if unknown_top:
         raise ConfigError("unknown top-level keys: " + ", ".join(sorted(unknown_top)))
+
+    if "claims" in config:
+        claims = config["claims"]
+        if not isinstance(claims, dict) or set(claims) != {"format_version"} or type(claims.get("format_version")) is not int or claims["format_version"] != 1:
+            raise ConfigError("[claims] requires format_version = 1 and no other keys")
 
     version = config.get("format_version")
     if version != FORMAT_VERSION:

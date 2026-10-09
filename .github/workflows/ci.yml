@@ -43,6 +43,11 @@ jobs:
         # Pinned as-of date: review dates in the example are fixed, so the run
         # stays reproducible instead of failing once those dates pass.
         run: uv run whykit lint examples/northline --strict --today 2026-09-17
+      - name: Check the opt-in claims example on its pinned date
+        run: |
+          uv run whykit lint examples/claims --strict --today 2026-10-09
+          uv run whykit check --root examples/claims --profile ci --today 2026-10-09
+          uv run whykit trace --root examples/claims --decision D-001 --today 2026-10-09 --json
       - name: Run the CI policy profile
         run: uv run whykit check --root examples/northline --profile ci --today 2026-09-17
       - name: Exercise the release policy profile
@@ -246,6 +251,9 @@ jobs:
           for version in 2.2.0 2.3.0; do
             uv run --no-sync --with "mcp==$version" python -m unittest discover -s tests -p 'test_mcp_handshake.py' -v
             uv run --no-sync --with "mcp==$version" python -m unittest discover -s tests -p 'test_mcp_frames.py' -v
+            uv run --no-sync --with "mcp==$version" python -m unittest discover -s tests -p 'test_mcp_sdk_contract.py' -v
+            uv run --no-sync --with "mcp==$version" python -m unittest discover -s tests -p 'test_mcp_runtime.py' -v
+            uv run --no-sync --with "mcp==$version" python -m unittest discover -s tests -p 'test_mcp_http_limits.py' -v
           done
       - name: Build twice from the same commit
         # SOURCE_DATE_EPOCH pins archive timestamps to the commit, so two

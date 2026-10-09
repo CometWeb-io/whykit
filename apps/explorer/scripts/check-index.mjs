@@ -1,3 +1,4 @@
+import { validateVaultIndex } from "../src/lib/model.ts";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,6 +7,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const file = resolve(HERE, "../src/generated/vault.json");
 const raw = readFileSync(file, "utf8");
 const data = JSON.parse(raw);
+validateVaultIndex(data);
 const bodiesRaw = readFileSync(resolve(HERE, "../src/generated/bodies.json"), "utf8");
 const bodies = JSON.parse(bodiesRaw);
 const findingsRaw = readFileSync(resolve(HERE, "../src/generated/findings.json"), "utf8");

@@ -10,7 +10,7 @@ rely on across releases. For the optional MCP server, see [mcp.md](mcp.md).
 1. **stdout holds exactly one JSON document.** On success it is the command's
    report. When the command cannot produce its report, it is an error object.
    Nothing else is printed to stdout, so `json.loads(stdout)` always works.
-2. **Every document carries `contract_version`.** It is `1` today, on reports
+2. **Every document carries `contract_version`.** It remains `1` for legacy vaults and becomes `2` for claims-enabled reports; see [parallel claim versions](claims.md#parallel-report-versions). On legacy reports
    and on error objects alike.
 3. **Exit codes do not depend on `--json`.** The same failure exits with the same
    code whether or not you asked for JSON.
@@ -175,6 +175,8 @@ CLI actually prints.
 | Command | Schema |
 |---|---|
 | `init --json` | `init-result.schema.json` |
+| `new claim --json` | `claim-create-result.schema.json` |
+| `claims enable\|disable --json` | `claims-enable-result.schema.json` |
 | `lint --json` | `lint-report.schema.json` |
 | `new decision\|evidence\|note --json` | `record-create.schema.json` |
 | `status --json` | `status-report.schema.json` |
@@ -361,3 +363,24 @@ BOM that is not at the start of the file, whitespace and any edited character.
 
 Schemas: [`snapshot.schema.json`](../schemas/snapshot.schema.json) and
 [`snapshot-verify.schema.json`](../schemas/snapshot-verify.schema.json).
+
+## Claim report schemas
+
+The original v1 IDs stay unchanged. Claims-enabled graph, backlinks, trace,
+impact, query, context, pack, status, review queue/approval/record, history, lint,
+check and Explorer use corresponding `*-v2.schema.json` contracts. Claim data
+has `claim-record.schema.json`, `claim-assessment.schema.json` and
+`claim-receipt.schema.json`; document/decision metadata has parallel v2 files.
+See [the claim guide](claims.md#parallel-report-versions). Workspace retains a
+v1 envelope with nested actual report versions. Error envelopes remain v1.
+
+## Recovery and publication previews
+
+`recover --json` emits [recovery-result.schema.json](../schemas/recovery-result.schema.json)
+only after recovery completes under the writer lock. A corrupt journal reports
+an error and remains for inspection; recovery is not a decision approval.
+
+`explorer-index --publication-preview` emits
+[publication-preview.schema.json](../schemas/publication-preview.schema.json).
+It is a **private** report with withholding reasons and source hashes, and is
+never included in public Explorer builds. A source hash is not reviewer identity.

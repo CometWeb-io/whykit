@@ -11,7 +11,7 @@ const GROUP_GAP_Y = 34;
 const PAD = 20;
 
 export type GraphNode = { d: VaultDoc; x: number; y: number };
-export type GraphEdge = { from: string; to: string };
+export type GraphEdge = { from: string; to: string; type?: "claim" };
 export type GraphGroup = { id: string; x: number; y: number };
 export type GraphLayout = {
   nodes: GraphNode[];
@@ -76,7 +76,7 @@ export function layoutGraph(
   const edges: GraphEdge[] = [];
   for (const n of nodes) {
     for (const to of linksFor(n.d)) {
-      if (placed.has(to.id)) edges.push({ from: n.d.id, to: to.id });
+      if (placed.has(to.id)) edges.push({ from: n.d.id, to: to.id, ...(to.claimId && n.d.claimIds?.includes(to.claimId) ? { type: "claim" as const } : {}) });
     }
   }
   return {

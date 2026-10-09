@@ -205,3 +205,7 @@ It does **not** check whether a source is honest, whether the reasoning was
 sound, or whether a decision was any good. A citation can be present and still
 be wrong. The [rule reference](rules.md) lists every check with its severity, and
 `whykit rules <code>` explains why a rule exists.
+
+## Optional reviewed claims
+
+E identifiers remain sources. Opt-in C records hold explicit reviewed support or contradiction, scope, validity and local fragments; decisions may reference both. See [the claim guide](claims.md) for assessment meanings and the separate integrity boundary.

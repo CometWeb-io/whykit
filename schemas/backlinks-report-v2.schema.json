@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/backlinks-report-v2.schema.json",
+  "title": "WhyKit backlinks report (claims opt-in v2)",
+  "description": "Output of `whykit backlinks --json`. A target that does not exist is a report with `exists: false` (exit 1), not an error object.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "target",
+    "id",
+    "kind",
+    "exists",
+    "backlinks",
+    "count"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 2
+    },
+    "target": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "exists": {
+      "type": "boolean"
+    },
+    "backlinks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "type",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": true
+}

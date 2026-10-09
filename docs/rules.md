@@ -12,6 +12,14 @@ the test suite fails if it drifts.
 <!-- rules:start -->
 | Code | Level | What it means | Default fix |
 |---|---|---|---|
+| <a name="claim.invalid_metadata"></a>`claim.invalid_metadata` | error | Claim metadata/path is malformed. | Use the explicit claim format and remove writable verification_status. |
+| <a name="claim.requires_opt_in"></a>`claim.requires_opt_in` | error | Claim records or references need explicit opt-in. | Preview and apply claims enable, or remove unaccepted claim references deliberately. |
+| <a name="claim.duplicate_id"></a>`claim.duplicate_id` | error | Claim identifier is duplicated. | Allocate one historical identifier per claim record. |
+| <a name="claim.invalid_relation"></a>`claim.invalid_relation` | error | Evidence relation table is malformed. | Use the exact columns, unique E/fragment relationships and meaningful rationale. |
+| <a name="claim.invalid_snapshot"></a>`claim.invalid_snapshot` | error | Local claim snapshot is invalid. | Restore a regular UTF-8 snapshot with its normalized hash; accepted snapshots are immutable. |
+| <a name="claim.invalid_fragment"></a>`claim.invalid_fragment` | error | Claim fragment is invalid. | Use an existing inclusive lines:N-M range. |
+| <a name="claim.capture_changed"></a>`claim.capture_changed` | error | Claim dependencies changed while reading. | Retry from unchanged captured inputs; never accept stale previews. |
+| <a name="claim.invalid_receipt"></a>`claim.invalid_receipt` | error | Claim review log/receipt is malformed. | Restore append-only review history and perform a fresh reviewed approval. |
 | <a name="agents.absent"></a>`agents.absent` | warning | No AGENTS.md contract is present. | Add AGENTS.md and state what agents may read, write, commit and escalate. |
 | <a name="agents.unconfigured"></a>`agents.unconfigured` | warning | AGENTS.md still contains an unanswered TODO. | Replace every contract TODO with an explicit operating rule. |
 | <a name="canonical.owner"></a>`canonical.owner` | warning | A canonical document has no real owner. | Set owner to a person or accountable role. |

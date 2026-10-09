@@ -1,6 +1,26 @@
+export type ClaimVerificationStatus = "supported" | "disputed" | "unsupported" | "unknown";
+export interface ClaimRelation {
+  evidence_id: string; relation: "supports" | "contradicts"; snapshot: string; source_snapshot_hash: string;
+  fragment: string; observed_at: string; rationale: string; usable: boolean; reasons: string[];
+  fragment_text?: string; fragment_truncated?: boolean;
+}
+
 export type DocStatus = "template" | "draft" | "in_review" | "approved" | "superseded" | "archived";
 
 export interface VaultDoc {
+  claimId?: string;
+  claimIds?: string[];
+  statement?: string;
+  scope?: string;
+  validFrom?: string;
+  validTo?: string | null;
+  lastVerified?: string | null;
+  verificationStatus?: ClaimVerificationStatus;
+  verificationReasons?: string[];
+  claimRelations?: ClaimRelation[];
+  historyReconstructed?: false;
+  assessmentAsOf?: string;
+  requiresReview?: boolean;
   id: string;
   title: string;
   aliases: string[];

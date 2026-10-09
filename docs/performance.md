@@ -1,8 +1,8 @@
 # Performance
 
-WhyKit reads the whole vault on every command, with no daemon and no index
-that could disagree with the files. That keeps results deterministic and safe
-to run in CI. The cost is that every command has to stay fast on a large vault.
+WhyKit validates the current file inventory on every command; the files remain
+the source of truth. Disposable indexes reduce repeated work after that
+validation. The cost is that every command has to stay fast on a large vault.
 Two caches cut the repeated work without changing any output: read commands
 keep a [parse cache](#parse-cache) in `.whykit/cache/`, reused only while a
 note's file is provably unchanged, and the MCP server, a long-lived process,
@@ -166,18 +166,63 @@ memory. What went:
 `tests/test_scale.py` fails if one request's peak at 1,000 notes rises from
 about 5 MB (`lint`) and 6 MB (`pack`) back towards the 7-12 MB it used to take.
 
+Graph JSON and Obsidian exports are serialized incrementally on stdout and
+with `--output`, preserving the existing pretty JSON bytes. File exports keep
+atomic replacement, fsync, permissions and CRLF; CLI stdout remains staged until
+the complete read succeeds. The builder still materializes nodes and edges:
+streaming removes a second complete rendered document, not the graph's O(N+E)
+memory cost. DOT and Mermaid retain their existing renderers.
+
 ## MCP server
 
 The MCP server is a long-lived process, so it can keep work between calls.
 It keeps the parsed notes and reuses a note only while its file's
-modification time, change time, size and inode all match. An edit, an atomic
+modification time, change time, size, inode and device all match (including
+the symlink itself). Where change time is not trustworthy, notably on Windows,
+content must also match. An edit, an atomic
 save (which replaces the inode), a rename or a deletion is therefore seen by
 the next call. A file whose timestamps are within two seconds of the clock is
 never kept, because a second write within the same timestamp tick and with the
-same size would otherwise be indistinguishable from the first. Everything
-derived from the notes (link resolution, findings, the graph) is still
-computed for every call, because it also depends on attachments, symlinks and
-configuration.
+same size would otherwise be indistinguishable from the first. After validating
+note identity and exact canonical path spellings, the server reuses note lookup,
+alias and canonical-path maps. Unchanged stat rows and canonical Path objects are
+shared after validation, so concurrent requests retain references rather than
+another copy of each validated path and signature.
+Every request has fresh link resolution, findings and graph views because those
+also depend on attachments, symlinks and configuration.
+
+Complete confined views share the current validated note lookup maps; strictly
+filtered views rebuild theirs. Resolution and derived data remain separate.
+Long-lived NoteCache queries also keep one disposable terms/metadata generation
+bound by SHA-256 to relative paths, content, titles and indexed metadata. SQLite
+stores document-level trigram postings without source text or character positions,
+plus indexes for type, status, exact sensitivity and canonical-document filters.
+A bounded conjunction of query trigrams selects a superset; the existing Python
+substring matcher still verifies hits, scores them and preserves exact totals.
+An unchanged generation reuses relative paths only after current inventory,
+stat, note-identity and exact canonical-path validation. Sensitivity selection is
+performed afresh before candidates are requested.
+
+The index is in memory and adds no file, daemon or dependency outside the standard
+library. It costs time and memory to build on a new generation. Without SQLite,
+queries retain their scan; without the FTS5 trigram capability, metadata indexes
+remain and text falls back to a scan. Short queries, NUL and surrogate-escaped
+input retain conservative scan paths. One-shot CLI queries continue to use the
+existing parse cache and scan rather than building a disposable text index.
+Broad exact-total retrieval, filesystem validation and ranking remain O(N).
+
+Resolution caches and filtered views are bound to the active request's process,
+thread and async task. A copied context cannot extend a finished scope or reuse
+another owner's sensitivity projection. LSP resolution caches also end with
+each request or lint pass; its parsed notes and editor buffers remain cached.
+
+Root-wide inventory collection prunes skipped directories before descending
+and checks each directory before reusing its canonical spelling for regular
+files. File symlinks keep the confinement check. Errors inspecting a file fail
+the read instead of returning a successful partial inventory. Explicitly scoped
+reads retain their existing semantics, including inspection of skipped folders.
+The inventory and stat validation remain O(N); full-text queries still scan the
+current visible candidates. No persistent search index or daemon is added.
 
 Latency per tool call at 5,000 notes, through the SDK-free `VaultTools.call`
 the server uses (`scripts/bench.py --mcp`, best of three runs; "repeated" is
@@ -359,7 +404,7 @@ therefore sees changes on disk at its next request. Commands that write to the
 vault never run inside a scope, and each MCP tool call opens its own scope.
 The cached evidence register is keyed by
 modification time and size, and callers get copies, never the cached objects.
-Two caches outlive a request: the MCP server's parsed notes, described
+Two caches outlive a request: the MCP server's validated notes and lookup maps, described
 [above](#mcp-server), and the on-disk [parse cache](#parse-cache), which
 holds only what a note's own bytes determine and is checked against the file
 before each use.

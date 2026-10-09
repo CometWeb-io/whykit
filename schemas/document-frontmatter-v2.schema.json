@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/document-frontmatter-v2.schema.json",
+  "title": "WhyKit opt-in document metadata",
+  "anyOf": [
+    {
+      "$ref": "https://cometweb.io/schemas/whykit/document-frontmatter.schema.json"
+    },
+    {
+      "$ref": "https://cometweb.io/schemas/whykit/claim-record.schema.json"
+    }
+  ]
+}

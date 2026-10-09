@@ -12,7 +12,39 @@ export function reviewCues(body: string): number {
  * Derive every lookup the Explorer needs from the generated index in one pass.
  * Kept free of the bundled JSON import so it can be tested against fixtures.
  */
+export function validateVaultIndex(vault: VaultIndex): void {
+  const version = vault.contract_version ?? 1;
+  if (version !== 1 && version !== 2) throw new Error("Unsupported vault index version");
+  if (!Array.isArray(vault.docs)) throw new Error("Invalid document index");
+  const ids = new Set<string>();
+  const date = (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+  const strings = (value: unknown) => Array.isArray(value) && value.every(v => typeof v === "string");
+  for (const d of vault.docs) {
+    const fields = ["claimId", "claimIds", "statement", "scope", "validFrom", "validTo", "lastVerified", "verificationStatus", "verificationReasons", "claimRelations", "historyReconstructed", "assessmentAsOf", "requiresReview"];
+    if (version === 1 && (d.type === "claim" || fields.some(k => Object.hasOwn(d, k)))) throw new Error("Claim payload requires index version 2");
+    if (d.claimIds && (!strings(d.claimIds) || new Set(d.claimIds).size !== d.claimIds.length || d.claimIds.some(v => !/^C-[0-9]{3,}$/.test(v)))) throw new Error("Invalid claim references");
+    if (d.type !== "claim") {
+      if (d.claimId || d.verificationStatus || d.claimRelations) throw new Error("Claim metadata requires a claim record");
+      continue;
+    }
+    if (!d.claimId || !/^C-[0-9]{3,}$/.test(d.claimId) || ids.has(d.claimId) || !d.statement?.trim() || !d.scope?.trim()
+        || !date(d.validFrom) || d.validTo != null && !date(d.validTo) || d.lastVerified != null && !date(d.lastVerified)
+        || !["supported", "disputed", "unsupported", "unknown"].includes(d.verificationStatus ?? "")
+        || !strings(d.verificationReasons) || !Array.isArray(d.claimRelations)) throw new Error("Invalid claim payload");
+    ids.add(d.claimId);
+    for (const row of d.claimRelations) {
+      if (!/^E-[0-9]{3,}$/.test(row.evidence_id) || !["supports", "contradicts"].includes(row.relation)
+          || !/^[0-9a-f]{64}$/.test(row.source_snapshot_hash) || row.snapshot !== `00-context/claim-snapshots/${row.source_snapshot_hash}.txt`
+          || !/^lines:[1-9][0-9]*-[1-9][0-9]*$/.test(row.fragment) || !date(row.observed_at)
+          || !row.rationale?.trim() || typeof row.usable !== "boolean" || !strings(row.reasons)
+          || row.fragment_text != null && typeof row.fragment_text !== "string") throw new Error("Invalid claim relation");
+    }
+  }
+}
+
 export function createVaultModel(vault: VaultIndex) {
+  validateVaultIndex(vault);
   const docs = vault.docs;
   // Bodies arrive with the index (tests, older builds) or later as a chunk.
   const bodies = new Map<string, string>();
@@ -21,7 +53,7 @@ export function createVaultModel(vault: VaultIndex) {
   const byId = new Map(docs.map(d => [d.id.toLowerCase(), d]));
   const aliases = new Map<string, VaultDoc[]>();
   for (const d of docs) {
-    for (const key of [d.id.split("/").at(-1) || d.id, ...d.aliases]) {
+    for (const key of [d.id.split("/").at(-1) || d.id, ...d.aliases, ...(d.claimId ? [d.claimId] : []), ...(d.decisionId ? [d.decisionId] : [])]) {
       const k = key.toLowerCase();
       const list = aliases.get(k);
       if (list) list.push(d);
@@ -50,7 +82,7 @@ export function createVaultModel(vault: VaultIndex) {
     const resolved = doc.links
       ? doc.links.map(at => docs[at])
       : extractWikilinks(doc.body ?? "").map(resolveDoc);
-    for (const target of resolved) {
+    for (const target of [...resolved, ...(doc.claimIds ?? []).map(resolveDoc)]) {
       if (!target || target.id === doc.id || seen.has(target.id)) continue;
       seen.add(target.id);
       targets.push(target);

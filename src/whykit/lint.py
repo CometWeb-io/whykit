@@ -14,6 +14,8 @@ Examples:
 """
 from __future__ import annotations
 
+from .io import _lock_owner, consistent_read
+
 from .tables import split_table_row as _split_table_row, review_table_header
 
 import argparse
@@ -58,9 +60,11 @@ class VaultPathError(ValueError):
 # once.  The scope is request-sized on purpose: a long-lived process such as the
 # MCP server must not see a stale answer after the vault changes on disk.
 class _RequestCache:
-    __slots__ = ("realpaths", "relative", "within", "registers")
+    __slots__ = ("realpaths", "relative", "within", "registers", "owner", "active")
 
     def __init__(self) -> None:
+        self.owner = _lock_owner()
+        self.active = True
         # Keyed by the path string, not the Path: Windows paths compare
         # case-insensitively, and a cache must never merge two spellings.
         self.realpaths: dict[str, Path] = {}
@@ -76,19 +80,26 @@ _REQUEST: contextvars.ContextVar[_RequestCache | None] = contextvars.ContextVar(
 )
 
 
+def _request_cache() -> _RequestCache | None:
+    cache = _REQUEST.get()
+    return cache if cache is not None and cache.active and cache.owner == _lock_owner() else None
+
+
 @contextlib.contextmanager
-def path_cache():
+def path_cache(*, fresh: bool = False):
     """Memoise ``Path.resolve()`` (and register parsing) for one read-only request.
 
-    Re-entrant: a nested scope reuses the outer cache.  Usable as a decorator.
+    Nested reads reuse the outer cache; protocol requests can force a fresh one.
     """
-    if _REQUEST.get() is not None:
+    if not fresh and _request_cache() is not None:
         yield
         return
-    token = _REQUEST.set(_RequestCache())
+    cache = _RequestCache()
+    token = _REQUEST.set(cache)
     try:
         yield
     finally:
+        cache.active = False
         _REQUEST.reset(token)
 
 
@@ -96,7 +107,7 @@ _POSIX = os.name == "posix"
 
 
 def _real(path: Path) -> Path:
-    cache = _REQUEST.get()
+    cache = _request_cache()
     if cache is None:
         return path.resolve()
     key = os.fspath(path)
@@ -207,7 +218,7 @@ def _relative_text(path: Path, root: Path) -> str | None:
 
 
 def _within(root: Path, path: Path) -> bool:
-    cache = _REQUEST.get()
+    cache = _request_cache()
     key = (os.fspath(root), os.fspath(path))
     if cache is not None:
         hit = cache.within.get(key)
@@ -318,11 +329,13 @@ OPTIONAL_KEYS = (
     "sent_at",
     "provenance",
     "workstream",
+    "claim_id", "claim_ids", "statement", "scope", "valid_from", "valid_to", "last_verified",
 )
 ALLOWED_STATUS = {"template", "draft", "in_review", "approved", "superseded", "archived"}
 # Records whose reasoning is closed: kept as written, never brought up to date.
 HISTORICAL_STATUSES = frozenset({"superseded", "archived"})
 ALLOWED_TYPE = {
+    "claim",
     "strategy",
     "research",
     "framework",
@@ -862,7 +875,7 @@ def load_note(path: Path, *, text: str | None = None) -> Note:
 def rel(root: Path, path: Path) -> str:
     # Resolve both sides so macOS /var vs /private/var (and similar aliasing)
     # does not break relative paths or silently fall back to absolutes.
-    cache = _REQUEST.get()
+    cache = _request_cache()
     key = (os.fspath(root), os.fspath(path))
     if cache is not None:
         hit = cache.relative.get(key)
@@ -911,6 +924,8 @@ def check_front_matter(root: Path, note: Note, findings: list[Finding], today: d
         return
 
     for key in REQUIRED_KEYS:
+        if key == "source_of_truth" and note.front.get("type") == "claim":
+            continue  # Claim acceptance is not a declaration of canonical truth.
         if key not in note.front:
             add(findings, root, note.path, 1, "error", "frontmatter.required", f"front matter is missing `{key}`")
         elif note.front[key] is None or (isinstance(note.front[key], (str, list)) and not note.front[key]):
@@ -1189,29 +1204,40 @@ def check_markdown_links(
             add(findings, root, note.path, line, "warning", "markdown_link.missing", f"local Markdown {kind} does not exist: ({target})")
 
 
-_EVIDENCE_VIEW: contextvars.ContextVar[tuple[Path, tuple | Callable[[], tuple]] | None] = contextvars.ContextVar("whykit_evidence_view", default=None)
+@dataclass
+class _EvidenceView:
+    root: Path
+    rows: tuple | Callable[[], tuple]
+    request: _RequestCache | None
+    active: bool = True
+
+
+_EVIDENCE_VIEW: contextvars.ContextVar[_EvidenceView | None] = contextvars.ContextVar("whykit_evidence_view", default=None)
 
 
 @contextlib.contextmanager
 def evidence_view(root: Path, rows: tuple | Callable[[], tuple]):
     """Use one captured, filtered register throughout a read-only request."""
-    token = _EVIDENCE_VIEW.set((_real(root), rows))
-    try:
-        yield
-    finally:
-        _EVIDENCE_VIEW.reset(token)
+    with path_cache():
+        view = _EvidenceView(_real(root), rows, _request_cache())
+        token = _EVIDENCE_VIEW.set(view)
+        try:
+            yield
+        finally:
+            view.active = False
+            _EVIDENCE_VIEW.reset(token)
 
 
 def evidence_register(root: Path) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]], list[tuple[str, int]]]:
     view = _EVIDENCE_VIEW.get()
-    if view is not None and view[0] == _real(root):
-        rows = view[1]() if callable(view[1]) else view[1]
+    cache = _request_cache()
+    if view is not None and view.active and cache is not None and view.request is cache and view.root == _real(root):
+        rows = view.rows() if callable(view.rows) else view.rows
         active, retired, occurrences = rows
         return ({key: dict(row) for key, row in active.items()}, {key: dict(row) for key, row in retired.items()}, list(occurrences))
     path = root / "00-context" / "evidence-register.md"
-    if not path.exists():
+    if not path.exists() or not _within(root, path):
         return {}, {}, []
-    cache = _REQUEST.get()
     if cache is None:
         return _parse_evidence_register(path)
     try:
@@ -1938,16 +1964,36 @@ def collect_markdown(root: Path, paths: list[str]) -> list[Path]:
             else:
                 raise VaultPathError(f"not a Markdown file or directory: {raw}")
         return out
-    depth = len(root.parts)
-    return sorted(
-        (
-            p for p in iter_markdown(root)
-            if p.is_file()
-            and _within(root, p)
-            and not any(part in CONTENT_SKIP_DIRS for part in p.parts[depth:])
-        ),
-        key=_path_order,
-    )
+    # Prune skipped trees before visiting their files; validate each directory
+    # once, then reuse its canonical spelling for regular files (also junctions).
+    root = _real(root)
+    pending = [root]
+    out = []
+    while pending:
+        directory = pending.pop()
+        if directory != root and directory.is_symlink():
+            continue
+        canonical_directory = _real(directory)
+        if not _within(root, canonical_directory):
+            continue
+        try:
+            entries = os.scandir(directory)
+        except PermissionError:
+            continue  # pathlib's recursive glob also skips inaccessible directories.
+        with entries:
+            for entry in entries:
+                if entry.is_dir(follow_symlinks=False):
+                    if entry.name not in CONTENT_SKIP_DIRS:
+                        pending.append(Path(entry.path))
+                elif is_markdown_name(entry.name) and entry.is_file():
+                    path = Path(entry.path)
+                    symlink = entry.is_symlink()
+                    if not symlink or _within(root, path):
+                        out.append(path)
+                        cache = _request_cache()
+                        if not symlink and cache is not None:
+                            cache.realpaths[os.fspath(path)] = path if directory == canonical_directory else canonical_directory / entry.name
+    return sorted(out, key=_path_order)
 
 
 def _path_order(path: Path) -> list[str]:
@@ -1961,6 +2007,7 @@ def _path_order(path: Path) -> list[str]:
     return os.path.normcase(os.fspath(path)).split(os.sep)
 
 
+@consistent_read
 @path_cache()
 def lint(
     root: Path,
@@ -2030,6 +2077,15 @@ def lint(
         except Exception:  # noqa: BLE001 — reported as config.invalid by check_config
             config = None
     policy = policy_from_config(config) if config is not None else EMPTY_POLICY
+    if config is not None and ("claims" in config or any(note.front.get("type") == "claim" or "claim_id" in note.front or "claim_ids" in note.front for note in all_notes)):
+        from .claims import capture_claims
+        claim_view = index_model.derived.get("claims_view")
+        if not isinstance(claim_view, dict):
+            claim_view = capture_claims(index_model, config)
+        selected_claim_paths = {rel(root, note.path) for note in notes}
+        for item in claim_view["errors"]:
+            if not paths or item["path"] in selected_claim_paths:
+                add(findings, root, root / item["path"], 1, "error", item["code"], item["message"])
     if policy.custom:
         check_custom_rules(policy, notes, findings, today, lambda path: rel(root, path))
     if not paths:
@@ -2151,8 +2207,9 @@ def main(argv: list[str] | None = None) -> int:
             lines.append(workflow_command("error", f"whykit lint --strict: {len(warnings)} warning(s) fail this gate", title="WhyKit"))
         emit_machine("\n".join(lines))
     elif fmt == "json":
+        from .claim_readers import report_version
         payload: dict = {
-            "contract_version": 1,
+            "contract_version": report_version(root),
             "root": str(root),
             "files": len(files),
             "errors": len(errors),

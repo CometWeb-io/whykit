@@ -16,7 +16,7 @@ From a source checkout, prefix commands with `uv run` (see
   `diff`, `snapshot`, `verify-snapshot`), **explore** (`query`, `context`,
   `pack`, `graph`, `backlinks`, `impact`), **integrate** (`install-hooks`,
   `explorer-index`, `serve`, `completion`) and **maintain** (`policy`, `rules`,
-  `doctor`). The table below follows the same order.
+  `doctor`, `recover`). The table below follows the same order.
 - `--root DIR` selects one vault. Single-vault commands accept it
   after the command name, before the command name (`whykit --root DIR lint`),
   and, for `new`, `review` and `evidence`, before or after the action. `adopt`
@@ -47,12 +47,15 @@ From a source checkout, prefix commands with `uv run` (see
 |---|---|---|---|
 | `init <dir>` | Create a vault from the bundled template | `--force`, `--profile`, `--full`, `--minimal`, `--json` | [How-to](guide.md#create-a-vault) |
 | `adopt <source>` | Inventory existing Markdown; stage it with `--write` or compare preservation with `--compare DIR` | `--into` (or `--root`), `--profile`, `--owner`, `--write`, `--compare`, `--json` | [How-to](guide.md#already-have-a-pile-of-markdown) |
-| `new decision <title>` | Create a decision record and its decision-log row; with `--from FILE`, promote an existing ADR into one (a dry run that prints the mapping until `--write`) | `--from`, `--write`, `--owner`, `--status`, `--source`, `--supersedes`, `--review-by`, `--sensitivity`, `--json`, `--root` | [How-to](guide.md#promote-an-adopted-adr) |
+| `new claim <title>` | Create an unreviewed claim draft after opt-in | `--statement`, `--scope`, `--valid-from`, `--valid-to`, `--owner`, `--sensitivity`, `--supersedes`, `--today`, `--json`, `--root` | [Concepts](concepts.md) |
+| `claims enable` | Preview opt-in; apply only the reviewed config/inventory | `--write`, `--expect-hash`, `--json`, `--root` | [Automation](automation.md) |
+| `claims disable` | Preview removal of opt-in; refuse remaining claim records or references | `--write`, `--expect-hash`, `--json`, `--root` | [Automation](automation.md) |
+| `new decision <title>` | Create a decision record and its decision-log row; with `--from FILE`, promote an existing ADR into one (a dry run that prints the mapping until `--write`) | `--from`, `--write`, `--owner`, `--status`, `--source`, `--claim`, `--supersedes`, `--review-by`, `--sensitivity`, `--json`, `--root` | [How-to](guide.md#promote-an-adopted-adr) |
 | `new evidence` | Append a source to the evidence register | `--source`, `--type`, `--location`, `--claims`, `--date`, `--accessed`, `--sensitivity`, `--json`, `--root` | [Concepts](concepts.md#evidence) |
 | `new note <title>` | Create a draft note in a workstream | `--workstream`, `--type`, `--owner`, `--sensitivity`, `--link-from`, `--json`, `--root` | [How-to](guide.md#create-records) |
 | `review list` | Show upcoming and overdue reviews | `--due-days`, `--overdue-only`, `--owner`, `--today`, `--json`, `--root` | [How-to](guide.md#record-a-review) |
 | `review approve <target>` | Preview the record, evidence and approval diff; apply only the reviewed snapshot | `--reviewer`, `--next-review`, `--today`, `--write`, `--expect-hash`, `--json`, `--root` | [How-to](guide.md#approve-a-decision) |
-| `review record <target>` | Append a review event; `confirmed` moves `review_by` forward | `--reviewer`, `--outcome`, `--next-review`, `--note`, `--today`, `--json`, `--root` | [Concepts](concepts.md#the-review-cycle) |
+| `review record <target>` | Append a review event; `confirmed` moves `review_by` forward | `--reviewer`, `--outcome`, `--next-review`, `--note`, `--today`, `--write`, `--expect-hash`, `--json`, `--root` | [Concepts](concepts.md#the-review-cycle) |
 | `evidence list` | List active and retired evidence | `--state`, `--json`, `--root` | [How-to](guide.md#retire-evidence) |
 | `evidence retire <E-NNN>` | Retire a source without deleting its ID | `--why`, `--replaced-by`, `--today`, `--json`, `--root` | [How-to](guide.md#retire-evidence) |
 | `lint [paths…]` | Check the vault, or some files in it; `--format` picks `text`, `json`, `sarif` (SARIF 2.1.0 for code scanning) or `github` (workflow annotations) | `--strict`, `--quiet`, `--json`, `--format`, `--no-orphans`, `--no-secrets`, `--today`, `--root` | [Rules](rules.md), [CI](ci.md) |
@@ -71,13 +74,15 @@ From a source checkout, prefix commands with `uv run` (see
 | `backlinks <target>` | List what links to a note, decision or evidence ID | `--json`, `--root` | [Obsidian](obsidian.md#graph-view-and-whykits-graph) |
 | `impact <target>` | Show what depends on evidence, a decision or a document | `--json`, `--root` | [How-to](guide.md#retire-evidence) |
 | `install-hooks` | Install a pre-commit hook that runs the `local` profile | `--force`, `--root` | [CI](ci.md#local-hooks) |
-| `explorer-index` | Export the Explorer's vault index (always JSON) | `--today`, `--json`, `--root`, `--private` | [Automation](automation.md#schemas) |
+| `explorer-index` | Export the Explorer's vault index (always JSON) | `--today`, `--json`, `--root`, `--private`, `--publication-preview` | [Automation](automation.md#schemas) |
 | `serve [vault]` | Run the optional Explorer from a source checkout; an installed copy names the checkout it came from, or the source to clone | `--root`, `--host`, `--port`, `--allow-sensitive-network` | [How-to](guide.md#browse-the-vault-in-the-explorer) |
 | `lsp` | Run the read-only language server over stdio, for editors: lint diagnostics, wikilink and ID completion, hover, go-to-definition and document links | `--root`, `--debounce`, `--today`, `--stdio` | [Editors](editors.md) |
 | `completion <shell>` | Print a `bash`, `zsh` or `fish` completion script | | `eval "$(whykit completion zsh)"` |
 | `policy` | Show the effective repository policy | `--json`, `--root` | [Configuration](configuration.md) |
 | `rules [code]` | List the lint rules, or explain one; with a vault, its custom rules and overrides too | `--json`, `--markdown`, `--root` | [Rules](rules.md), [Team rules](configuration.md#team-rules) |
 | `doctor` | Check prerequisites, integrity and review hygiene | `--today`, `--json`, `--root` | [Troubleshooting](troubleshooting.md) |
+
+| `recover` | Recover interrupted writes and collect terminal journals | `--root`, `--json` | [Recovery](#recover-interrupted-writes) |
 
 ## `whykit-mcp`
 
@@ -97,3 +102,17 @@ It speaks stdio unless `--http` is given. See the [MCP server guide](mcp.md).
 | `130` | Interrupted (Ctrl-C) |
 
 [Automation](automation.md#error-codes) maps every error code to its exit code.
+
+## Claim authoring and review
+
+`claims enable/disable` previews a config-only edit; `--write --expect-hash` applies the unchanged preview. `new claim` creates an unreviewed draft, and `new decision --claim C-NNN` adds a typed dependency without altering E source_ids. [The claim guide](claims.md) documents local snapshot preparation and C/D approval. `review record` previews C and D with claims; legacy D without claims retains its existing write behavior.
+
+## Recover interrupted writes
+
+`whykit recover --root DIR [--json]` is an explicit governed write. It finishes
+READY journals under the mutation lock, collects terminal journals and removes
+pre-READY journals older than 24 hours. Corrupt recovery material fails closed
+and remains available for inspection. Recovery does not accept new approvals.
+
+`explorer-index --publication-preview` returns private withholding diagnostics
+and a source manifest hash. Never publish it with the public Explorer index.

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/history-report-v2.schema.json",
+  "title": "WhyKit immutable-history report (claims opt-in v2)",
+  "description": "Output of `whykit history --json`. Blocked rewrites are a report with `passed: false` (exit 1). With `--staged`, `head` is `INDEX` and `staged` is true.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "base",
+    "head",
+    "passed",
+    "blocked"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 2
+    },
+    "base": {
+      "type": "string"
+    },
+    "head": {
+      "type": "string"
+    },
+    "staged": {
+      "type": "boolean",
+      "description": "True for `whykit history --staged`: head is the Git index (reported as INDEX), not a commit."
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "blocked": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "status",
+          "path"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "review_without_event",
+              "approval_without_event",
+              "review_history_rewritten",
+              "immutable_claim_removed",
+              "immutable_claim_semantics",
+              "immutable_claim_lifecycle",
+              "claim_lifecycle_reset",
+              "claim_supersedes_without_approval",
+              "immutable_claim_snapshot",
+              "claim_supersedes_cycle_or_foreign",
+              "claim_review_without_bound_event",
+              "claim_review_chain_reset",
+              "decision_claim_review_unbound",
+              "claim_review_invalid_event",
+              "claim_archive_without_event",
+              "claim.invalid_metadata",
+              "claim.requires_opt_in",
+              "claim.duplicate_id",
+              "claim.invalid_relation",
+              "claim.invalid_snapshot",
+              "claim.invalid_fragment",
+              "claim.capture_changed",
+              "claim.invalid_receipt",
+              "claim.unsafe_git_input"
+            ],
+            "description": "Present when the blocked change lacks a fresh matching review or approval receipt."
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

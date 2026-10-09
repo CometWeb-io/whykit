@@ -262,3 +262,9 @@ npx playwright install chromium
 ```
 
 Evidence rows show their effective sensitivity in the register and record cards. Private-view exposure notices include confidential/restricted evidence entries as well as notes. Public exports filter entries by their register/replacement floor; raw labeled tables are withheld.
+
+## Claim views
+
+The Explorer accepts existing v1 indexes and explicit v2 claim DTOs, rejects unknown versions and malformed claim relations, and renders the Python-computed state without a second state machine. C and dependent D views show both conflict sides, scope, validity and verification dates. Claim dependencies appear in the graph; source relations remain explicit in the inspector and freshness view. Receipts and host paths stay out of browser data. Source fragments are untrusted data.
+
+The E2E builder creates separate `claims` and `claims-hidden` synthetic sites. They are test artifacts, not the final default public asset. Run E2E sequentially before `npm run check`, which restores the public Northline index.

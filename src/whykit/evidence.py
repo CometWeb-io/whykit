@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from .contract import TargetNotFound, describe_os_error, emit_error, vault_not_found
-from .io import atomic_write_text, safe_vault_target, vault_mutation_lock
+from .io import consistent_read, atomic_write_text, safe_vault_target, vault_mutation_lock
 from .impact import analyze_impact
 from .lint import HISTORICAL_STATUSES, EVIDENCE_ID_RE, _split_table_row, evidence_register, find_vault_root, is_vault_root
 from .scaffold import _frontmatter_replace, _table_cell, _with_evidence_sensitivity, _register_inherited_label
@@ -15,6 +15,7 @@ from .tables import evidence_table_bounds
 from .console import emit_machine
 
 
+@consistent_read
 def list_evidence(root: Path, *, state: str = "all") -> dict:
     active, retired, _ = evidence_register(root)
     items: list[dict] = []

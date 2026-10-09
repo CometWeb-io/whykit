@@ -1,6 +1,8 @@
 """Operational review queue and append-only review events."""
 from __future__ import annotations
 
+from .io import consistent_read, vault_read_lock
+
 from .tables import review_table_header
 
 import argparse
@@ -57,6 +59,7 @@ def _reviewed_provenance(text: str) -> str:
     return ("\ufeff" if text.startswith("\ufeff") else "") + "".join(lines)
 
 
+@consistent_read
 @path_cache()
 def _approval_plan(root: Path, target: str, reviewer: str, today: dt.date, next_review: str | None) -> tuple[dict, dict[Path, str], dict[Path, bytes | None]]:
     root = root.resolve()
@@ -130,7 +133,7 @@ def _approval_plan(root: Path, target: str, reviewer: str, today: dt.date, next_
             raise ValueError("this record already has an approval event; never reset an accepted record")
     active, retired, _ = _parse_evidence_register_text(register_text or "")
     cited = set(note.cited_evidence)
-    if not cited or not cited <= set(active) or cited & set(retired):
+    if (not cited and not note.front.get("claim_ids")) or not cited <= set(active) or cited & set(retired):
         raise ValueError("approval requires cited active evidence; missing or retired sources must be reviewed first")
     _, findings = lint(root, orphans=False, today=today, vault=index, config=config)
     blocked = [item for item in findings
@@ -199,7 +202,7 @@ def _approval_plan(root: Path, target: str, reviewer: str, today: dt.date, next_
             "changes": changes}, updates, inputs
 
 
-def approve_decision(root: Path, target: str, *, reviewer: str, today: dt.date | None = None,
+def _approve_legacy_decision(root: Path, target: str, *, reviewer: str, today: dt.date | None = None,
                      next_review: str | None = None, write: bool = False, expected_sha256: str | None = None) -> dict:
     """Preview a reviewable diff; apply only the same snapshot under the vault lock."""
     today = today or dt.date.today()
@@ -216,6 +219,28 @@ def approve_decision(root: Path, target: str, *, reviewer: str, today: dt.date |
                 raise ValueError("approval inputs changed; review a fresh preview")
         apply_transaction(root, updates)
         return {**plan, "applied": True}
+
+
+def approve_record(root: Path, target: str, *, reviewer: str, today: dt.date | None = None,
+                   next_review: str | None = None, write: bool = False, expected_sha256: str | None = None) -> dict:
+    scope = vault_mutation_lock(root) if write else vault_read_lock(root)
+    with scope:
+        from .claim_review import bound_review, resolve_record
+        note = resolve_record(VaultIndex.load(root), target)
+        if note is not None and (note.front.get("type") == "claim" or note.front.get("claim_ids")):
+            return bound_review(root, target, reviewer=reviewer, today=today or dt.date.today(), next_review=next_review,
+                                outcome="approved", write=write, expected_sha256=expected_sha256)
+        result = _approve_legacy_decision(root, target, reviewer=reviewer, today=today, next_review=next_review,
+                                          write=write, expected_sha256=expected_sha256)
+        from .claim_readers import report_version
+        result["contract_version"] = report_version(root)
+        return result
+
+
+def approve_decision(root: Path, target: str, *, reviewer: str, today: dt.date | None = None,
+                     next_review: str | None = None, write: bool = False, expected_sha256: str | None = None) -> dict:
+    return approve_record(root, target, reviewer=reviewer, today=today, next_review=next_review,
+                          write=write, expected_sha256=expected_sha256)
 
 
 def _review_log_template(today: dt.date, owner: str = "TODO") -> str:
@@ -288,6 +313,7 @@ def _resolve_note(root: Path, target: str):
     return by_path.get(path.resolve()), ambiguous
 
 
+@consistent_read
 @path_cache()
 def review_queue(root: Path, *, today: dt.date | None = None, due_days: int = 30, owner: str | None = None, overdue_only: bool = False) -> list[dict]:
     today = today or dt.date.today()
@@ -309,7 +335,14 @@ def record_review(
     note_text: str = "",
     next_review: str | None = None,
     today: dt.date | None = None,
+    write: bool | None = None,
+    expected_sha256: str | None = None,
 ) -> dict:
+    from .claim_review import bound_review, resolve_record
+    target_note = resolve_record(VaultIndex.load(root), target)
+    if target_note is not None and (target_note.front.get("type") == "claim" or target_note.front.get("claim_ids")):
+        return bound_review(root, target, reviewer=reviewer, today=today or dt.date.today(), next_review=next_review,
+                            outcome=outcome, note_text=note_text, write=bool(write), expected_sha256=expected_sha256)
     today = today or dt.date.today()
     reviewer = reviewer.strip()
     if not reviewer or reviewer == "TODO":
@@ -368,7 +401,7 @@ def record_review(
         apply_transaction(root, updates)
 
         return {
-            "contract_version": 1,
+            "contract_version": 2 if load_config(root)[0].get("claims") == {"format_version": 1} else 1,
             "date": today.isoformat(),
             "target": rel(root, note.path),
             "decision_id": str(note.front.get("decision_id") or "") or None,
@@ -415,6 +448,8 @@ def main(argv: list[str] | None = None) -> int:
     record.add_argument("--next-review")
     record.add_argument("--note", default="", dest="note_text")
     record.add_argument("--today")
+    record.add_argument("--write", action="store_true", default=None)
+    record.add_argument("--expect-hash", dest="expected_sha256")
     record.add_argument("--json", action="store_true")
 
     approval = sub.add_parser("approve", help="preview an approval; apply only the reviewed snapshot")
@@ -481,7 +516,7 @@ def main(argv: list[str] | None = None) -> int:
         if due_days < 0:
             return emit_error("invalid_argument", "--due-days must be >= 0", json_mode=args.json)
         queue = review_queue(root, today=today, due_days=due_days, owner=args.owner, overdue_only=args.overdue_only)
-        payload = {"contract_version": 1, "due_days": due_days, "count": len(queue), "reviews": queue}
+        payload = {"contract_version": 2 if config.get("claims") == {"format_version": 1} else 1, "due_days": due_days, "count": len(queue), "reviews": queue}
         if args.json:
             emit_machine(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
@@ -500,7 +535,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = record_review(
             root, args.target, reviewer=args.reviewer, outcome=args.outcome,
-            note_text=args.note_text, next_review=args.next_review, today=today,
+            note_text=args.note_text, next_review=args.next_review, today=today, write=args.write, expected_sha256=args.expected_sha256,
         )
     except TargetNotFound as exc:
         return emit_error("not_found", str(exc), json_mode=args.json)

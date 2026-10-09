@@ -1,0 +1,42 @@
+# Versioned repository-local policy. WhyKit has no hidden user-global config.
+format_version = 1
+
+[defaults]
+owner = "Ada Example"
+sensitivity = "internal"
+decision_review_days = 90
+status_due_days = 30
+require_hub_links = false
+
+[profiles.local]
+strict = false
+orphans = true
+secrets = true
+require_git = false
+require_clean_tree = false
+require_configured = false
+require_hub_links = false
+history = "optional"
+
+[profiles.ci]
+strict = true
+orphans = true
+secrets = true
+require_git = false
+require_clean_tree = false
+require_configured = false
+require_hub_links = false
+history = "optional"
+
+[profiles.release]
+strict = true
+orphans = true
+secrets = true
+require_git = true
+require_clean_tree = true
+require_configured = true
+require_hub_links = false
+history = "required"
+
+[claims]
+format_version = 1

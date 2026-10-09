@@ -221,3 +221,43 @@ needed to materialize reports; they are not a whole-process DoS guarantee.
 - `tests/test_adversarial_inputs.py` pins each crash, hang and injection the
   harness or review found, and `tests/test_mcp_security.py` the sensitivity
   and transport rules above.
+
+## Claim-bound material
+
+Claim support is a deterministic view of locally captured, human-attributed relationships. It is not truth or authenticated reviewer identity. [Claim integrity and privacy](claims.md#integrity-and-privacy) describes receipts, trusted-base history, source/snapshot floors and whole-record withholding. Missing and stale counterevidence remain uncertainty; they are never silently converted into support. MCP retains its read-only boundary.
+
+## Transaction reads and journal lifecycle
+
+Complete CLI reports, Explorer projections and MCP requests hold a shared
+advisory lock against WhyKit's governed writers. A pristine vault is checked for
+its first writer before returning a report; a racing request fails and can be
+retried. Readers do not create a mutation lock or replay interrupted writes.
+READY journals left by a crash block reads until `whykit recover` completes.
+Nested reads reuse the lock; upgrading a read lock to a write lock is refused.
+External editors that ignore the lock remain outside this guarantee.
+
+Lock ownership and request caches are bound to the process, thread and async
+task. Copied contexts cannot reuse a released lock, expired evidence register
+or filtered MCP view. Captured views expire when their own scope ends, even
+inside a longer path-cache scope. Fresh requests revalidate filesystem paths
+and sensitivity before answering; LSP no longer retains path resolutions across
+requests.
+
+A durable COMMITTED journal is renamed to a garbage-collection directory before
+any staged bytes or markers are deleted. Recovery can therefore resume cleanup
+without replaying already committed targets, even if cleanup lost its markers.
+Pre-READY journals never wrote targets and are collected under the writer lock
+only after 24 hours. Journal state is not an approval audit log; the Markdown
+review log and Git history remain the persistent ledger.
+
+The private `explorer-index --publication-preview` contains withheld paths and
+reasons. It is separate from the public index and must remain private. Its hash
+binds captured Markdown, config and claim snapshots; it is not a human signature,
+authority attestation or proof that deliberately public prose contains no secrets.
+
+CLI read scopes include policy selection and output formatting. Large rendered
+reports spill into a private temporary file outside the vault and are emitted
+only when the read scope succeeds, preserving UTF-8 machine output. Graph and
+snapshot `--output` operations use the writer lock; exports refuse Git state,
+transaction state, mutation locks and parse-cache paths. Explicit snapshot files
+such as `.whykit/snapshot.json` remain supported.

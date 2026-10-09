@@ -219,6 +219,11 @@ class McpSensitivityTests(unittest.TestCase):
         server_package = types.ModuleType("mcp.server")
         server_package.__path__ = []  # type: ignore[attr-defined]
         server_package.MCPServer = SDKServer  # type: ignore[attr-defined]
+        runner = types.ModuleType('mcp.server.runner')
+        runner.serve_dual_era_loop = lambda: None
+        stdio = types.ModuleType('mcp.server.stdio')
+        for name in ('_claim_fd', '_open_stdin_diversion', '_open_stdout_diversion'):
+            setattr(stdio, name, lambda: None)
         mcp_types = types.ModuleType("mcp_types")
         for name in ("CallToolResult", "TextContent", "ToolAnnotations", "Completion", "ListResourcesResult", "Resource"):
             setattr(mcp_types, name, type(name, (Model,), {}))
@@ -248,6 +253,8 @@ class McpSensitivityTests(unittest.TestCase):
         with patch.dict(sys.modules, {
             "mcp": package,
             "mcp.server": server_package,
+            "mcp.server.runner": runner,
+            "mcp.server.stdio": stdio,
             "mcp.server.mcpserver": types.ModuleType("mcp.server.mcpserver"),
             "mcp.server.mcpserver.exceptions": exceptions,
             "mcp.server.subscriptions": subscriptions,

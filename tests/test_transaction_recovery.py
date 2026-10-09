@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import errno
-import hashlib
 import json
 import os
 import subprocess
@@ -26,7 +25,7 @@ def boundary(label):
     events.append(label)
     if len(events) == stop:
         os._exit(77)
-replace, fsync, unlink = os.replace, os.fsync, Path.unlink
+replace, fsync, unlink = os.replace, os.fsync, os.unlink
 def replaced(*args, **kwargs):
     result = replace(*args, **kwargs)
     boundary("replace")
@@ -35,12 +34,12 @@ def synced(*args, **kwargs):
     result = fsync(*args, **kwargs)
     boundary("fsync")
     return result
-def removed(self, *args, **kwargs):
-    result = unlink(self, *args, **kwargs)
-    if self.name.endswith(".new"):
+def removed(path, *args, **kwargs):
+    result = unlink(path, *args, **kwargs)
+    if str(path).endswith(".new"):
         boundary("unlink")
     return result
-os.replace, os.fsync, Path.unlink = replaced, synced, removed
+os.replace, os.fsync, os.unlink = replaced, synced, removed
 if stop == 0:
     os._exit(77)
 with io.vault_mutation_lock(root):
@@ -69,7 +68,7 @@ class TransactionRecoveryTests(unittest.TestCase):
                 pass
             for path, expected in updates.items():
                 self.assertEqual(path.read_text(encoding="utf-8"), expected)
-            self.assertTrue((tx / "COMMITTED").exists())
+            self.assertFalse(tx.exists())
             self.assertEqual(list(tx.glob("*.new")), [])
 
     def test_process_death_after_every_replace_fsync_and_cleanup(self) -> None:
@@ -144,16 +143,17 @@ class TransactionRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve() / "vault"
             tx, updates = self._stage(root)
-            original = Path.unlink
+            original = os.unlink
 
             def fail(path, *args, **kwargs):
-                if path.name == "0.new":
+                if str(path).endswith("0.new"):
                     raise OSError(errno.EACCES, "synthetic cleanup failure")
                 return original(path, *args, **kwargs)
 
-            with patch.object(Path, "unlink", fail), self.assertRaises(OSError):
+            with patch.object(os, "unlink", fail), self.assertRaises(OSError):
                 io.commit_transaction(root, tx)
-            self.assertTrue((tx / "COMMITTED").exists())
+            self.assertFalse(tx.exists())
+            self.assertTrue(tx.with_name("gc-" + tx.name).exists())
             first = next(iter(updates))
             first.write_text("a later edit\n", encoding="utf-8")
             with io.vault_mutation_lock(root):
@@ -218,10 +218,7 @@ scaffold.create_note(root, "Crash probe", workstream="notes", owner="Example rev
                     pass
                 self.assertTrue((root / "notes/crash-probe.md").is_file())
                 self.assertIn("[[notes/crash-probe|Crash probe]]", (root / "Home.md").read_text(encoding="utf-8"))
-                tx = next((root / ".whykit/transactions").iterdir())
-                manifest = json.loads((tx / "manifest.json").read_text(encoding="utf-8"))
-                for entry in manifest:
-                    self.assertEqual(hashlib.sha256((root / entry["target"]).read_bytes()).hexdigest(), entry["sha256"])
+                self.assertEqual(list((root / ".whykit/transactions").iterdir()), [])
 
 
 if __name__ == "__main__":

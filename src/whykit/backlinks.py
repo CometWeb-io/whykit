@@ -1,11 +1,14 @@
 """Inbound link discovery for documents, decisions and evidence."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import json
 import sys
 from pathlib import Path
 
+from .claim_readers import claim_reader
 from .contract import vault_not_found
 from .graph import build_graph
 from .lint import (
@@ -52,7 +55,9 @@ def _normalize_target(root: Path, target: str, vault: VaultIndex) -> tuple[str, 
     return "document", strip_markdown_suffix(raw)
 
 
+@consistent_read
 @path_cache()
+@claim_reader("backlinks")
 def build_backlinks(root: Path, target: str, *, vault: VaultIndex | None = None) -> dict:
     root = root.resolve()
     vault = vault or VaultIndex.load(root)

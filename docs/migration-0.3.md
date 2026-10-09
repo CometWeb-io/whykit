@@ -342,3 +342,7 @@ to hidden records or unclassified local attachments are withheld as whole
 notes. Ledgers, findings and search follow the resulting visibility. Private
 export preserves the previous full content, with an added `exportMode` field.
 No vault file is rewritten by an export.
+
+## Optional claim format
+
+There is no automatic semantic migration. [Claims enable](claims.md) previews a config-only edit and a base64 backup; apply requires the exact reviewed hash. Existing E IDs, source_ids and historical D/receipts keep their bytes and meanings. New C records and claim_ids are authored explicitly. Default init remains v1. Claims-enabled reports use parallel v2 schemas; snapshots/error envelopes and unchanged commands retain their existing contracts.

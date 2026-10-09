@@ -38,6 +38,7 @@ import secrets
 import sys
 import time
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -239,6 +240,16 @@ def _require_mcp():
         # `pip install 'whykit[mcp]'` would not work.
         print(MISSING_EXTRA_MESSAGE, file=sys.stderr)
         raise SystemExit(2) from exc
+    try:
+        from mcp.server import runner, stdio
+        required = ((stdio, "_claim_fd"), (stdio, "_open_stdin_diversion"),
+                    (stdio, "_open_stdout_diversion"), (runner, "serve_dual_era_loop"))
+        supported = all(callable(getattr(module, name, None)) for module, name in required)
+    except ImportError:
+        supported = False
+    if not supported:
+        print("Unsupported MCP SDK transport contract; install the locked whykit[mcp] extra.", file=sys.stderr)
+        raise SystemExit(2)
     return MCPServer
 
 
@@ -442,9 +453,9 @@ def _withhold_register_details(report: dict) -> dict:
     }
 
 
-def _missing_context(target: str, kind: object) -> dict:
+def _missing_context(target: str, kind: object, *, contract_version: int = 1) -> dict:
     return {
-        "contract_version": 1,
+        "contract_version": contract_version,
         "target": target,
         "exists": False,
         "ambiguous": False,
@@ -452,10 +463,10 @@ def _missing_context(target: str, kind: object) -> dict:
     }
 
 
-def _missing_impact(target: str, kind: object) -> dict:
+def _missing_impact(target: str, kind: object, *, contract_version: int = 1) -> dict:
     if kind == "evidence":
         return {
-            "contract_version": 1,
+            "contract_version": contract_version,
             "target": target,
             "kind": "evidence",
             "exists": False,
@@ -467,7 +478,7 @@ def _missing_impact(target: str, kind: object) -> dict:
         }
     if kind == "decision":
         return {
-            "contract_version": 1,
+            "contract_version": contract_version,
             "target": target,
             "kind": "decision",
             "exists": False,
@@ -476,7 +487,7 @@ def _missing_impact(target: str, kind: object) -> dict:
             "reference_count": 0,
         }
     return {
-        "contract_version": 1,
+        "contract_version": contract_version,
         "target": target,
         "kind": "document",
         "exists": False,
@@ -503,6 +514,8 @@ TOOL_BASE_SCHEMAS: dict[str, str] = {
     "trace": "trace-report.schema.json",
     "backlinks": "backlinks-report.schema.json",
 }
+TOOL_V2_BASE_SCHEMAS = {tool: name.replace(".schema.json", "-v2.schema.json") for tool, name in TOOL_BASE_SCHEMAS.items()}
+BUNDLED_SCHEMA_FILES = frozenset({*TOOL_BASE_SCHEMAS.values(), *TOOL_V2_BASE_SCHEMAS.values(), "claim-assessment.schema.json"})
 
 _CEILING_SCHEMA = {
     "description": "The server's sensitivity ceiling; records above it are treated as nonexistent.",
@@ -520,8 +533,23 @@ _TRUNCATED_SCHEMA = {
 
 
 def _load_contract_schema(name: str) -> dict[str, Any]:
+    if name not in BUNDLED_SCHEMA_FILES:
+        raise ValueError("unbundled contract reference")
     path = Path(__file__).with_name("contract_schemas") / name
-    return json.loads(path.read_text(encoding="utf-8"))
+    def inline(value):
+        if isinstance(value, list):
+            return [inline(item) for item in value]
+        if isinstance(value, dict):
+            if "$ref" in value:
+                ref = value["$ref"].removeprefix("https://cometweb.io/schemas/whykit/")
+                if ref not in BUNDLED_SCHEMA_FILES or ref == name:
+                    raise ValueError("unsupported bundled contract reference")
+                nested = _load_contract_schema(ref)
+                nested.pop("$id", None)
+                return {**nested, **{key:inline(item) for key,item in value.items() if key != "$ref"}}
+            return {key:inline(item) for key,item in value.items()}
+        return value
+    return inline(json.loads(path.read_text(encoding="utf-8")))
 
 
 def _extend(schema: dict[str, Any], title: str, required: Iterable[str] = (), **properties: Any) -> dict[str, Any]:
@@ -533,9 +561,12 @@ def _extend(schema: dict[str, Any], title: str, required: Iterable[str] = (), **
 
 
 @functools.cache
-def _output_schemas() -> dict[str, dict[str, Any]]:
+def _output_schemas(contract_version: int = 1) -> dict[str, dict[str, Any]]:
     schemas: dict[str, dict[str, Any]] = {}
-    for tool, name in TOOL_BASE_SCHEMAS.items():
+    mapping = TOOL_BASE_SCHEMAS if contract_version == 1 else TOOL_V2_BASE_SCHEMAS if contract_version == 2 else None
+    if mapping is None:
+        raise ValueError("unsupported report contract version")
+    for tool, name in mapping.items():
         schema = _load_contract_schema(name)
         # The `$id` names the CLI contract; this is a derived document.
         schema.pop("$id", None)
@@ -590,9 +621,9 @@ def _output_schemas() -> dict[str, dict[str, Any]]:
     return schemas
 
 
-def output_schema(tool: str) -> dict[str, Any]:
+def output_schema(tool: str, *, contract_version: int = 1) -> dict[str, Any]:
     """The JSON Schema a successful ``tool`` result's ``structuredContent`` follows."""
-    return copy.deepcopy(_output_schemas()[tool])
+    return copy.deepcopy(_output_schemas(contract_version)[tool])
 
 
 # ---------------------------------------------------------------------------
@@ -684,7 +715,15 @@ def _validate_cursor(value: object) -> str | None:
 # Tool handlers (SDK-free)
 # ---------------------------------------------------------------------------
 
-_TOOL_VIEW: contextvars.ContextVar[tuple[Any, Any] | None] = contextvars.ContextVar("whykit_tool_view", default=None)
+@dataclass
+class _ToolView:
+    tools: Any
+    index: Any
+    request: Any
+    active: bool = True
+
+
+_TOOL_VIEW: contextvars.ContextVar[_ToolView | None] = contextvars.ContextVar("whykit_tool_view", default=None)
 
 
 def _vault_request(handler):  # type: ignore[no-untyped-def]
@@ -712,8 +751,8 @@ class VaultTools:
         self.allowed = _allowed_sensitivities(self.policy)
         from whykit.vault_index import NoteCache
 
-        # Parsed notes survive between calls while their files are unchanged;
-        # everything derived from them is recomputed per call.
+        # Parsed notes and lookup maps survive validated unchanged files;
+        # filesystem resolution and policy projections are request-scoped.
         self.notes = NoteCache()
         self.cursors = CursorCodec(self.policy)
 
@@ -726,11 +765,20 @@ class VaultTools:
         """
         from whykit.vault_index import VaultIndex
 
+        from .lint import _request_cache
+        request = _request_cache()
         current = _TOOL_VIEW.get()
-        if current is not None and current[0] is self and current[1] is not None:
-            return current[1]
+        if current is not None and current.active and request is not None and current.request is request and current.tools is self and current.index is not None:
+            return current.index
         ceiling = SENSITIVITY_LEVEL[self.policy]
         index = VaultIndex.load(self.vault)
+        from .claims import capture_claims, claims_enabled
+        from .config import ConfigError, load_config
+        from .sensitivity import visible_claim_view
+        try:
+            config, _ = load_config(self.vault)
+        except ConfigError:
+            raise ToolFailure("invalid_config", "the vault configuration does not validate; run `whykit policy`") from None
         active, retired, occurrences, per_row = classified_evidence(index)
         register = self.vault / "00-context/evidence-register.md"
         visible = index.subset(lambda note: note_sensitivity_level(note) <= ceiling and not (per_row and note.path == register))
@@ -740,9 +788,32 @@ class VaultTools:
         note = index.note_for(register)
         visible.derived["register_visible"] = note is None or note_sensitivity_level(note) <= ceiling
         visible.derived["full_index"] = index
-        if current is not None and current[0] is self:
-            _TOOL_VIEW.set((self, visible))
+        if claims_enabled(config) or any(n.front.get("claim_id") or n.front.get("claim_ids") for n in index.notes):
+            captured = capture_claims(index, config)
+            visible, projected = visible_claim_view(index, captured, ceiling=self.policy)
+            # A per-row register is exposed through classified rows, never its raw body.
+            if per_row:
+                visible = visible.subset(lambda n: n.path != register)
+                visible.derived["claims_view"] = projected
+                visible.derived["evidence_register"] = ({eid: row for eid,row in projected["evidence"].items() if row["state"] == "active"},
+                                                         {eid: row for eid,row in projected["evidence"].items() if row["state"] == "retired"},
+                                                         [(eid,n+1) for n,eid in enumerate(sorted(projected["evidence"]))])
+            visible.derived["register_visible"] = note is None or note_sensitivity_level(note) <= ceiling
+            visible.derived["full_index"] = index
+            bound = {"config": hashlib.sha256((self.vault / "whykit.toml").read_bytes()).hexdigest() if (self.vault / "whykit.toml").exists() else None,
+                     "evidence": projected["evidence"],
+                     "claims": {cid: hashlib.sha256(record["text"].encode("utf-8")).hexdigest() for cid,record in projected["records"].items()},
+                     "snapshots": {path: hashlib.sha256(captured["raw_inputs"].get(self.vault / path) or b"").hexdigest() for path in projected["snapshots"]},
+                     "reviews": projected["review_rows"]}
+            if claims_enabled(config):
+                visible.derived["claim_cursor_stamp"] = hashlib.sha256(json.dumps(bound, sort_keys=True).encode("utf-8")).hexdigest()
+        if current is not None and current.active and request is not None and current.request is request and current.tools is self:
+            current.index = visible
         return visible
+
+    def _cursor_binding(self, values: list) -> list:
+        stamp = self.visible_index().derived.get("claim_cursor_stamp")
+        return values + [stamp] if stamp is not None else values
 
     def register_visible(self) -> bool:
         """Whether the evidence register's own label is within the ceiling.
@@ -787,7 +858,7 @@ class VaultTools:
             raise ToolFailure("invalid_argument", "source_id must be an E-NNN identifier")
         canonical_only = _validate_bool(canonical_only, "canonical_only")
         self._check_vault()
-        binding = [text, doc_type, status, owner, tag, source_id, canonical_only, limit]
+        binding = self._cursor_binding([text, doc_type, status, owner, tag, source_id, canonical_only, limit])
         next_cursor = None
 
         def select(matches: list[tuple[int, str, Any]]) -> list[tuple[int, str, Any]]:
@@ -835,7 +906,7 @@ class VaultTools:
         except PermissionError:
             # Match the ordinary missing-target contract so a caller cannot
             # confirm the existence or sensitivity of a filtered document.
-            return _missing_context(target, report.get("kind"))
+            return _missing_context(target, report.get("kind"), contract_version=report["contract_version"])
         filtered["content_trust"] = "untrusted_data"
         return filtered
 
@@ -848,18 +919,18 @@ class VaultTools:
         report = analyze_impact(self.vault, target, vault=self.visible_index())
         kind = report.get("kind", "document")
         if not report.get("exists"):
-            return _missing_impact(target, kind) if kind == "evidence" else report
+            return _missing_impact(target, kind, contract_version=report["contract_version"]) if kind == "evidence" else report
         # A path that resolves to a file the vault index skips (for example
         # under `.obsidian/`) has no metadata to classify; treat it as absent
         # rather than confirming that the file exists.
         if kind == "document" and "sensitivity" not in (report.get("record") or {}):
-            return _missing_impact(target, kind)
+            return _missing_impact(target, kind, contract_version=report["contract_version"])
         try:
             return filter_report(report, self.policy, self.register_visible())
         except PermissionError:
             # Return the same shape as an absent target of this kind. In
             # particular, do not reveal a hidden record's sensitivity label.
-            return _missing_impact(target, kind)
+            return _missing_impact(target, kind, contract_version=report["contract_version"])
 
     @_vault_request
     def status(self, today: str | None = None, due_days: int | None = None) -> dict:
@@ -928,7 +999,8 @@ class VaultTools:
                 ownership_gaps += 1
 
         return {
-            "contract_version": 1,
+            "contract_version": report["contract_version"],
+            **({"claims": report["claims"]} if "claims" in report else {}),
             "as_of": report["as_of"],
             "max_sensitivity": self.policy,
             "documents": len(visible_notes),
@@ -1018,9 +1090,9 @@ class VaultTools:
             report = _withhold_register_details(report)
         records = report["decisions"]
         if gaps_only:
-            records = [record for record in records if record["live"] and record["gaps"]]
+            records = [record for record in records if record["live"] and (record["gaps"] or record.get("claim_gaps"))]
         page, next_cursor, more = self.cursors.page(
-            records, scope="trace", binding=[decision, as_of.isoformat(), gaps_only, limit],
+            records, scope="trace", binding=self._cursor_binding([decision, as_of.isoformat(), gaps_only, limit]),
             keys=((record["decision_id"], record["path"], hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()) for record in records), cursor=cursor, limit=limit,
         )
         filtered = _filter_nested({
@@ -1043,9 +1115,10 @@ class VaultTools:
         cursor = _validate_cursor(cursor)
         self._check_vault()
         if _EVIDENCE_RE.fullmatch(target) and target not in self._evidence_ids():
+            from .claim_readers import report_version
             # Evidence inherits the register's own label.
             report: dict[str, Any] = {
-                "contract_version": 1,
+                "contract_version": report_version(self.vault),
                 "target": target,
                 "id": f"evidence:{target}",
                 "kind": "evidence",
@@ -1057,7 +1130,7 @@ class VaultTools:
             report = build_backlinks(self.vault, target, vault=self.visible_index())
         links = report["backlinks"]
         page, next_cursor, more = self.cursors.page(
-            links, scope="backlinks", binding=[report["id"], limit],
+            links, scope="backlinks", binding=self._cursor_binding([report["id"], limit]),
             keys=((link["type"], link["from"], link["to"]) for link in links), cursor=cursor, limit=limit,
         )
         return {
@@ -1266,21 +1339,28 @@ class VaultTools:
 
     def scoped(self, handler: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Run one request with a fresh resolve cache and the shared note cache."""
-        from whykit.lint import path_cache, evidence_view
+        from whykit.lint import path_cache, evidence_view, _request_cache
         from whykit.vault_index import reuse_notes
 
         # One resolve cache per request, never per process: the vault may change
         # on disk between requests and the next one must see it.  Parsed notes
         # are reused only after their stat signature is re-checked.
-        with path_cache(), reuse_notes(self.notes):
-            current = _TOOL_VIEW.get()
-            if current is not None and current[0] is self:
+        from .io import vault_read_lock
+
+        self._check_vault()
+        request = _request_cache()
+        current = _TOOL_VIEW.get()
+        nested = current is not None and current.active and request is not None and current.request is request and current.tools is self
+        with vault_read_lock(self.vault), path_cache(fresh=not nested), reuse_notes(self.notes):
+            if nested:
                 return handler(*args, **kwargs)
-            token = _TOOL_VIEW.set((self, None))
+            view = _ToolView(self, None, _request_cache())
+            token = _TOOL_VIEW.set(view)
             try:
                 with evidence_view(self.vault, lambda: self.visible_index().derived["evidence_register"]):
                     return handler(*args, **kwargs)
             finally:
+                view.active = False
                 _TOOL_VIEW.reset(token)
 
 
@@ -1329,6 +1409,7 @@ class VaultWatcher:
             path for path in iter_markdown(root)
             if not any(part in CONTENT_SKIP_DIRS for part in path.parts[depth:])
         )
+        paths.extend((root / "00-context/claim-snapshots").glob("*.txt"))
         for path in (*paths, root / "whykit.toml"):
             try:
                 info = os.stat(path)
@@ -1643,7 +1724,7 @@ def build_server(
             # follows; error results keep the shared `{"error": ...}` body.
             listed = await super().list_tools()
             return [
-                tool.model_copy(update={"output_schema": output_schema(tool.name)})
+                tool.model_copy(update={"description": (tool.description or "") + " Claims opt-in returns contract v2 assessments; supported is reviewed support, not truth or authenticated identity.", "output_schema": {"type": "object", "anyOf": [output_schema(tool.name), output_schema(tool.name, contract_version=2)]}})
                 if tool.name in TOOL_NAMES else tool
                 for tool in listed
             ]

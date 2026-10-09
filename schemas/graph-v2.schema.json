@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/graph-v2.schema.json",
+  "title": "WhyKit typed relationship graph (claims opt-in v2)",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "nodes",
+    "edges",
+    "unresolved",
+    "stats"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 2
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "title"
+        ]
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "to",
+          "type"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "wikilink",
+              "evidence",
+              "supersedes",
+              "claim",
+              "supports",
+              "contradicts"
+            ]
+          },
+          "source_snapshot_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "fragment": {
+            "type": "string",
+            "pattern": "^lines:[1-9][0-9]*-[1-9][0-9]*$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "unresolved": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "stats": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

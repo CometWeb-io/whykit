@@ -17,7 +17,7 @@ export function reviewQueue(docs: readonly VaultDoc[], now: Date, days = 30): Du
       const [year, month, day] = d.reviewBy.split("-").map(Number) as [number, number, number];
       return { d, days: Math.round((Date.UTC(year, month - 1, day) - today) / 86_400_000) };
     })
-    .filter(x => Number.isFinite(x.days) && x.days <= days)
+    .filter(x => Number.isFinite(x.days) && (x.days <= days || x.d.requiresReview))
     .sort((a, b) => a.days - b.days || a.d.title.localeCompare(b.d.title));
 }
 
