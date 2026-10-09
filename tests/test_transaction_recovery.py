@@ -98,7 +98,7 @@ class TransactionRecoveryTests(unittest.TestCase):
                 root = Path(tmp).resolve() / "vault"
                 tx, updates = self._stage(root)
                 first = next(iter(updates))
-                first.write_text(updates[first] if matching else "unrelated data\n", encoding="utf-8")
+                first.write_bytes((tx / "0.new").read_bytes() if matching else b"unrelated data\n")
                 (tx / "0.new").unlink()
                 if matching:
                     self._recovered(root, tx, updates)
