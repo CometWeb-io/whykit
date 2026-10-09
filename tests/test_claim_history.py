@@ -128,9 +128,15 @@ class ClaimHistoryTests(ClaimApprovalTests):
 
     def test_normalized_line_endings_do_not_change_immutable_snapshot(self):
         base = self.baseline()
+        # Record both newline encodings so history normalization is exercised.
+        self.git("config", "core.autocrlf", "false")
         p = next((self.root / "00-context/claim-snapshots").glob("*.txt"))
         p.write_bytes(p.read_bytes().replace(b"\n", b"\r\n"))
         self.commit()
+        self.assertIn(
+            p.relative_to(self.root).as_posix(),
+            self.git("diff", "--name-only", base, "HEAD").splitlines(),
+        )
         self.assertEqual(self.findings(base), [])
 
     def test_history_gate_integrates_claim_findings(self):
