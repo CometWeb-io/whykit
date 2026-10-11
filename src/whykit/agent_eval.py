@@ -20,7 +20,7 @@ MAX_LINE = 64 * 1024
 MAX_CASES = 10_000
 CASE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}\Z")
 RECORD_ID = re.compile(r"[ECD]-[0-9]{3,}\Z")
-RECORD_MENTION = re.compile(r"(?<![A-Za-z0-9_-])[ECD]-[0-9]{3,}(?![A-Za-z0-9_-])")
+RECORD_MENTION = re.compile(r"(?<![A-Za-z0-9_-])[ECD]-[0-9]{3,}(?![A-Za-z0-9_-])", re.IGNORECASE)
 CLAIM_ID = re.compile(r"C-[0-9]{3,}\Z")
 CLAIM_STATES = {"supported", "disputed", "unsupported", "unknown"}
 
@@ -162,7 +162,7 @@ def evaluate(cases_path: Path, responses_path: Path) -> dict:
                     false_abstentions += 1
             # A model can mention E-999 in prose but leave it out of the structured
             # citations array. Evaluate both surfaces; do not trust self-reporting.
-            inline = set(RECORD_MENTION.findall(response["answer"]))
+            inline = {identifier.upper() for identifier in RECORD_MENTION.findall(response["answer"])}
             claimed = response["citations"] | inline
             presented += len(claimed)
             licensed += len(claimed & expected["allowed"])
