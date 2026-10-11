@@ -51,7 +51,7 @@ export function maskMarkdownCode(text: string): string {
     runs.push({ start: hit.index, end: hit.index + hit[0].length });
   }
   const nextBySize = new Map<number, number>();
-  const closing: (number | undefined)[] = new Array(runs.length);
+  const closing: (number | undefined)[] = runs.map(() => undefined);
   for (let i = runs.length - 1; i >= 0; i--) {
     const size = runs[i]!.end - runs[i]!.start;
     closing[i] = nextBySize.get(size);
@@ -73,7 +73,7 @@ export function findCodeSpan(text: string): { index: number; length: number; val
     runs.push({ start: hit.index, end: hit.index + hit[0].length });
   }
   const nextBySize = new Map<number, number>();
-  const closing: (number | undefined)[] = new Array(runs.length);
+  const closing: (number | undefined)[] = runs.map(() => undefined);
   for (let i = runs.length - 1; i >= 0; i--) {
     const size = runs[i]!.end - runs[i]!.start;
     closing[i] = nextBySize.get(size);
