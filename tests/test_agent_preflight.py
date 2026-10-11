@@ -247,6 +247,24 @@ class PreflightTests(unittest.TestCase):
                 with self.assertRaises(PreflightInputError):
                     self.load(payload)
 
+    def test_schema_validator_rejects_boolean_number_and_nonfinite_confusion(self) -> None:
+        import math
+
+        report = self.assess(self.trace())
+        root = Path(__file__).resolve().parents[1]
+        schema = json.loads((root / "schemas/agent-preflight-result.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(validate(report, schema), [])
+        for field in ("execution_authorized", "trusted_history_checked", "semantics_checked"):
+            with self.subTest(field=field):
+                # Python treats False as equal to integer zero; JSON Schema does not.
+                tampered = {**report, field: 0}
+                self.assertNotEqual(validate(tampered, schema), [])
+        self.assertNotEqual(validate(False, {"enum": [0]}), [])
+        self.assertNotEqual(validate(0, {"enum": [False]}), [])
+        for invalid in (math.nan, math.inf, -math.inf):
+            with self.subTest(nonfinite=repr(invalid)):
+                self.assertNotEqual(validate(invalid, {"type": "number"}), [])
+
     def test_result_and_proposal_match_public_schemas(self) -> None:
         repo = Path(__file__).resolve().parents[1]
         def read(name: str) -> dict:
