@@ -85,6 +85,17 @@ class PreflightTests(unittest.TestCase):
         with self.assertRaises((ConfigError, ValueError)):
             check_proposal(vault, self.path, today=TODAY)
 
+    def test_locally_approved_real_claim_decision_has_a_matching_approval_event(self) -> None:
+        from _claims import TODAY as REVIEW_DATE, approved_claim_vault
+        root = self.path.parent / "approved-claim-vault"
+        _cid, _claim_path, decision_id, _decision_path = approved_claim_vault(root, today=REVIEW_DATE)
+        self.valid["decision_ids"] = [decision_id]
+        self.load(self.valid)
+        report = check_proposal(root, self.path, today=REVIEW_DATE)
+        self.assertEqual(report["referenced_decisions"], 1)
+        self.assertNotIn("invalid_decision_record", report["findings"][0]["problems"])
+        self.assertNotIn("unverified_local_approval", report["findings"][0]["problems"])
+
     def test_invalid_canonical_record_and_missing_approval_receipt_block(self) -> None:
         for finding in ("invalid_decision_record", "unverified_local_approval", "future_record_update"):
             with self.subTest(finding=finding):
