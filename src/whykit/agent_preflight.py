@@ -130,8 +130,12 @@ def check_proposal(root: Path, proposal_path: Path, *, today: dt.date | None = N
         # The generic trace reader tolerates a bad config in legacy mode.
         # A proposal gate must not silently lose evidence age policies.
         load_config(root)
-        report = build_trace(root, today=today)
-        notes = VaultIndex.load(root).notes
+        # Parse one stable inventory for both trace and review-date checks.
+        # Separate loads duplicate I/O and can observe different note versions
+        # when an external editor ignores the advisory mutation lock.
+        vault = VaultIndex.load(root)
+        report = build_trace(root, today=today, vault=vault)
+        notes = vault.notes
         dates: dict[str, object] = {}
         duplicates: set[str] = set()
         for note in notes:
