@@ -1,3 +1,4 @@
+import { foldText } from "./unicode.ts";
 import type { DecisionRow, EvidenceRow, Finding, VaultDoc, VaultIndex } from "../types.ts";
 import { extractWikilinks } from "./markdown.ts";
 
@@ -50,11 +51,11 @@ export function createVaultModel(vault: VaultIndex) {
   const bodies = new Map<string, string>();
   for (const d of docs) if (typeof d.body === "string") bodies.set(d.id, d.body);
   let complete = bodies.size === docs.length;
-  const byId = new Map(docs.map(d => [d.id.toLowerCase(), d]));
+  const byId = new Map(docs.map(d => [foldText(d.id), d]));
   const aliases = new Map<string, VaultDoc[]>();
   for (const d of docs) {
     for (const key of [d.id.split("/").at(-1) || d.id, ...d.aliases, ...(d.claimId ? [d.claimId] : []), ...(d.decisionId ? [d.decisionId] : [])]) {
-      const k = key.toLowerCase();
+      const k = foldText(key);
       const list = aliases.get(k);
       if (list) list.push(d);
       else aliases.set(k, [d]);
@@ -63,9 +64,9 @@ export function createVaultModel(vault: VaultIndex) {
 
   function resolveDoc(target: string): VaultDoc | undefined {
     const clean = target.trim().replace(/^\//, "").replace(/\.md$/, "");
-    const direct = byId.get(clean.toLowerCase());
+    const direct = byId.get(foldText(clean));
     if (direct) return direct;
-    const stem = clean.split("/").at(-1)?.toLowerCase() || clean.toLowerCase();
+    const stem = foldText(clean.split("/").at(-1) || clean);
     const hits = aliases.get(stem) || [];
     // An alias shared by several notes is ambiguous; guessing would draw a
     // link the linter rejects, so it stays unresolved.
@@ -100,11 +101,11 @@ export function createVaultModel(vault: VaultIndex) {
   function entries(): Entry[] {
     if (searchIndex) return searchIndex;
     searchIndex = docs.map(doc => {
-      const title = doc.title.toLowerCase();
-      const id = doc.id.toLowerCase();
-      const tags = doc.tags.join(" ").toLowerCase();
-      const summary = doc.summary.toLowerCase();
-      const body = (bodies.get(doc.id) ?? "").toLowerCase();
+      const title = foldText(doc.title);
+      const id = foldText(doc.id);
+      const tags = foldText(doc.tags.join(" "));
+      const summary = foldText(doc.summary);
+      const body = foldText(bodies.get(doc.id) ?? "");
       return { doc, title, id, tags, summary, meta: `${title} ${id} ${tags} ${summary}`, body };
     });
     return searchIndex;
@@ -185,7 +186,7 @@ export function createVaultModel(vault: VaultIndex) {
   const canonical = docs.filter(d => d.sourceOfTruth && d.status === "approved");
 
   function searchDocs(q: string, limit = 30): VaultDoc[] {
-    const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const terms = foldText(q.trim()).split(/\s+/).filter(Boolean);
     if (!terms.length) return [];
     const hits: { doc: VaultDoc; score: number }[] = [];
     for (const item of entries()) {

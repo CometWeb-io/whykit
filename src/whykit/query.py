@@ -5,6 +5,7 @@ from .io import consistent_read
 
 import argparse
 import heapq
+import unicodedata
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -14,6 +15,11 @@ from .contract import emit_error, vault_not_found
 from .lint import EVIDENCE_ID_RE, Note, find_vault_root, is_vault_root, path_cache
 from .vault_index import VaultIndex, _NOTE_CACHE
 from .console import emit_machine
+
+
+def _fold(value: str) -> str:
+    """NFC then full casefold, shared with the Explorer query implementation."""
+    return unicodedata.normalize("NFC", value).casefold()
 
 
 def _as_list(value: object) -> list[str]:
@@ -63,9 +69,9 @@ def query_vault(
     _select: Callable[[list[tuple[int, str, Note]]], list[tuple[int, str, Note]]] | None = None,
 ) -> dict:
     index = vault or VaultIndex.load(root)
-    needle = (text or "").casefold().strip()
-    owner_needle = (owner or "").casefold().strip()
-    tag_needle = (tag or "").casefold().strip()
+    needle = _fold(text or "").strip()
+    owner_needle = _fold(owner or "").strip()
+    tag_needle = _fold(tag or "").strip()
     matches: list[tuple[int, str, Note]] = []
     cache = _NOTE_CACHE.get()
     metadata: dict[str, str | bool] = {}
@@ -96,9 +102,9 @@ def query_vault(
         canonical = front.get("source_of_truth") is True
         if canonical_only and not canonical:
             continue
-        if owner_needle and owner_needle not in str(front.get("owner") or "").casefold():
+        if owner_needle and owner_needle not in _fold(str(front.get("owner") or "")):
             continue
-        if tag_needle and not any(tag_needle == value.casefold() for value in _as_list(front.get("tags"))):
+        if tag_needle and not any(tag_needle == _fold(value) for value in _as_list(front.get("tags"))):
             continue
         path = index.relative(note.path)
         if source_id:
@@ -108,9 +114,9 @@ def query_vault(
 
         score = 0
         if needle:
-            title = str(front.get("title") or note.path.stem).casefold()
-            path_text = path.casefold()
-            body = note.text.casefold()
+            title = _fold(str(front.get("title") or note.path.stem))
+            path_text = _fold(path)
+            body = _fold(note.text)
             if needle not in title and needle not in path_text and needle not in body:
                 continue
             if needle == title:

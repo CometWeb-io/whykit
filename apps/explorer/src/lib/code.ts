@@ -27,7 +27,7 @@ function blank(chars: string[], start: number, stop: number): void {
 
 /** Mask fenced code and variable-length backtick code spans in linear time. */
 export function maskMarkdownCode(text: string): string {
-  const chars = [...text];
+  const chars = text.split("");
   const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
   let active: Fence | null = null;
   let at = 0;
