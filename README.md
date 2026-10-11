@@ -99,6 +99,12 @@ is true**. It is not an AI memory service, a vector database or an
 access-control boundary; [Positioning](docs/project-positioning.md) says when
 plain ADRs are the better choice.
 
+## Model-neutral agent evaluation
+
+An optional [offline evaluation harness](docs/agent-evaluation.md) scores
+agent responses for evidence citations, disputed claims, appropriate abstention
+and explicit forbidden-content markers. No LLM dependency or network access.
+
 ## Documentation
 
 Start at the [documentation index](docs/README.md). The most used pages:
