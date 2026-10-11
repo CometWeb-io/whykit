@@ -28,6 +28,18 @@ class AgentEvaluationTests(unittest.TestCase):
             "forbidden_phrases": ["SENSITIVE-HOLDOUT"],
         }}
 
+    def test_gate_compares_unrounded_pass_rate(self) -> None:
+        cases = [{"id": f"case-{i}", "expected": {"disposition": "answer", "allowed_citations": ["E-001"]}} for i in range(3)]
+        responses = [
+            {"id": "case-0", "disposition": "answer", "answer": "Grounded result 0."},
+            {"id": "case-1", "disposition": "answer", "answer": "Grounded result 1."},
+        ]
+        left, right = self.fixture(cases, responses)
+        result = evaluate(left, right)
+        self.assertEqual(result["pass_rate"], 0.666667)
+        self.assertEqual(main(["--cases", str(left), "--responses", str(right), "--min-pass-rate", "0.666667"]), 1)
+        self.assertEqual(main(["--cases", str(left), "--responses", str(right), "--min-pass-rate", "0.666666"]), 0)
+
     def test_all_requirements_pass(self) -> None:
         left, right = self.fixture([self.case()], [
             {"id": "test-one", "disposition": "answer", "citations": ["E-001"], "answer": "Grounded."}

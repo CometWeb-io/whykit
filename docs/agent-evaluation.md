@@ -67,3 +67,7 @@ A structured `answer` disposition with an empty or whitespace-only `answer`
 receives `empty_answer` even when the model lists the correct citations; a
 citation list alone is not an answer. Non-empty answers still require external
 human/semantic validation. This scorer cannot certify factual accuracy.
+
+The displayed `pass_rate` is rounded to six decimals; the CLI acceptance
+threshold compares the unrounded ratio `passed / count` to avoid borderline
+false-positive acceptances.
