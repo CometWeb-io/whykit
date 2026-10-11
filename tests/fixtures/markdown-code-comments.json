@@ -266,5 +266,25 @@
       "E-001",
       "E-002"
     ]
+  },
+  {
+    "id": "unicode-line-separator-inside-tilde-info",
+    "markdown": "~~~info [[E-001]]\n~~~\n[[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "unicode-paragraph-separator-inside-tilde-info",
+    "markdown": "~~~info [[E-001]]\n~~~\n[[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
   }
 ]

@@ -2,7 +2,7 @@
  * No HTML interpretation; intentionally keeps text offsets stable.
  */
 const BT = String.fromCharCode(96);
-const OPEN = new RegExp("^ {0,3}(" + BT + "{3,}|~{3,})(.*)$");
+const OPEN = new RegExp("^ {0,3}(" + BT + "{3,}|~{3,})([\\s\\S]*)$");
 const CLOSE = new RegExp("^ {0,3}(" + BT + "+|~+)[ \\t]*$");
 const RUNS = new RegExp(BT + "+", "g");
 // Construct this marker at runtime: a literal would invalidate the

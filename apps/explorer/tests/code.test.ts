@@ -110,6 +110,13 @@ test("comment lexical precedence scales with numerous inline delimiters", () => 
   assert.ok(masked.includes(allowed));
 });
 
+test("Unicode separators inside fence info stay on the current physical line", () => {
+  for (const separator of ["\u2028", "\u2029"]) {
+    const input = "~~~info" + separator + "[[E-001]]\n~~~\n[[E-002]]";
+    assert.deepEqual(extractWikilinks(input), ["E-002"]);
+  }
+});
+
 test("Unicode separators do not open phantom Markdown code fences", () => {
   for (const separator of ["\u0085", "\u2028", "\u2029", "\v", "\f"]) {
     const content = "prefix" + separator + "~~~\n[[E-001]]\n~~~\n[[E-002]]";
