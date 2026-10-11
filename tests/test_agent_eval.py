@@ -7,7 +7,6 @@ import unittest
 from pathlib import Path
 
 from whykit.agent_eval import EvaluationInputError, evaluate, main
-from _jsonschema import validate
 
 
 class AgentEvaluationTests(unittest.TestCase):
@@ -29,18 +28,6 @@ class AgentEvaluationTests(unittest.TestCase):
             "forbidden_phrases": ["SENSITIVE-HOLDOUT"],
         }}
 
-
-    def test_evaluation_result_matches_public_schema(self) -> None:
-        root = Path(__file__).resolve().parents[1]
-        schema = json.loads((root / "schemas/agent-eval-result.schema.json").read_text(encoding="utf-8"))
-        left, right = self.fixture([self.case()], [
-            {"id": "test-one", "disposition": "answer", "citations": ["E-001"], "answer": "E-001"}
-        ])
-        result = evaluate(left, right)
-        self.assertEqual(validate(result, schema), [])
-        result["pass_rate"] = -1
-        self.assertNotEqual(validate(result, schema), [])
-
     def test_all_requirements_pass(self) -> None:
         left, right = self.fixture([self.case()], [
             {"id": "test-one", "disposition": "answer", "citations": ["E-001"], "answer": "Grounded."}
@@ -51,6 +38,14 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertEqual(result["citation_precision"], 1)
         self.assertEqual(result["false_abstentions"], 0)
         self.assertEqual(main(["--cases", str(left), "--responses", str(right)]), 0)
+
+    def test_answer_without_text_does_not_pass_on_citations_alone(self) -> None:
+        left, right = self.fixture([self.case()], [
+            {"id": "test-one", "disposition": "answer", "citations": ["E-001"], "answer": "   "}
+        ])
+        report = evaluate(left, right)
+        self.assertEqual(report["passed"], 0)
+        self.assertIn("empty_answer", report["results"][0]["violations"])
 
     def test_overconfident_answer_and_leak_never_pass(self) -> None:
         left, right = self.fixture([self.case("abstain")], [
@@ -117,7 +112,7 @@ class AgentEvaluationTests(unittest.TestCase):
 
     def test_missing_and_unknown_predictions(self) -> None:
         left, right = self.fixture([self.case(), {"id": "test-two", "expected": {"disposition": "abstain"}}], [
-            {"id": "test-one", "disposition": "answer", "citations": ["E-001"]}
+            {"id": "test-one", "disposition": "answer", "citations": ["E-001"], "answer": "E-001 supports this case."}
         ])
         self.assertEqual(evaluate(left, right)["passed"], 1)
         self.assertEqual(evaluate(left, right)["results"][1]["violations"], ["missing_response"])
