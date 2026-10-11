@@ -81,6 +81,14 @@ class MarkdownCodeTests(unittest.TestCase):
                     if original in "\r\n":
                         self.assertEqual(masked[index], original)
 
+    def test_comment_precedence_with_many_delimiters_stays_bounded(self) -> None:
+        # A comment opener must not be erased by a code span created later,
+        # and many unmatched runs must not trigger repeated rescans.
+        source = ("<!-- " + BT + "body --> " + BT + " ") * 2500 + "[[E-002]]"
+        masked = _mask_code(source)
+        self.assertEqual(len(masked), len(source))
+        self.assertIn("[[E-002]]", masked)
+
     def test_many_unmatched_runs_do_not_quadratically_scan(self) -> None:
         content = (BT + " text " + BT * 2 + " x ") * 5000 + " [[E-002]]"
         self.assert_only_real_evidence(content)

@@ -103,6 +103,13 @@ test("HTML-commented headings never become Explorer navigation entries", () => {
   assert.deepEqual(extractHeadings(markdown).map((heading) => heading.text), ["Actual section"]);
 });
 
+test("comment lexical precedence scales with numerous inline delimiters", () => {
+  const source = ("<!-- " + BT + "body --> " + BT + " ").repeat(2500) + allowed;
+  const masked = maskMarkdownCode(source);
+  assert.equal(masked.length, source.length);
+  assert.ok(masked.includes(allowed));
+});
+
 test("a very large number of unmatched delimiters terminates", () => {
   const src = (BT + " text " + BT.repeat(2) + " x ").repeat(10000) + allowed;
   assert.deepEqual(extractWikilinks(src), ["E-002"]);

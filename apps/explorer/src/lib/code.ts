@@ -61,29 +61,46 @@ export function maskMarkdownCode(text: string): string {
     closing[i] = nextBySize.get(size);
     nextBySize.set(size, i);
   }
-  for (let i = 0; i < runs.length;) {
-    const close = closing[i];
-    if (close === undefined) { i++; continue; }
-    blank(chars, runs[i]!.start, runs[close]!.end);
-    i = close + 1;
-  }
-  // Strip comment ranges after masking code spans; a marker inside inline code
-  // is literal text, not the start of an HTML comment.
-  const visible = chars.join("");
+
+  // A comment that opens before a backtick span closes at the first literal
+  // terminator, even if its body contains a matched backtick pair. Inline
+  // code opened first owns any apparent comment marker within its span.
+  // Keep next-marker positions while skipping tokens: each search is over a
+  // fresh suffix, giving linear total scanning work.
   let cursor = 0;
-  while (cursor < visible.length) {
-    const start = visible.indexOf(COMMENT_START, cursor);
-    if (start < 0) break;
-    let escapes = 0;
-    while (start - escapes - 1 >= 0 && visible[start - escapes - 1] === "\\") escapes++;
-    if (escapes % 2 === 1) {
-      cursor = start + 4;
+  let runIndex = 0;
+  let commentStart = masked.indexOf(COMMENT_START);
+  while (cursor < masked.length) {
+    while (runIndex < runs.length && runs[runIndex]!.end <= cursor) runIndex++;
+    if (commentStart >= 0 && commentStart < cursor) {
+      commentStart = masked.indexOf(COMMENT_START, cursor);
+    }
+    const nextRun = runIndex < runs.length ? runs[runIndex]!.start : Infinity;
+    if (commentStart >= 0 && commentStart < nextRun) {
+      let escapes = 0;
+      while (commentStart - escapes - 1 >= 0 &&
+             masked[commentStart - escapes - 1] === "\\") escapes++;
+      if (escapes % 2 === 1) {
+        cursor = commentStart + COMMENT_START.length;
+        commentStart = masked.indexOf(COMMENT_START, cursor);
+        continue;
+      }
+      const stop = masked.indexOf("-->", commentStart + COMMENT_START.length);
+      cursor = stop < 0 ? masked.length : stop + 3;
+      blank(chars, commentStart, cursor);
+      commentStart = masked.indexOf(COMMENT_START, cursor);
       continue;
     }
-    const endMarker = visible.indexOf("-->", start + 4);
-    const end = endMarker < 0 ? visible.length : endMarker + 3;
-    blank(chars, start, end);
-    cursor = end;
+    if (runIndex >= runs.length) break;
+    const endIndex = closing[runIndex];
+    if (endIndex === undefined) {
+      cursor = runs[runIndex]!.end;
+      runIndex++;
+    } else {
+      cursor = runs[endIndex]!.end;
+      blank(chars, runs[runIndex]!.start, cursor);
+      runIndex = endIndex + 1;
+    }
   }
   return chars.join("");
 }
