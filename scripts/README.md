@@ -31,6 +31,20 @@ start](../README.md#60-second-quickstart). After publication, the package instal
 uv tool install whykit
 ```
 
+## `agent_eval.py`
+
+Local, provider-neutral evaluator for supplied agent responses (JSONL). It
+checks licensed E/C/D citations, contradictory claims, explicit abstention,
+forbidden content markers and reproducible input hashes. It performs **no model
+calls or network requests**. Sample inputs are synthetic, not a real model
+benchmark. Keep private holdout datasets outside this repository; see
+[docs/agent-evaluation.md](../docs/agent-evaluation.md).
+
+```bash
+uv run python scripts/agent_eval.py --cases examples/agent-eval/cases.jsonl \\
+  --responses examples/agent-eval/responses.jsonl
+```
+
 ## `bench.py`
 
 Times the read commands on a vault, each in a fresh interpreter, and can record
