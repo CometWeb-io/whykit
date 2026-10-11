@@ -41,7 +41,13 @@ def _read(path: Path, role: str) -> tuple[dict[str, dict], str]:
     sha = hashlib.sha256()
     total = 0
     with path.open("rb") as stream:
-        for line_number, line in enumerate(stream, 1):
+        line_number = 0
+        while True:
+            # Never materialize an unbounded JSONL line before checking its size.
+            line = stream.readline(MAX_LINE + 1)
+            if not line:
+                break
+            line_number += 1
             total += len(line)
             if total > MAX_BYTES or len(line) > MAX_LINE or line_number > MAX_CASES:
                 raise EvaluationInputError(role + ": size or record limit exceeded")
@@ -122,7 +128,7 @@ def evaluate(cases_path: Path, responses_path: Path) -> dict:
     if set(predictions) - set(cases):
         raise EvaluationInputError("unknown response case ID")
     results = []
-    overconfident = unknown_citations = leaked = required_count = recovered = 0
+    overconfident = false_abstentions = unknown_citations = leaked = required_count = recovered = licensed = presented = 0
     for case_id in sorted(cases):
         expected = _expected(cases[case_id])
         response = _response(predictions[case_id]) if case_id in predictions else None
@@ -134,6 +140,10 @@ def evaluate(cases_path: Path, responses_path: Path) -> dict:
                 violations.add("wrong_disposition")
                 if response["disposition"] == "answer" and expected["disposition"] == "abstain":
                     overconfident += 1
+                elif response["disposition"] == "abstain" and expected["disposition"] == "answer":
+                    false_abstentions += 1
+            presented += len(response["citations"])
+            licensed += len(response["citations"] & expected["allowed"])
             if response["citations"] - expected["allowed"]:
                 violations.add("unlicensed_citations")
                 unknown_citations += len(response["citations"] - expected["allowed"])
@@ -158,7 +168,9 @@ def evaluate(cases_path: Path, responses_path: Path) -> dict:
     return {
         "format": FORMAT, "cases_sha256": corpus_sha256, "responses_sha256": responses_sha256,
         "count": len(results), "passed": passed, "pass_rate": round(passed / len(results), 6),
-        "false_answers": overconfident, "unlicensed_citations": unknown_citations,
+        "false_answers": overconfident, "false_abstentions": false_abstentions,
+        "citation_precision": round(licensed / presented, 6) if presented else None,
+        "unlicensed_citations": unknown_citations,
         "forbidden_phrase_matches": leaked,
         "required_citation_recall": round(recovered / required_count, 6) if required_count else None,
         "results": results,

@@ -35,8 +35,8 @@ become evidence.
 ## Interpreting output
 
 Output includes input SHA-256 digests, exact case IDs, stable violation codes,
-pass rate, false-answer count, unlicensed-citation count, forbidden phrase matches
-and recall of required citations. It does not contain questions, answers,
+pass rate, false-answer and false-abstention counts, citation precision,
+unlicensed-citation count, forbidden phrase matches and recall of required citations. It does not contain questions, answers,
 sensitive marker values or source excerpts. Default exit 0 requires all cases
 to pass; 1 denotes a scored failure; 2 denotes invalid input. Even with
 --min-pass-rate 0, a false answer to an abstention case or a forbidden phrase
@@ -51,3 +51,6 @@ holdouts private; never commit confidential agent transcripts to the repository.
 
 Limits: 10 MiB per JSONL input, 64 KiB per line, 10,000 records. The scorer
 uses only the Python standard library and performs no network requests.
+
+Inputs are read with a bounded per-line read, rather than loading a potentially
+unbounded line into memory before checking its size.

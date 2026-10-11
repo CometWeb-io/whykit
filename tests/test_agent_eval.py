@@ -35,6 +35,8 @@ class AgentEvaluationTests(unittest.TestCase):
         result = evaluate(left, right)
         self.assertEqual(result["passed"], 1)
         self.assertEqual(result["required_citation_recall"], 1)
+        self.assertEqual(result["citation_precision"], 1)
+        self.assertEqual(result["false_abstentions"], 0)
         self.assertEqual(main(["--cases", str(left), "--responses", str(right)]), 0)
 
     def test_overconfident_answer_and_leak_never_pass(self) -> None:
@@ -67,6 +69,13 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertEqual(evaluate(left, right)["passed"], 1)
         self.assertEqual(evaluate(left, right)["results"][1]["violations"], ["missing_response"])
         right.write_text('{"id":"other","disposition":"answer"}\n', encoding="utf-8")
+        with self.assertRaises(EvaluationInputError):
+            evaluate(left, right)
+
+    def test_line_limit_is_enforced_before_json_parsing(self) -> None:
+        from whykit.agent_eval import MAX_LINE
+        left, right = self.fixture([self.case()], [{"id": "test-one", "disposition": "answer"}])
+        left.write_bytes(b"x" * (MAX_LINE + 100))
         with self.assertRaises(EvaluationInputError):
             evaluate(left, right)
 
