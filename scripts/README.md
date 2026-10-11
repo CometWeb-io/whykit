@@ -31,6 +31,17 @@ start](../README.md#60-second-quickstart). After publication, the package instal
 uv tool install whykit
 ```
 
+## `agent_preflight.py`
+
+Read-only inspection of the decision IDs named in an agent proposal. This
+reports evidence and review gaps but **never authorizes execution**. See
+[docs/agent-preflight.md](../docs/agent-preflight.md).
+
+```bash
+uv run python scripts/agent_preflight.py --root /path/to/vault \
+  --proposal /path/to/proposal.json
+```
+
 ## `agent_eval.py`
 
 Local, provider-neutral evaluator for supplied agent responses (JSONL). It
