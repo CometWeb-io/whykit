@@ -18,6 +18,12 @@ hello@cometweb.io the contact; CometWeb is not the copyright holder.
 
 ### Highlights
 
+- Markdown HTML comments are excluded from Python evidence citations and
+  Explorer graph links/navigation, including partial and mixed-line-ending
+  comments; Python and TypeScript share a 10-case regression corpus. Parser
+  caches invalidate on package source changes. Full CommonMark HTML container
+  semantics remain out of scope for this narrow masking fix.
+
 - **Evidence extraction correctness:** shared position-preserving Markdown code
   masking reduces false references from code examples; Python and Explorer
   agree on fenced-code boundaries and Unicode NFC/full casefold matching.

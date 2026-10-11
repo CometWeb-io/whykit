@@ -5,6 +5,9 @@ const BT = String.fromCharCode(96);
 const OPEN = new RegExp("^ {0,3}(" + BT + "{3,}|~{3,})(.*)$");
 const CLOSE = new RegExp("^ {0,3}(" + BT + "+|~+)[ \\t]*$");
 const RUNS = new RegExp(BT + "+", "g");
+// Construct this marker at runtime: a literal would invalidate the
+// Explorer's safe single-file HTML build.
+const COMMENT_START = [60, 33, 45, 45].map((point) => String.fromCharCode(point)).join("");
 
 export type Fence = { character: string; width: number; info: string };
 
@@ -63,6 +66,24 @@ export function maskMarkdownCode(text: string): string {
     if (close === undefined) { i++; continue; }
     blank(chars, runs[i]!.start, runs[close]!.end);
     i = close + 1;
+  }
+  // Strip comment ranges after masking code spans; a marker inside inline code
+  // is literal text, not the start of an HTML comment.
+  const visible = chars.join("");
+  let cursor = 0;
+  while (cursor < visible.length) {
+    const start = visible.indexOf(COMMENT_START, cursor);
+    if (start < 0) break;
+    let escapes = 0;
+    while (start - escapes - 1 >= 0 && visible[start - escapes - 1] === "\\") escapes++;
+    if (escapes % 2 === 1) {
+      cursor = start + 4;
+      continue;
+    }
+    const endMarker = visible.indexOf("-->", start + 4);
+    const end = endMarker < 0 ? visible.length : endMarker + 3;
+    blank(chars, start, end);
+    cursor = end;
   }
   return chars.join("");
 }

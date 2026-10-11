@@ -81,6 +81,28 @@ test("invalid backtick info string is not considered a fence", () => {
   assert.deepEqual(extractWikilinks(src), ["E-002"]);
 });
 
+test("shared comment corpus agrees on visible wikilinks and preserves UTF-16 offsets", async () => {
+  const { readFileSync } = await import("node:fs");
+  const cases = JSON.parse(
+    readFileSync(new URL("../../../tests/fixtures/markdown-code-comments.json", import.meta.url), "utf8")
+  ) as { id: string; markdown: string; evidence: string[]; wikilinks: string[] }[];
+  for (const example of cases) {
+    assert.deepEqual(extractWikilinks(example.markdown), example.wikilinks, example.id);
+    const masked = maskMarkdownCode(example.markdown);
+    assert.equal(masked.length, example.markdown.length, example.id);
+    for (let i = 0; i < example.markdown.length; i++) {
+      if ("\r\n".includes(example.markdown[i]!)) {
+        assert.equal(masked[i], example.markdown[i], example.id);
+      }
+    }
+  }
+});
+
+test("HTML-commented headings never become Explorer navigation entries", () => {
+  const markdown = "<" + "!--\n## Hidden section\n-->" + "\n## Actual section";
+  assert.deepEqual(extractHeadings(markdown).map((heading) => heading.text), ["Actual section"]);
+});
+
 test("a very large number of unmatched delimiters terminates", () => {
   const src = (BT + " text " + BT.repeat(2) + " x ").repeat(10000) + allowed;
   assert.deepEqual(extractWikilinks(src), ["E-002"]);
