@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from whykit.agent_preflight import PreflightInputError, assess, read_proposal
+from whykit.agent_preflight import PreflightInputError, assess, read_proposal, check_proposal
 
 TODAY = dt.date(2026, 10, 11)
 
@@ -82,6 +82,20 @@ class PreflightTests(unittest.TestCase):
         _, first = self.load(self.valid)
         _, second = self.load(self.valid)
         self.assertEqual(first, second)
+
+    def test_real_example_vault_does_not_mutate_any_files(self) -> None:
+        from hashlib import sha256
+        root = Path(__file__).resolve().parents[1] / "examples" / "tiny"
+        before = {p.relative_to(root): sha256(p.read_bytes()).hexdigest()
+                  for p in root.rglob("*") if p.is_file()}
+        self.load(self.valid)
+        report = check_proposal(root, self.path, today=TODAY)
+        self.assertIn(report["verdict"], {"blocked", "review_required"})
+        self.assertFalse(report["execution_authorized"])
+        self.assertTrue(report["review_required"])
+        after = {p.relative_to(root): sha256(p.read_bytes()).hexdigest()
+                 for p in root.rglob("*") if p.is_file()}
+        self.assertEqual(before, after)
 
     def test_private_summary_not_emitted(self) -> None:
         self.valid["summary"] = "PRIVATE SENSITIVE PROJECT"
