@@ -78,6 +78,12 @@ INTENTIONAL_CHANGES: dict[str, tuple[str, str]] = {
         "evidence.retired is not reported on superseded or archived records (summary.warnings); "
         "snapshot format v2 by default (format + normalization keys)",
     ),
+    # The corrected variable-length/unclosed code masking changes context
+    # assembly for the synthetic pack fixture; all other command digests stay pinned.
+    "pack": (
+        "e4f1dfaea253416ac82c130726e73fcf8acb171cc1879bbfeac6bf45ff8042b9",
+        "fixed Markdown masking removes example-code links from assembled agent context",
+    ),
     # The synthetic vault has lint errors, so explorer-index refuses. It used
     # to write nothing to stdout; it now writes the machine-contract error
     # object (code vault_invalid), with the same exit code 1.
