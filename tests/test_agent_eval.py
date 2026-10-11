@@ -33,6 +33,9 @@ class AgentEvaluationTests(unittest.TestCase):
         responses = [
             {"id": "case-0", "disposition": "answer", "answer": "Grounded result 0."},
             {"id": "case-1", "disposition": "answer", "answer": "Grounded result 1."},
+            # A soft false abstention checks unrounded thresholds; a *missing*
+            # response is a non-overridable integrity failure tested separately.
+            {"id": "case-2", "disposition": "abstain", "answer": ""},
         ]
         left, right = self.fixture(cases, responses)
         result = evaluate(left, right)
