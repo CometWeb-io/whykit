@@ -80,6 +80,16 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertEqual(actual["unlicensed_citations"], 1)
         self.assertIn("unlicensed_citations", actual["results"][0]["violations"])
 
+    def test_lowercase_and_mixed_case_unlicensed_ids_in_answer(self) -> None:
+        for mention in ("e-999", "c-999", "D-999"):
+            with self.subTest(mention=mention):
+                left, right = self.fixture([self.case()], [
+                    {"id": "test-one", "disposition": "answer",
+                     "citations": ["E-001"], "answer": "E-001 and " + mention}
+                ])
+                report = evaluate(left, right)
+                self.assertIn("unlicensed_citations", report["results"][0]["violations"])
+
     def test_citations_can_be_required_in_the_actual_answer(self) -> None:
         case = self.case()
         case["expected"]["require_inline_citations"] = True
