@@ -7,7 +7,7 @@ const CLOSE = new RegExp("^ {0,3}(" + BT + "+|~+)[ \\t]*$");
 const RUNS = new RegExp(BT + "+", "g");
 // Construct this marker at runtime: a literal would invalidate the
 // Explorer's safe single-file HTML build.
-const COMMENT_START = String.fromCharCode(60, 33, 45, 45);
+const COMMENT_START = [60, 33, 45, 45].map((point) => String.fromCharCode(point)).join("");
 
 export type Fence = { character: string; width: number; info: string };
 
@@ -67,7 +67,7 @@ export function maskMarkdownCode(text: string): string {
     blank(chars, runs[i]!.start, runs[close]!.end);
     i = close + 1;
   }
-  // Strip comment ranges after masking code spans; <!-- inside inline code
+  // Strip comment ranges after masking code spans; a marker inside inline code
   // is literal text, not the start of an HTML comment.
   const visible = chars.join("");
   let cursor = 0;
