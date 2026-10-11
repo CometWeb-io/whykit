@@ -92,9 +92,9 @@ class MarkdownCodeTests(unittest.TestCase):
     def test_only_commonmark_cr_lf_crlf_split_physical_lines(self) -> None:
         # Unicode separators are content, not physical Markdown line endings.
         # A phantom fence created by str.splitlines() would hide E-001.
-        for separator in ("\\u0085", "\\u2028", "\\u2029", "\\v", "\\f"):
+        for separator in ("\u0085", "\u2028", "\u2029", "\v", "\f"):
             with self.subTest(separator=ascii(separator)):
-                content = "prefix" + separator + "~~~\\n[[E-001]]\\n~~~\\n[[E-002]]"
+                content = "prefix" + separator + "~~~\n[[E-001]]\n~~~\n[[E-002]]"
                 self.assert_only_real_evidence(content, ("E-001", "E-002"))
 
     def test_many_unmatched_runs_do_not_quadratically_scan(self) -> None:
