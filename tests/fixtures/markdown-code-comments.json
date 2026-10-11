@@ -176,5 +176,35 @@
     "wikilinks": [
       "E-002"
     ]
+  },
+  {
+    "id": "short-empty-comment",
+    "markdown": "<!--> [[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "short-dash-comment",
+    "markdown": "<!---> [[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "short-empty-comment-before-code",
+    "markdown": "<!--> `[[E-001]]` [[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
   }
 ]

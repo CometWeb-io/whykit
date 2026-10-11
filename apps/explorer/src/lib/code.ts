@@ -85,8 +85,14 @@ export function maskMarkdownCode(text: string): string {
         commentStart = masked.indexOf(COMMENT_START, cursor);
         continue;
       }
-      const stop = masked.indexOf("-->", commentStart + COMMENT_START.length);
-      cursor = stop < 0 ? masked.length : stop + 3;
+      // Short empty-comment forms also terminate immediately (CommonMark).
+      const suffix = masked.slice(commentStart + COMMENT_START.length, commentStart + 6);
+      if (suffix.startsWith(">")) cursor = commentStart + 5;
+      else if (suffix.startsWith("->")) cursor = commentStart + 6;
+      else {
+        const stop = masked.indexOf("-->", commentStart + COMMENT_START.length);
+        cursor = stop < 0 ? masked.length : stop + 3;
+      }
       blank(chars, commentStart, cursor);
       commentStart = masked.indexOf(COMMENT_START, cursor);
       continue;

@@ -80,7 +80,13 @@ def mask_code(text: str) -> str:
         if escapes % 2:
             cursor = token.end()
             continue
-        closer = visible.find("-->", token.end())
-        cursor = len(visible) if closer < 0 else closer + 3
+        # CommonMark also recognizes the two short empty-comment forms.
+        if visible.startswith("<!-->", start):
+            cursor = start + 5
+        elif visible.startswith("<!--->", start):
+            cursor = start + 6
+        else:
+            closer = visible.find("-->", token.end())
+            cursor = len(visible) if closer < 0 else closer + 3
         blank(start, cursor)
     return "".join(chars)
