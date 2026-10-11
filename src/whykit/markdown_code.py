@@ -14,6 +14,10 @@ _BT = chr(96)
 _FENCE_OPEN = re.compile(r"^ {0,3}(" + _BT + r"{3,}|~{3,})(.*)$")
 _FENCE_CLOSE = re.compile(r"^ {0,3}(" + _BT + r"+|~+)[ \t]*$")
 _BACKTICK_RUN = re.compile(_BT + "+")
+# CommonMark line endings are only CR, LF and CRLF. str.splitlines() also
+# splits on NEL, vertical tab, form feed and Unicode paragraph separators,
+# which would create phantom fences and suppress genuine evidence citations.
+_MARKDOWN_LINE = re.compile(r"[^\r\n]*(?:\r\n|\n|\r)|[^\r\n]+$")
 
 
 def mask_code(text: str) -> str:
@@ -31,7 +35,8 @@ def mask_code(text: str) -> str:
             if chars[index] not in "\r\n":
                 chars[index] = " "
 
-    for line in text.splitlines(keepends=True):
+    for line_match in _MARKDOWN_LINE.finditer(text):
+        line = line_match.group()
         body = line.rstrip("\r\n")
         if opening is None:
             match = _FENCE_OPEN.match(body)
