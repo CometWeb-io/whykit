@@ -144,6 +144,13 @@ def check_proposal(root: Path, proposal_path: Path, *, today: dt.date | None = N
     proposal, digest = read_proposal(proposal_path)
     root = root.resolve(strict=True)
     with vault_read_lock(root):
+        # Reject any symlinked approval log *before* loading or traversing
+        # vault notes; the indexer must not follow it even for an incidental read.
+        log_path = root / "00-context/review-log.md"
+        if log_path.parent.is_symlink() or log_path.is_symlink():
+            raise PreflightInputError("unsafe_review_log_path")
+        if log_path.exists() and not log_path.resolve(strict=True).is_relative_to(root):
+            raise PreflightInputError("unsafe_review_log_path")
         # The generic trace reader tolerates a bad config in legacy mode.
         # A proposal gate must not silently lose evidence age policies.
         load_config(root)
@@ -156,13 +163,6 @@ def check_proposal(root: Path, proposal_path: Path, *, today: dt.date | None = N
         dates: dict[str, object] = {}
         duplicates: set[str] = set()
         integrity: dict[str, set[str]] = {}
-        log_path = root / "00-context/review-log.md"
-        # Reject symlink escapes before touching the approval log, even if
-        # a previous vault reader tolerated the path. We never print its text.
-        if log_path.parent.is_symlink() or log_path.is_symlink():
-            raise PreflightInputError("unsafe_review_log_path")
-        if log_path.exists() and not log_path.resolve(strict=True).is_relative_to(root):
-            raise PreflightInputError("unsafe_review_log_path")
         # A missing or unparseable approval log cannot authenticate a decision.
         # Local receipts bind content, but are still editable and unauthenticated.
         log_text = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
