@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from whykit.agent_preflight import PreflightInputError, assess, read_proposal, check_proposal
+from _jsonschema import validate
 
 TODAY = dt.date(2026, 10, 11)
 
@@ -96,6 +97,17 @@ class PreflightTests(unittest.TestCase):
         after = {p.relative_to(root): sha256(p.read_bytes()).hexdigest()
                  for p in root.rglob("*") if p.is_file()}
         self.assertEqual(before, after)
+
+
+    def test_result_and_proposal_match_public_schemas(self) -> None:
+        repo = Path(__file__).resolve().parents[1]
+        read = lambda name: json.loads((repo / "schemas" / name).read_text(encoding="utf-8"))
+        report = self.assess(self.trace())
+        proposal, _ = self.load(self.valid)
+        self.assertEqual(validate(report, read("agent-preflight-result.schema.json")), [])
+        self.assertEqual(validate(proposal, read("agent-preflight-proposal.schema.json")), [])
+        report["execution_authorized"] = True
+        self.assertNotEqual(validate(report, read("agent-preflight-result.schema.json")), [])
 
     def test_private_summary_not_emitted(self) -> None:
         self.valid["summary"] = "PRIVATE SENSITIVE PROJECT"

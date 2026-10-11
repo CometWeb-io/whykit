@@ -39,3 +39,6 @@ offline agent evaluator to test how real models select references.
 
 This feature deliberately requires human action outside the CLI before any
 file edits, merge, publication or deployment.
+
+Machine-readable schema: [agent-preflight-result.schema.json](../schemas/agent-preflight-result.schema.json).
+Input schema: [agent-preflight-proposal.schema.json](../schemas/agent-preflight-proposal.schema.json).

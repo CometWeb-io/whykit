@@ -62,3 +62,5 @@ uses only the Python standard library and performs no network requests.
 
 Inputs are read with a bounded per-line read, rather than loading a potentially
 unbounded line into memory before checking its size.
+
+Machine-readable result schema: [agent-eval-result.schema.json](../schemas/agent-eval-result.schema.json).
