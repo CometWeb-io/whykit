@@ -91,7 +91,7 @@ test("shared comment corpus agrees on visible wikilinks and preserves UTF-16 off
     const masked = maskMarkdownCode(example.markdown);
     assert.equal(masked.length, example.markdown.length, example.id);
     for (let i = 0; i < example.markdown.length; i++) {
-      if ("\\r\\n".includes(example.markdown[i]!)) {
+      if ("\r\n".includes(example.markdown[i]!)) {
         assert.equal(masked[i], example.markdown[i], example.id);
       }
     }
