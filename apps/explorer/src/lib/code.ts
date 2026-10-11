@@ -5,6 +5,9 @@ const BT = String.fromCharCode(96);
 const OPEN = new RegExp("^ {0,3}(" + BT + "{3,}|~{3,})(.*)$");
 const CLOSE = new RegExp("^ {0,3}(" + BT + "+|~+)[ \\t]*$");
 const RUNS = new RegExp(BT + "+", "g");
+// Construct this marker at runtime: a literal would invalidate the
+// Explorer's safe single-file HTML build.
+const COMMENT_START = String.fromCharCode(60, 33, 45, 45);
 
 export type Fence = { character: string; width: number; info: string };
 
@@ -69,7 +72,7 @@ export function maskMarkdownCode(text: string): string {
   const visible = chars.join("");
   let cursor = 0;
   while (cursor < visible.length) {
-    const start = visible.indexOf("<!--", cursor);
+    const start = visible.indexOf(COMMENT_START, cursor);
     if (start < 0) break;
     let escapes = 0;
     while (start - escapes - 1 >= 0 && visible[start - escapes - 1] === "\\") escapes++;
