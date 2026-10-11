@@ -157,6 +157,12 @@ def check_proposal(root: Path, proposal_path: Path, *, today: dt.date | None = N
         duplicates: set[str] = set()
         integrity: dict[str, set[str]] = {}
         log_path = root / "00-context/review-log.md"
+        # Reject symlink escapes before touching the approval log, even if
+        # a previous vault reader tolerated the path. We never print its text.
+        if log_path.parent.is_symlink() or log_path.is_symlink():
+            raise PreflightInputError("unsafe_review_log_path")
+        if log_path.exists() and not log_path.resolve(strict=True).is_relative_to(root):
+            raise PreflightInputError("unsafe_review_log_path")
         # A missing or unparseable approval log cannot authenticate a decision.
         # Local receipts bind content, but are still editable and unauthenticated.
         log_text = log_path.read_text(encoding="utf-8") if log_path.exists() else ""

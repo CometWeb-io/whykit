@@ -96,6 +96,25 @@ class PreflightTests(unittest.TestCase):
                 report = self.assess(self.trace(evidence=invalid))
                 self.assertIn("incomplete_trace_projection", report["findings"][0]["problems"])
 
+    def test_symlinked_review_log_is_refused_before_read(self) -> None:
+        import shutil
+        base = Path(__file__).resolve().parents[1] / "examples" / "tiny"
+        root = self.path.parent / "unsafe-vault"
+        shutil.copytree(base, root)
+        link = root / "00-context/review-log.md"
+        if link.exists():
+            link.unlink()
+        secret = self.path.parent / "local-secret.txt"
+        secret.write_text("SYNTHETIC_SECRET_MARKER", encoding="utf-8")
+        try:
+            link.symlink_to(secret)
+        except (NotImplementedError, OSError):
+            self.skipTest("filesystem does not permit symlink creation")
+        self.load(self.valid)
+        with self.assertRaises(PreflightInputError) as caught:
+            check_proposal(root, self.path, today=TODAY)
+        self.assertEqual(str(caught.exception), "unsafe_review_log_path")
+
     def test_malformed_configuration_is_not_ignored(self) -> None:
         import shutil
         from whykit.config import ConfigError

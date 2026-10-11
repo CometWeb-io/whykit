@@ -61,3 +61,7 @@ positive preflight even if a human-approved decision includes a written
 explanation. A supported claim must still have a valid local binding. A
 non-opted-in claim reference or an absent/incomplete claim projection cannot
 be treated as legacy evidence with no claim obligations.
+
+The preflight refuses a symlinked approval log or symlinked 00-context
+directory rather than reading an approval history outside its vault. External
+editors that bypass vault locks still require independent filesystem controls.
