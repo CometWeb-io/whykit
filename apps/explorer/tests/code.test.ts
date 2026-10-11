@@ -98,6 +98,11 @@ test("shared comment corpus agrees on visible wikilinks and preserves UTF-16 off
   }
 });
 
+test("HTML-commented headings never become Explorer navigation entries", () => {
+  const markdown = "<" + "!--\n## Hidden section\n-->" + "\n## Actual section";
+  assert.deepEqual(extractHeadings(markdown).map((heading) => heading.text), ["Actual section"]);
+});
+
 test("a very large number of unmatched delimiters terminates", () => {
   const src = (BT + " text " + BT.repeat(2) + " x ").repeat(10000) + allowed;
   assert.deepEqual(extractWikilinks(src), ["E-002"]);
