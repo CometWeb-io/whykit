@@ -150,6 +150,10 @@ def evaluate(cases_path: Path, responses_path: Path) -> dict:
         if response is None:
             violations.add("missing_response")
         else:
+            # Correct metadata without an actual answer is not a successful
+            # grounded answer. The evaluator still cannot judge semantic truth.
+            if response["disposition"] == "answer" and not response["answer"].strip():
+                violations.add("empty_answer")
             if response["disposition"] != expected["disposition"]:
                 violations.add("wrong_disposition")
                 if response["disposition"] == "answer" and expected["disposition"] == "abstain":

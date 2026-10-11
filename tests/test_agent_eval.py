@@ -39,6 +39,14 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertEqual(result["false_abstentions"], 0)
         self.assertEqual(main(["--cases", str(left), "--responses", str(right)]), 0)
 
+    def test_answer_without_text_does_not_pass_on_citations_alone(self) -> None:
+        left, right = self.fixture([self.case()], [
+            {"id": "test-one", "disposition": "answer", "citations": ["E-001"], "answer": "   "}
+        ])
+        report = evaluate(left, right)
+        self.assertEqual(report["passed"], 0)
+        self.assertIn("empty_answer", report["results"][0]["violations"])
+
     def test_overconfident_answer_and_leak_never_pass(self) -> None:
         left, right = self.fixture([self.case("abstain")], [
             {"id": "test-one", "disposition": "answer", "citations": ["E-001"], "answer": "SENSITIVE-HOLDOUT"}
@@ -104,7 +112,7 @@ class AgentEvaluationTests(unittest.TestCase):
 
     def test_missing_and_unknown_predictions(self) -> None:
         left, right = self.fixture([self.case(), {"id": "test-two", "expected": {"disposition": "abstain"}}], [
-            {"id": "test-one", "disposition": "answer", "citations": ["E-001"]}
+            {"id": "test-one", "disposition": "answer", "citations": ["E-001"], "answer": "E-001 supports this case."}
         ])
         self.assertEqual(evaluate(left, right)["passed"], 1)
         self.assertEqual(evaluate(left, right)["results"][1]["violations"], ["missing_response"])
