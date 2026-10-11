@@ -68,7 +68,7 @@ class AgentEvaluationTests(unittest.TestCase):
         ])
         result = evaluate(left, right)
         self.assertIn("citations_not_in_answer", result["results"][0]["violations"])
-        right.write_text('{"id":"test-one","disposition":"answer","citations":["E-001"],"answer":"See E-001"}\n')
+        right.write_text('{"id":"test-one","disposition":"answer","citations":["E-001"],"answer":"See E-001"}\n', encoding="utf-8")
         self.assertEqual(evaluate(left, right)["passed"], 1)
 
     def test_unknown_schema_keys_fail_closed(self) -> None:
