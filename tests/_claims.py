@@ -46,6 +46,9 @@ def source_snapshot(root: Path, data: bytes) -> tuple[str, str]:
 
 def claim_vault(root: Path, *, today: dt.date = TODAY) -> Path:
     fresh_vault(root, "--minimal")
+    # The fixture models 2026-10-09; init must not stamp newer real-world dates.
+    from whykit.cli import _stamp_vault_dates
+    _stamp_vault_dates(root, today)
     config = root / "whykit.toml"
     config.write_text(config.read_text(encoding="utf-8") + "\n[claims]\nformat_version = 1\n", encoding="utf-8")
     register = root / "00-context/evidence-register.md"

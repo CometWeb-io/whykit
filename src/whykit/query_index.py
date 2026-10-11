@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import unicodedata
 import sqlite3
 from typing import TYPE_CHECKING
 
@@ -96,7 +97,7 @@ class QueryIndex:
                 canonical = note.front.get('source_of_truth') is True
                 bound = json.dumps([path, note.content_sha256, title, fields, canonical], ensure_ascii=True, separators=(',', ':'))
                 digest.update(bound.encode('ascii') + b'\n')
-                text = '\x1f'.join((title, path, note.text)).casefold()
+                text = unicodedata.normalize('NFC', '\x1f'.join((title, path, note.text))).casefold()
                 if not all(_indexable(value) for value in (*fields, text)):
                     self.unindexed.add(ordinal)
                     continue

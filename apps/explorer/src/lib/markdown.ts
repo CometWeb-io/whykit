@@ -1,3 +1,4 @@
+import { fenceStart, fenceEnd, findCodeSpan, maskMarkdownCode } from "./code.ts";
 export type MdInline =
   | { t: "text"; v: string }
   | { t: "strong"; v: MdInline[] }
@@ -26,7 +27,7 @@ export function parseInline(input: string): MdInline[] {
   while (rest.length) {
     const wiki = rest.match(WIKI);
     const link = rest.match(LINK);
-    const code = rest.match(/`([^`]+)`/);
+    const code = findCodeSpan(rest);
     const strong = rest.match(/\*\*([^*]+)\*\*/);
     const em = rest.match(/(?<!\*)\*([^*]+)\*(?!\*)/);
 
@@ -46,8 +47,8 @@ export function parseInline(input: string): MdInline[] {
         node: { t: "link", href: link[2]!, label: link[1]! },
       });
     }
-    if (code && code.index != null) {
-      hits.push({ i: code.index, n: code[0].length, node: { t: "code", v: code[1]! } });
+    if (code) {
+      hits.push({ i: code.index, n: code.length, node: { t: "code", v: code.value } });
     }
     if (strong && strong.index != null) {
       hits.push({
@@ -145,15 +146,16 @@ export function parseMarkdown(src: string): MdBlock[] {
       continue;
     }
 
-    if (trimmed.startsWith("```")) {
-      const lang = trimmed.slice(3).trim();
+    const fence = fenceStart(line);
+    if (fence) {
+      const lang = fence.info.split(/\s+/, 1)[0] || "";
       const buf: string[] = [];
-      i += 1;
-      while (i < lines.length && !(lines[i] ?? "").trim().startsWith("```")) {
+      i++;
+      while (i < lines.length && !fenceEnd(lines[i] ?? "", fence)) {
         buf.push(lines[i] ?? "");
-        i += 1;
+        i++;
       }
-      i += 1;
+      if (i < lines.length) i++;
       blocks.push({ t: "code", lang, code: buf.join("\n") });
       continue;
     }
@@ -240,7 +242,7 @@ export function parseMarkdown(src: string): MdBlock[] {
         t.startsWith("#") ||
         t.startsWith(">") ||
         t.startsWith("|") ||
-        t.startsWith("```") ||
+        fenceStart(l) !== null ||
         /^[-*]\s+/.test(t) ||
         /^\d+\.\s+/.test(t)
       ) {
@@ -265,7 +267,7 @@ export function parseMarkdown(src: string): MdBlock[] {
 }
 
 export function extractWikilinks(src: string): string[] {
-  const masked = src.replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`/g, "");
+  const masked = maskMarkdownCode(src);
   const out: string[] = [];
   const re = /\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]*)?\]\]/g;
   let m: RegExpExecArray | null;
