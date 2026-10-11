@@ -145,9 +145,13 @@ def check_proposal(root: Path, proposal_path: Path, *, today: dt.date | None = N
         # A missing or unparseable approval log cannot authenticate a decision.
         # Local receipts bind content, but are still editable and unauthenticated.
         log_text = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+        # This preflight checks declared IDs only. Verifying approval receipts
+        # for all decisions would repeatedly parse the review log and grow
+        # roughly with unrelated vault history on large workspaces.
+        selected_ids = set(proposal["decision_ids"])
         for note in notes:
             did = note.front.get("decision_id")
-            if not isinstance(did, str) or not DECISION_ID_RE.fullmatch(did):
+            if not isinstance(did, str) or did not in selected_ids or not DECISION_ID_RE.fullmatch(did):
                 continue
             if did in dates:
                 duplicates.add(did)
