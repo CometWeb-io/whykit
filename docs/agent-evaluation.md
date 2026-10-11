@@ -44,7 +44,7 @@ pass rate, false-answer and false-abstention counts, citation precision,
 unlicensed-citation count, forbidden phrase matches and recall of required citations. It does not contain questions, answers,
 sensitive marker values or source excerpts. Default exit 0 requires all cases
 to pass; 1 denotes a scored failure; 2 denotes invalid input. Even with
---min-pass-rate 0, a false answer to an abstention case or a forbidden phrase
+minimum pass-rate option 0, a false answer to an abstention case or a forbidden phrase
 match fails the run.
 
 Unknown schema fields fail closed, including misspelled rubric keys. The text
@@ -75,5 +75,5 @@ false-positive acceptances.
 **Non-overridable integrity failures:** fabricated/unlicensed E/C/D citations,
 missing per-case responses, overconfident answers where abstention is required,
 and forbidden-phrase exposure always produce exit code 1. Lowering
-`--min-pass-rate` does not waive these failures. NaN and Infinity literals are
+`minimum pass-rate option` does not waive these failures. NaN and Infinity literals are
 refused as non-JSON inputs rather than silently accepted by Python JSON parsing.
