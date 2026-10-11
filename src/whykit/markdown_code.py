@@ -3,7 +3,7 @@
 Handles CommonMark backtick and tilde fences (including an unfinished fence),
 and variable-length inline backtick spans. It deliberately does not implement
 all of CommonMark: indented code, HTML blocks and container blocks are separate.
-Also excludes HTML comments (after code spans), including unclosed block comments.
+Also excludes HTML comments in source order, including unclosed block comments.
 Masked characters become spaces, with original newlines and offsets preserved.
 """
 from __future__ import annotations
@@ -45,42 +45,48 @@ def mask_code(text: str) -> str:
                 opening = None
         at += len(line)
 
-    # Find matching code-span delimiters in O(N). Each opening delimiter
-    # uses the next subsequent run of exactly the same length.
-    runs = list(_BACKTICK_RUN.finditer("".join(chars)))
+    # Resolve inline spans and comments in lexical order. A comment that opens
+    # before a backtick run must close on the first literal '-->', even when
+    # that closer contains matching backticks. Conversely an inline code span
+    # already open before a comment marker owns that marker as literal code.
+    # Precomputed exact-width backtick run matches keep this O(N).
+    visible = "".join(chars)
+    runs = list(_BACKTICK_RUN.finditer(visible))
     next_of_size: dict[int, int] = {}
     closing: list[int | None] = [None] * len(runs)
-    for i in range(len(runs) - 1, -1, -1):
-        size = len(runs[i].group())
-        closing[i] = next_of_size.get(size)
-        next_of_size[size] = i
+    by_start: dict[int, int] = {}
+    for index in range(len(runs) - 1, -1, -1):
+        width = len(runs[index].group())
+        closing[index] = next_of_size.get(width)
+        next_of_size[width] = index
+        by_start[runs[index].start()] = index
 
-    i = 0
-    while i < len(runs):
-        close = closing[i]
-        if close is None:
-            i += 1
-            continue
-        blank(runs[i].start(), runs[close].end())
-        i = close + 1
-
-    # Scan comments only after masking code. An HTML comment marker displayed
-    # inside a code span must not consume ordinary citations after that span.
-    # Only ASCII backslash escapes affect an opening '<' in Markdown.
-    remaining = "".join(chars)
     cursor = 0
-    while True:
-        start = remaining.find("<!--", cursor)
-        if start < 0:
-            break
+    for token in re.finditer(_BT + r"+|<!--", visible):
+        start = token.start()
+        if start < cursor:
+            continue
+        if token.group()[0] == _BT:
+            end_index = closing[by_start[start]]
+            if end_index is None:
+                cursor = token.end()
+            else:
+                cursor = runs[end_index].end()
+                blank(start, cursor)
+            continue
         escapes = 0
-        while start - escapes - 1 >= 0 and remaining[start - escapes - 1] == "\\":
+        while start - escapes - 1 >= 0 and visible[start - escapes - 1] == "\\":
             escapes += 1
         if escapes % 2:
-            cursor = start + 4
+            cursor = token.end()
             continue
-        closer = remaining.find("-->", start + 4)
-        end = len(remaining) if closer < 0 else closer + 3
-        blank(start, end)
-        cursor = end
+        # CommonMark also recognizes the two short empty-comment forms.
+        if visible.startswith("<!-->", start):
+            cursor = start + 5
+        elif visible.startswith("<!--->", start):
+            cursor = start + 6
+        else:
+            closer = visible.find("-->", token.end())
+            cursor = len(visible) if closer < 0 else closer + 3
+        blank(start, cursor)
     return "".join(chars)
