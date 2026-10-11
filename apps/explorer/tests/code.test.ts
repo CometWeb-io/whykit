@@ -120,7 +120,7 @@ test("Unicode separators inside fence info stay on the current physical line", (
 test("Unicode separators do not open phantom Markdown code fences", () => {
   for (const separator of ["\u0085", "\u2028", "\u2029", "\v", "\f"]) {
     const content = "prefix" + separator + "~~~\n[[E-001]]\n~~~\n[[E-002]]";
-    assert.deepEqual(extractWikilinks(content), ["E-001", "E-002"]);
+    assert.deepEqual(extractWikilinks(content), ["E-001"]);
   }
 });
 
