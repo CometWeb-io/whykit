@@ -101,7 +101,8 @@ class PreflightTests(unittest.TestCase):
 
     def test_result_and_proposal_match_public_schemas(self) -> None:
         repo = Path(__file__).resolve().parents[1]
-        read = lambda name: json.loads((repo / "schemas" / name).read_text(encoding="utf-8"))
+        def read(name: str) -> dict:
+            return json.loads((repo / "schemas" / name).read_text(encoding="utf-8"))
         report = self.assess(self.trace())
         proposal, _ = self.load(self.valid)
         self.assertEqual(validate(report, read("agent-preflight-result.schema.json")), [])
