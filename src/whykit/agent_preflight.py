@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .io import vault_read_lock
+from .config import load_config
 from .lint import DECISION_ID_RE
 from .trace import build_trace
 from .vault_index import VaultIndex
@@ -85,6 +86,20 @@ def assess(proposal: dict[str, Any], trace: dict[str, Any], review_dates: dict[s
                 problems.add("not_binding")
             if record.get("gaps") or record.get("claim_gaps"):
                 problems.add("unresolved_evidence_or_claims")
+            # Even when no staleness window is configured, an active evidence
+            # entry with an invalid/future access date cannot establish current
+            # grounding. The trace's broad gap summary does not cover this case.
+            evidence = record.get("evidence")
+            if not isinstance(evidence, list) or not isinstance(record.get("gaps"), list):
+                problems.add("incomplete_trace_projection")
+            else:
+                for entry in evidence:
+                    if not isinstance(entry, dict) or entry.get("state") not in {"active", "retired", "missing"}:
+                        problems.add("incomplete_trace_projection")
+                    elif entry.get("state") == "active":
+                        age = entry.get("age_days")
+                        if type(age) is not int or age < 0:
+                            problems.add("unverifiable_evidence_access")
             if record.get("superseded_by"):
                 problems.add("superseded")
             date_text = review_dates.get(did)
@@ -102,6 +117,7 @@ def assess(proposal: dict[str, Any], trace: dict[str, Any], review_dates: dict[s
         "as_of": today.isoformat(), "review_scope": "explicit_decision_ids_only",
         "verdict": "blocked" if any(row["problems"] for row in findings) else "review_required",
         "review_required": True, "semantics_checked": False, "execution_authorized": False,
+        "trusted_history_checked": False,
         "referenced_decisions": len(findings), "findings": findings,
     }
 
@@ -111,6 +127,9 @@ def check_proposal(root: Path, proposal_path: Path, *, today: dt.date | None = N
     proposal, digest = read_proposal(proposal_path)
     root = root.resolve(strict=True)
     with vault_read_lock(root):
+        # The generic trace reader tolerates a bad config in legacy mode.
+        # A proposal gate must not silently lose evidence age policies.
+        load_config(root)
         report = build_trace(root, today=today)
         notes = VaultIndex.load(root).notes
         dates: dict[str, object] = {}

@@ -13,6 +13,7 @@
     "review_required",
     "semantics_checked",
     "execution_authorized",
+    "trusted_history_checked",
     "referenced_decisions",
     "findings"
   ],
@@ -78,6 +79,9 @@
         },
         "additionalProperties": false
       }
+    },
+    "trusted_history_checked": {
+      "const": false
     }
   },
   "additionalProperties": false

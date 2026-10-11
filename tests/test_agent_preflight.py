@@ -26,7 +26,7 @@ class PreflightTests(unittest.TestCase):
 
     def trace(self, **overrides: object) -> dict:
         return {"decisions": [{"decision_id": "D-001", "status": "approved", "live": True,
-                 "superseded_by": [], "gaps": [], "claim_gaps": [], **overrides}]}
+                 "superseded_by": [], "gaps": [], "claim_gaps": [], "evidence": [], **overrides}]}
 
     def assess(self, trace: dict, dates: dict[str, object] | None = None) -> dict:
         proposal, digest = self.load(self.valid)
@@ -38,6 +38,7 @@ class PreflightTests(unittest.TestCase):
         self.assertTrue(result["review_required"])
         self.assertFalse(result["execution_authorized"])
         self.assertFalse(result["semantics_checked"])
+        self.assertFalse(result["trusted_history_checked"])
 
     def test_missing_or_ambiguous_decision_blocks(self) -> None:
         for report in ({"decisions": []}, {"decisions": [*self.trace()["decisions"], *self.trace()["decisions"]]}):
@@ -57,6 +58,32 @@ class PreflightTests(unittest.TestCase):
                 report = self.assess(self.trace(**update))
                 self.assertEqual(report["verdict"], "blocked")
                 self.assertIn(reason, report["findings"][0]["problems"])
+
+    def test_active_evidence_requires_a_valid_non_future_access_date(self) -> None:
+        for age in (None, -1, "0"):
+            with self.subTest(age=age):
+                item = {"id": "E-001", "state": "active", "age_days": age, "stale": False}
+                report = self.assess(self.trace(evidence=[item]))
+                self.assertEqual(report["verdict"], "blocked")
+                self.assertIn("unverifiable_evidence_access", report["findings"][0]["problems"])
+
+    def test_missing_trace_projection_refuses_to_greenlight(self) -> None:
+        for invalid in (None, {}, "invalid"):
+            with self.subTest(value=invalid):
+                report = self.assess(self.trace(evidence=invalid))
+                self.assertIn("incomplete_trace_projection", report["findings"][0]["problems"])
+
+    def test_malformed_configuration_is_not_ignored(self) -> None:
+        import shutil
+        from whykit.config import ConfigError
+        base = Path(__file__).resolve().parents[1] / "examples" / "tiny"
+        vault = self.path.parent / "private-vault"
+        shutil.copytree(base, vault)
+        self.load(self.valid)
+        config = vault / "whykit.toml"
+        config.write_text("this is deliberately invalid [", encoding="utf-8")
+        with self.assertRaises((ConfigError, ValueError)):
+            check_proposal(vault, self.path, today=TODAY)
 
     def test_review_due_today_vs_yesterday(self) -> None:
         self.assertEqual(self.assess(self.trace(), {"D-001": "2026-10-11"})["verdict"], "review_required")

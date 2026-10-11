@@ -23,7 +23,7 @@ strictly checked for duplicate JSON keys and hashed with SHA-256.
 - error (exit 2): malformed proposal, unreadable vault or filesystem error.
 
 Both normal outcomes have review_required:true, semantics_checked:false,
-execution_authorized:false. Reports include only the declared proposal ID,
+execution_authorized:false, trusted_history_checked:false. Reports include only the declared proposal ID,
 input SHA, named decision IDs, stable problem codes and current date. There are
 no document bodies, paths, titles, reviewer identities or secret excerpts.
 
@@ -42,3 +42,9 @@ file edits, merge, publication or deployment.
 
 Machine-readable schema: [agent-preflight-result.schema.json](../schemas/agent-preflight-result.schema.json).
 Input schema: [agent-preflight-proposal.schema.json](../schemas/agent-preflight-proposal.schema.json).
+
+A malformed vault configuration blocks the preflight instead of silently
+omitting staleness rules. Missing or future evidence access dates also block a
+positive structural result. This does not authenticate approval events or
+check a trusted Git baseline: apply independent history review to an agent's
+proposed changes before any execution.
