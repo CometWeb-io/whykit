@@ -35,6 +35,7 @@ from collections.abc import Callable, Iterator
 from typing import Iterable
 
 from .config import CONFIG_FILE, ConfigError, load_config
+from .markdown_code import mask_code as _mask_code
 from .rule_policy import EMPTY_POLICY, Override, check_custom_rules, policy_from_config, secret_scan_skipped
 from .console import emit_machine, one_line
 from .placeholders import (
@@ -1033,16 +1034,6 @@ class _LineNumbers:
 URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 FACT_CALLOUT_RE = re.compile(r"^> \[!fact\]", re.I)
 DECISION_ID_SECTION_RE = re.compile(r"^## Decision ID\s*$\n+\s*(D-[0-9]{3,})\s*$", re.MULTILINE)
-FENCE_RE = re.compile(r"^(```|~~~).*?^\1", re.MULTILINE | re.DOTALL)
-INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
-
-
-def _mask_code(text: str) -> str:
-    def blank(match: re.Match[str]) -> str:
-        return "".join("\n" if ch == "\n" else " " for ch in match.group(0))
-    return INLINE_CODE_RE.sub(blank, FENCE_RE.sub(blank, text))
-
-
 def _link_key(value: str) -> str:
     # Filenames written on macOS are often NFD while typed link text is NFC; on
     # a Linux CI checkout the two spellings are different byte strings.
