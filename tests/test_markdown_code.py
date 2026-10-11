@@ -53,6 +53,10 @@ class MarkdownCodeTests(unittest.TestCase):
         self.assertEqual([item[0] for item in note.wikilink_hits], ["public"])
         self.assertFalse(any("private.md" in item for item in note.markdown_link_hits))
 
+    def test_plain_document_reuses_input_without_allocating_a_second_string(self) -> None:
+        source = "See E-001 and [[real-note]] without any code fences"
+        self.assertIs(_mask_code(source), source)
+
     def test_many_unmatched_runs_do_not_quadratically_scan(self) -> None:
         content = (BT + " text " + BT * 2 + " x ") * 5000 + " [[E-002]]"
         self.assert_only_real_evidence(content)

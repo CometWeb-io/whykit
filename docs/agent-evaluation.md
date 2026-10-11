@@ -7,9 +7,9 @@ scoring with passing a real-model benchmark.
 
 ## Quickstart
 
-Run from a source checkout, or from an installed source package:
+Run from a source checkout with development dependencies installed:
 
-    python -m whykit.agent_eval --cases examples/agent-eval/cases.jsonl --responses examples/agent-eval/responses.jsonl
+    uv run python scripts/agent_eval.py --cases examples/agent-eval/cases.jsonl --responses examples/agent-eval/responses.jsonl
 
 The sample corpus is synthetic and publicly visible. It is a scorer smoke test,
 not a sealed holdout or an observed accuracy figure for any model.

@@ -10,7 +10,6 @@ import argparse
 import hashlib
 import json
 import re
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -183,5 +182,3 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if result["pass_rate"] >= args.min_pass_rate and result["false_answers"] == 0 and result["forbidden_phrase_matches"] == 0 else 1
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())

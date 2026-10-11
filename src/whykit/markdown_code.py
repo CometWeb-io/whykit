@@ -17,6 +17,10 @@ _BACKTICK_RUN = re.compile(_BT + "+")
 
 def mask_code(text: str) -> str:
     """Mask fenced and inline code in linear time, preserving character offsets."""
+    # Most notes have no code delimiters. Reuse the original string to avoid
+    # one retained allocation per note in large-vault lint/pack runs.
+    if _BT not in text and "~~~" not in text:
+        return text
     chars = list(text)
     opening: tuple[str, int] | None = None
     at = 0
