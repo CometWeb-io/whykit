@@ -28,11 +28,12 @@ function blank(chars: string[], start: number, stop: number): void {
 /** Mask fenced code and variable-length backtick code spans in linear time. */
 export function maskMarkdownCode(text: string): string {
   const chars = text.split("");
-  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  // Markdown line endings include CRLF, LF and bare CR (CommonMark §2.3).
+  const lines = text.match(/[^\r\n]*(?:\r\n|\n|\r)|[^\r\n]+$/g) ?? [];
   let active: Fence | null = null;
   let at = 0;
   for (const line of lines) {
-    const body = line.replace(/\r?\n$/, "");
+    const body = line.replace(/\r\n$|\n$|\r$/, "");
     if (!active) {
       const opening = fenceStart(body);
       if (opening) {
@@ -83,7 +84,7 @@ export function findCodeSpan(text: string): { index: number; length: number; val
     const close = closing[i];
     if (close === undefined) continue;
     const open = runs[i]!, finish = runs[close]!;
-    let value = text.slice(open.end, finish.start).replace(/\n/g, " ");
+    let value = text.slice(open.end, finish.start).replace(/\r\n|\n|\r/g, " ");
     if (value.length > 1 && value.startsWith(" ") && value.endsWith(" ") && /[^ ]/.test(value)) {
       value = value.slice(1, -1);
     }

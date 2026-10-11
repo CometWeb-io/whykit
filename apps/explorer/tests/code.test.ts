@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fenceStart, maskMarkdownCode } from "../src/lib/code.ts";
-import { extractWikilinks, parseInline, parseMarkdown } from "../src/lib/markdown.ts";
+import { extractHeadings, extractWikilinks, parseInline, parseMarkdown } from "../src/lib/markdown.ts";
 
 const BT = String.fromCharCode(96);
 const link = "[[E-001]]";
@@ -47,6 +47,33 @@ test("mask preserves offsets and all original newlines", () => {
   for (let i = 0; i < src.length; i++) if (src[i] === "\n") assert.equal(masked[i], "\n");
   assert.equal(masked.includes(link), false);
   assert.equal(masked.includes(allowed), true);
+});
+
+test("CR-only fenced examples cannot forge Explorer graph links", () => {
+  for (const fence of [BT.repeat(3), "~~~"]) {
+    const src = fence + "md\r" + link + "\r" + fence + "\r" + allowed;
+    assert.deepEqual(extractWikilinks(src), ["E-002"]);
+    const first = parseMarkdown(src)[0];
+    assert.equal(first?.t, "code");
+    if (first?.t === "code") assert.ok(first.code.includes(link));
+  }
+});
+
+test("mixed line endings and CR-only code spans preserve graph semantics", () => {
+  const fence = "~~~\r" + link + "\r\n~~~\n" + allowed;
+  assert.deepEqual(extractWikilinks(fence), ["E-002"]);
+  const src = BT.repeat(2) + "a\rb" + BT.repeat(2) + " " + allowed;
+  const parsed = parseInline(BT.repeat(2) + "a\rb" + BT.repeat(2));
+  assert.equal(parsed[0]?.t, "code");
+  if (parsed[0]?.t === "code") assert.equal(parsed[0].v, "a b");
+  assert.deepEqual(extractWikilinks(src), ["E-002"]);
+});
+
+test("CR-only heading extraction excludes headings hidden inside fences", () => {
+  const body = "## Real\r~~~\r## Example only\r~~~\r## After\r\n";
+  assert.deepEqual(extractHeadings(body).map(h => h.text), ["Real", "After"]);
+  const inline = "## Heading " + BT + "code" + BT + "\r";
+  assert.deepEqual(extractHeadings(inline).map(h => h.text), ["Heading " + BT + "code" + BT]);
 });
 
 test("invalid backtick info string is not considered a fence", () => {
