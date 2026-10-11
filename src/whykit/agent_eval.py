@@ -1,0 +1,187 @@
+"""Offline evaluation of evidence-grounded agent outputs from JSONL fixtures.
+
+This module never contacts models or vaults. Holdout prompts, candidate answers
+and sensitive markers remain local. Reports expose case IDs and violation codes,
+not prompts, answers, withheld markers or source text.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import sys
+from pathlib import Path
+from typing import Any
+
+FORMAT = "whykit.agent-eval/v1"
+MAX_BYTES = 10 * 1024 * 1024
+MAX_LINE = 64 * 1024
+MAX_CASES = 10_000
+CASE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}\Z")
+RECORD_ID = re.compile(r"[ECD]-[0-9]{3,}\Z")
+CLAIM_ID = re.compile(r"C-[0-9]{3,}\Z")
+CLAIM_STATES = {"supported", "disputed", "unsupported", "unknown"}
+
+
+class EvaluationInputError(ValueError):
+    """A malformed or unsupported input; no private values are echoed."""
+
+
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise EvaluationInputError("duplicate JSON property")
+        result[key] = value
+    return result
+
+
+def _read(path: Path, role: str) -> tuple[dict[str, dict], str]:
+    records: dict[str, dict] = {}
+    sha = hashlib.sha256()
+    total = 0
+    with path.open("rb") as stream:
+        for line_number, line in enumerate(stream, 1):
+            total += len(line)
+            if total > MAX_BYTES or len(line) > MAX_LINE or line_number > MAX_CASES:
+                raise EvaluationInputError(role + ": size or record limit exceeded")
+            sha.update(line)
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line.decode("utf-8"), object_pairs_hook=_unique_object)
+            except (UnicodeError, ValueError, RecursionError):
+                raise EvaluationInputError(role + ": invalid JSON at line " + str(line_number)) from None
+            if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not CASE_ID.fullmatch(row["id"]):
+                raise EvaluationInputError(role + ": invalid case ID at line " + str(line_number))
+            if row["id"] in records:
+                raise EvaluationInputError(role + ": duplicate case ID at line " + str(line_number))
+            records[row["id"]] = row
+    if not records:
+        raise EvaluationInputError(role + ": empty input")
+    return records, sha.hexdigest()
+
+
+def _ids(value: object, field: str) -> set[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) or not RECORD_ID.fullmatch(item) for item in value):
+        raise EvaluationInputError(field + ": invalid record identifier list")
+    if len(set(value)) != len(value):
+        raise EvaluationInputError(field + ": duplicated record identifier")
+    return set(value)
+
+
+def _states(value: object, field: str) -> dict[str, str]:
+    if not isinstance(value, dict) or any(
+        not isinstance(key, str) or not CLAIM_ID.fullmatch(key)
+        or not isinstance(state, str) or state not in CLAIM_STATES
+        for key, state in value.items()
+    ):
+        raise EvaluationInputError(field + ": invalid claim state mapping")
+    return value
+
+
+def _expected(row: dict) -> dict:
+    value = row.get("expected")
+    if not isinstance(value, dict) or not isinstance(value.get("disposition"), str) or value["disposition"] not in {"answer", "abstain"}:
+        raise EvaluationInputError("case: invalid expected disposition")
+    allowed = _ids(value.get("allowed_citations", []), "allowed_citations")
+    required = _ids(value.get("required_citations", []), "required_citations")
+    forbidden = _ids(value.get("forbidden_citations", []), "forbidden_citations")
+    if not required <= allowed or forbidden & allowed:
+        raise EvaluationInputError("case: contradictory citation policy")
+    conflict = value.get("conflict", False)
+    if type(conflict) is not bool:
+        raise EvaluationInputError("case: conflict must be a boolean")
+    phrases = value.get("forbidden_phrases", [])
+    if not isinstance(phrases, list) or len(phrases) > 50 or any(not isinstance(p, str) or not p or len(p) > 512 for p in phrases):
+        raise EvaluationInputError("case: invalid forbidden phrases")
+    return {
+        "disposition": value["disposition"], "allowed": allowed, "required": required,
+        "forbidden": forbidden, "claims": _states(value.get("claim_states", {}), "claim_states"),
+        "conflict": conflict, "phrases": phrases,
+    }
+
+
+def _response(row: dict) -> dict:
+    if not isinstance(row.get("disposition"), str) or row["disposition"] not in {"answer", "abstain"}:
+        raise EvaluationInputError("response: invalid disposition")
+    answer, conflict = row.get("answer", ""), row.get("conflict", False)
+    if not isinstance(answer, str) or len(answer) > MAX_LINE or type(conflict) is not bool:
+        raise EvaluationInputError("response: invalid answer or conflict")
+    return {
+        "disposition": row["disposition"],
+        "citations": _ids(row.get("citations", []), "citations"),
+        "claims": _states(row.get("claim_states", {}), "claim_states"),
+        "conflict": conflict, "answer": answer,
+    }
+
+
+def evaluate(cases_path: Path, responses_path: Path) -> dict:
+    cases, corpus_sha256 = _read(cases_path, "cases")
+    predictions, responses_sha256 = _read(responses_path, "responses")
+    if set(predictions) - set(cases):
+        raise EvaluationInputError("unknown response case ID")
+    results = []
+    overconfident = unknown_citations = leaked = required_count = recovered = 0
+    for case_id in sorted(cases):
+        expected = _expected(cases[case_id])
+        response = _response(predictions[case_id]) if case_id in predictions else None
+        violations: set[str] = set()
+        if response is None:
+            violations.add("missing_response")
+        else:
+            if response["disposition"] != expected["disposition"]:
+                violations.add("wrong_disposition")
+                if response["disposition"] == "answer" and expected["disposition"] == "abstain":
+                    overconfident += 1
+            if response["citations"] - expected["allowed"]:
+                violations.add("unlicensed_citations")
+                unknown_citations += len(response["citations"] - expected["allowed"])
+            if response["citations"] & expected["forbidden"]:
+                violations.add("forbidden_citations")
+            if expected["required"] - response["citations"]:
+                violations.add("missing_citations")
+            if response["claims"] != expected["claims"]:
+                violations.add("incorrect_claim_states")
+            if response["conflict"] != expected["conflict"]:
+                violations.add("incorrect_conflict_assessment")
+            count = sum(p.casefold() in response["answer"].casefold() for p in expected["phrases"])
+            if count:
+                leaked += count
+                violations.add("forbidden_phrase_in_answer")
+            if expected["disposition"] == "abstain" and response["citations"]:
+                violations.add("abstention_with_citations")
+            recovered += len(expected["required"] & response["citations"])
+        required_count += len(expected["required"])
+        results.append({"id": case_id, "pass": not violations, "violations": sorted(violations)})
+    passed = sum(item["pass"] for item in results)
+    return {
+        "format": FORMAT, "cases_sha256": corpus_sha256, "responses_sha256": responses_sha256,
+        "count": len(results), "passed": passed, "pass_rate": round(passed / len(results), 6),
+        "false_answers": overconfident, "unlicensed_citations": unknown_citations,
+        "forbidden_phrase_matches": leaked,
+        "required_citation_recall": round(recovered / required_count, 6) if required_count else None,
+        "results": results,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Evaluate locally supplied agent answers against a sealed evidence corpus")
+    parser.add_argument("--cases", required=True, type=Path)
+    parser.add_argument("--responses", required=True, type=Path)
+    parser.add_argument("--min-pass-rate", type=float, default=1.0)
+    args = parser.parse_args(argv)
+    if not (0 <= args.min_pass_rate <= 1):
+        parser.error("--min-pass-rate must be between 0 and 1")
+    try:
+        result = evaluate(args.cases, args.responses)
+    except (OSError, EvaluationInputError) as exc:
+        print(json.dumps({"format": FORMAT, "error": "invalid_input", "kind": type(exc).__name__}))
+        return 2
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return 0 if result["pass_rate"] >= args.min_pass_rate and result["false_answers"] == 0 and result["forbidden_phrase_matches"] == 0 else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

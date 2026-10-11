@@ -1,0 +1,3 @@
+{"id":"grounded-evidence","disposition":"answer","citations":["E-001"],"answer":"Source E-001 supports a bounded conclusion."}
+{"id":"insufficient-evidence","disposition":"abstain","citations":[],"answer":"Insufficient evidence."}
+{"id":"disputed-claim","disposition":"answer","citations":["E-002","E-003"],"claim_states":{"C-001":"disputed"},"conflict":true,"answer":"The two source snapshots disagree."}

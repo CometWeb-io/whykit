@@ -66,3 +66,5 @@ Exact behaviour, checked against the code by the test suite.
 | [Contributing](../CONTRIBUTING.md) | Repository layout, checks to run and how docs are tested |
 
 - [Optional reviewed claims](claims.md): opt-in C records, local fragments, four assessment states, receipts and parallel v2 reports.
+
+- [Offline agent evaluation](agent-evaluation.md): corpus and response contracts, groundedness and abstention metrics.
