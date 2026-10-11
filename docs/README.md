@@ -68,3 +68,5 @@ Exact behaviour, checked against the code by the test suite.
 - [Optional reviewed claims](claims.md): opt-in C records, local fragments, four assessment states, receipts and parallel v2 reports.
 
 - [Offline agent evaluation](agent-evaluation.md): corpus and response contracts, groundedness and abstention metrics.
+
+- [Governed agent preflight](agent-preflight.md): check declared decision dependencies before an agent-proposed action.

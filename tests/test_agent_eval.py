@@ -43,6 +43,20 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertEqual(main(["--cases", str(left), "--responses", str(right), "--min-pass-rate", "0.666667"]), 1)
         self.assertEqual(main(["--cases", str(left), "--responses", str(right), "--min-pass-rate", "0.666666"]), 0)
 
+    def test_agent_eval_public_schema_validates_real_output_and_ranges(self) -> None:
+        from _jsonschema import validate
+        repo = Path(__file__).resolve().parents[1]
+        schema = json.loads((repo / "schemas/agent-eval-result.schema.json").read_text(encoding="utf-8"))
+        left, right = self.fixture([self.case()], [
+            {"id": "test-one", "disposition": "answer", "citations": ["E-001"], "answer": "E-001"}
+        ])
+        report = evaluate(left, right)
+        self.assertEqual(validate(report, schema), [])
+        for field in ("pass_rate", "citation_precision", "required_citation_recall"):
+            with self.subTest(metric=field):
+                corrupted = {**report, field: 1.1}
+                self.assertNotEqual(validate(corrupted, schema), [])
+
     def test_all_requirements_pass(self) -> None:
         left, right = self.fixture([self.case()], [
             {"id": "test-one", "disposition": "answer", "citations": ["E-001"], "answer": "Grounded."}

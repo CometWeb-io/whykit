@@ -18,6 +18,23 @@ hello@cometweb.io the contact; CometWeb is not the copyright holder.
 
 ### Highlights
 
+- **Evidence extraction correctness:** shared position-preserving Markdown code
+  masking reduces false references from code examples; Python and Explorer
+  agree on fenced-code boundaries and Unicode NFC/full casefold matching.
+  Full CommonMark containers and indented code remain outside this parser subset.
+- **Source-only AI evaluation:** deterministic offline JSONL scoring of stated
+  citations, undeclared IDs appearing in answers, conflicts, abstentions,
+  private marker exposure and case-level accuracy, with SHA-bound reports.
+  No model provider or hosted service is required.
+- **Governed agent proposal preflight:** fail-closed, read-only checks for
+  explicitly named decisions, evidence and claim gaps, supersession and review
+  deadlines. It always requires human review and never authorizes execution.
+  A proposal cannot establish that it listed every relevant decision.
+- Machine-readable result schemas and tests for the new optional agent
+  evaluation and preflight entrypoints. They do not change the legacy v1
+  CLI/MCP report contracts.
+
+
 - Long-lived queries use a SHA-bound in-memory terms/metadata index, with
   conservative scan fallback and the original exact substring ranking. Complete
   confined views share validated lookup maps; privacy is selected afresh.

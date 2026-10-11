@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/agent-preflight-proposal.schema.json",
+  "title": "WhyKit explicit agent proposal manifest",
+  "type": "object",
+  "required": [
+    "proposal_id",
+    "decision_ids"
+  ],
+  "properties": {
+    "proposal_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+      "maxLength": 80
+    },
+    "decision_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^D-[0-9]{3,}$"
+      },
+      "maxItems": 64
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 4096
+    }
+  },
+  "additionalProperties": false
+}

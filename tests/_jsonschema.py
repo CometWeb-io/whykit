@@ -9,6 +9,7 @@ nothing.
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,8 @@ from typing import Any
 ANNOTATIONS = frozenset({"$schema", "$id", "title", "description", "$defs", "$comment", "examples", "default"})
 ASSERTIONS = frozenset({
     "type", "const", "enum", "required", "properties", "additionalProperties",
-    "items", "minItems", "pattern", "minLength", "minimum", "anyOf", "allOf", "$ref",
+    "items", "minItems", "maxItems", "pattern", "minLength", "maxLength",
+    "minimum", "maximum", "anyOf", "allOf", "$ref",
     "if", "then", "else", "uniqueItems",
 })
 SUPPORTED_KEYWORDS = ANNOTATIONS | ASSERTIONS
@@ -26,10 +28,26 @@ _TYPES = {
     "array": lambda v: isinstance(v, list),
     "string": lambda v: isinstance(v, str),
     "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
-    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "number": lambda v: (isinstance(v, (int, float)) and not isinstance(v, bool)
+                       and (not isinstance(v, float) or math.isfinite(v))),
     "boolean": lambda v: isinstance(v, bool),
     "null": lambda v: v is None,
 }
+
+
+def _json_equal(left: Any, right: Any) -> bool:
+    """JSON structural equality, without Python's bool == int coercion."""
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(
+            _json_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _json_equal(a, b) for a, b in zip(left, right, strict=True)
+        )
+    return left == right
 
 
 def unsupported_keywords(schema: Any, path: str = "#") -> list[str]:
@@ -94,19 +112,25 @@ def _check(value: Any, schema: Any, root: dict[str, Any], where: str, errors: li
         if not any(_TYPES[name](value) for name in types):
             errors.append(f"{where}: expected {'/'.join(types)}, got {type(value).__name__}")
             return
-    if "const" in schema and value != schema["const"]:
+    if "const" in schema and not _json_equal(value, schema["const"]):
         errors.append(f"{where}: expected {schema['const']!r}, got {value!r}")
-    if "enum" in schema and value not in schema["enum"]:
+    if "enum" in schema and not any(_json_equal(value, item) for item in schema["enum"]):
         errors.append(f"{where}: {value!r} is not one of {schema['enum']!r}")
     if isinstance(value, str):
         if "minLength" in schema and len(value) < schema["minLength"]:
             errors.append(f"{where}: shorter than {schema['minLength']}")
+        if "maxLength" in schema and len(value) > schema["maxLength"]:
+            errors.append(f"{where}: longer than {schema['maxLength']}")
         if "pattern" in schema and not re.search(schema["pattern"], value):
             errors.append(f"{where}: {value!r} does not match {schema['pattern']}")
     if _TYPES["number"](value) and "minimum" in schema and value < schema["minimum"]:
         errors.append(f"{where}: {value} is below {schema['minimum']}")
+    if _TYPES["number"](value) and "maximum" in schema and value > schema["maximum"]:
+        errors.append(f"{where}: {value} exceeds {schema['maximum']}")
     if isinstance(value, list) and "minItems" in schema and len(value) < schema["minItems"]:
         errors.append(f"{where}: fewer than {schema['minItems']} items")
+    if isinstance(value, list) and "maxItems" in schema and len(value) > schema["maxItems"]:
+        errors.append(f"{where}: more than {schema['maxItems']} items")
     if isinstance(value, list) and schema.get("uniqueItems"):
         seen = [repr(item) for item in value]
         if len(seen) != len(set(seen)):

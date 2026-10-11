@@ -105,6 +105,11 @@ An optional [offline evaluation harness](docs/agent-evaluation.md) scores
 agent responses for evidence citations, disputed claims, appropriate abstention
 and explicit forbidden-content markers. No LLM dependency or network access.
 
+## Governed agent preflight
+
+A [read-only proposal preflight](docs/agent-preflight.md) checks explicitly named decisions,
+evidence gaps, claim bindings and review deadlines. It cannot authorize execution.
+
 ## Documentation
 
 Start at the [documentation index](docs/README.md). The most used pages:
