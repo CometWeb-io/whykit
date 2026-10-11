@@ -14,6 +14,7 @@ from typing import Any
 
 from .io import vault_read_lock
 from .config import load_config
+from .immutability import _approval_event_matches
 from .lint import DECISION_ID_RE
 from .trace import build_trace
 from .vault_index import VaultIndex
@@ -67,7 +68,8 @@ def read_proposal(path: Path) -> tuple[dict[str, Any], str]:
 
 
 def assess(proposal: dict[str, Any], trace: dict[str, Any], review_dates: dict[str, object],
-           *, today: dt.date, digest: str) -> dict[str, Any]:
+           *, today: dt.date, digest: str,
+           integrity_findings: dict[str, set[str]] | None = None) -> dict[str, Any]:
     """Check declared IDs only. Absence of a finding does not approve a change."""
     by_id: dict[str, list[dict]] = {}
     for row in trace.get("decisions", []):
@@ -76,7 +78,7 @@ def assess(proposal: dict[str, Any], trace: dict[str, Any], review_dates: dict[s
             by_id.setdefault(key, []).append(row)
     findings: list[dict[str, Any]] = []
     for did in sorted(proposal["decision_ids"]):
-        problems: set[str] = set()
+        problems: set[str] = set(integrity_findings.get(did, set())) if integrity_findings else set()
         rows = by_id.get(did, [])
         if len(rows) != 1:
             problems.add("unknown_or_ambiguous_decision")
@@ -138,15 +140,41 @@ def check_proposal(root: Path, proposal_path: Path, *, today: dt.date | None = N
         notes = vault.notes
         dates: dict[str, object] = {}
         duplicates: set[str] = set()
+        integrity: dict[str, set[str]] = {}
+        log_path = root / "00-context/review-log.md"
+        # A missing or unparseable approval log cannot authenticate a decision.
+        # Local receipts bind content, but are still editable and unauthenticated.
+        log_text = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
         for note in notes:
             did = note.front.get("decision_id")
-            if isinstance(did, str) and DECISION_ID_RE.fullmatch(did):
-                if did in dates:
-                    duplicates.add(did)
-                dates[did] = note.front.get("review_by")
+            if not isinstance(did, str) or not DECISION_ID_RE.fullmatch(did):
+                continue
+            if did in dates:
+                duplicates.add(did)
+            dates[did] = note.front.get("review_by")
+            relative = vault.relative(note.path)
+            canonical = (
+                note.front_error is None
+                and note.front.get("type") == "decision"
+                and re.fullmatch(r"06-decisions/d-[0-9]{3,}-.+\.md", relative, re.IGNORECASE) is not None
+                and relative.casefold().startswith("06-decisions/" + did.casefold() + "-")
+            )
+            if not canonical:
+                integrity.setdefault(did, set()).add("invalid_decision_record")
+            if note.front.get("status") == "approved":
+                try:
+                    updated = dt.date.fromisoformat(str(note.front.get("last_updated") or ""))
+                    if updated > today:
+                        integrity.setdefault(did, set()).add("future_record_update")
+                except ValueError:
+                    integrity.setdefault(did, set()).add("invalid_record_timestamp")
+                if not canonical or not _approval_event_matches(note.text, relative, None, log_text):
+                    integrity.setdefault(did, set()).add("unverified_local_approval")
         for did in duplicates:
             dates[did] = None
-        return assess(proposal, report, dates, today=today, digest=digest)
+            integrity.setdefault(did, set()).add("duplicate_decision_id")
+        return assess(proposal, report, dates, today=today, digest=digest,
+                      integrity_findings=integrity)
 
 
 def main(argv: list[str] | None = None) -> int:

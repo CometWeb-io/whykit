@@ -48,3 +48,10 @@ omitting staleness rules. Missing or future evidence access dates also block a
 positive structural result. This does not authenticate approval events or
 check a trusted Git baseline: apply independent history review to an agent's
 proposed changes before any execution.
+
+A spoofed document with a D-NNN field is not a valid decision. Only a
+well-formed record under 06-decisions with a matching ID and a locally valid
+approval receipt can pass this structural preflight. Missing/future timestamps
+or duplicate IDs block it. **Local receipts are editable and do not authenticate
+a human reviewer**, and no trusted Git baseline is verified. A separate,
+independently controlled Git review remains mandatory.

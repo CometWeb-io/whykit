@@ -85,6 +85,35 @@ class PreflightTests(unittest.TestCase):
         with self.assertRaises((ConfigError, ValueError)):
             check_proposal(vault, self.path, today=TODAY)
 
+    def test_invalid_canonical_record_and_missing_approval_receipt_block(self) -> None:
+        for finding in ("invalid_decision_record", "unverified_local_approval", "future_record_update"):
+            with self.subTest(finding=finding):
+                checked = self.load(self.valid)
+                report = assess(checked[0], self.trace(), {"D-001": "2026-11-01"},
+                                today=TODAY, digest=checked[1],
+                                integrity_findings={"D-001": {finding}})
+                self.assertEqual(report["verdict"], "blocked")
+                self.assertIn(finding, report["findings"][0]["problems"])
+
+    def test_forged_record_outside_decision_directory_cannot_be_binding(self) -> None:
+        import shutil
+        base = Path(__file__).resolve().parents[1] / "examples" / "tiny"
+        root = self.path.parent / "spoofed"
+        shutil.copytree(base, root)
+        fake = root / "notes" / "rogue.md"
+        fake.write_text(
+            "---\ntype: reference\ndecision_id: D-999\ntitle: Rogue\n"
+            "status: approved\nreview_by: 2026-11-01\nlast_updated: 2026-10-10\n"
+            "created: 2026-10-09\nsensitivity: public\n---\n\nSee E-001.\n",
+            encoding="utf-8",
+        )
+        self.valid["decision_ids"] = ["D-999"]
+        self.load(self.valid)
+        checked = check_proposal(root, self.path, today=TODAY)
+        self.assertEqual(checked["verdict"], "blocked")
+        self.assertIn("invalid_decision_record", checked["findings"][0]["problems"])
+        self.assertIn("unverified_local_approval", checked["findings"][0]["problems"])
+
     def test_review_due_today_vs_yesterday(self) -> None:
         self.assertEqual(self.assess(self.trace(), {"D-001": "2026-10-11"})["verdict"], "review_required")
         self.assertEqual(self.assess(self.trace(), {"D-001": "2026-10-10"})["findings"][0]["problems"], ["review_overdue"])
