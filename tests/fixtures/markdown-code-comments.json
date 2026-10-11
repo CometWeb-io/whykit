@@ -1,0 +1,106 @@
+[
+  {
+    "id": "single-line",
+    "markdown": "Before <!-- [[E-001]] --> [[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "multiline",
+    "markdown": "<!--\n[[E-001]]\n-->\n[[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "unclosed",
+    "markdown": "[[E-002]]\n<!-- never ends\n[[E-001]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "code-marker-inline",
+    "markdown": "`<!--` [[E-002]] `-->` [[E-003]]",
+    "wikilinks": [
+      "E-002",
+      "E-003"
+    ],
+    "evidence": [
+      "E-002",
+      "E-003"
+    ]
+  },
+  {
+    "id": "fenced-marker",
+    "markdown": "```\n<!-- [[E-001]] -->\n```\n[[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "escaped-marker",
+    "markdown": "\\<!-- [[E-001]] --> [[E-002]]",
+    "wikilinks": [
+      "E-001",
+      "E-002"
+    ],
+    "evidence": [
+      "E-001",
+      "E-002"
+    ]
+  },
+  {
+    "id": "even-escaped-marker",
+    "markdown": "\\\\<!-- [[E-001]] --> [[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "two-comments",
+    "markdown": "<!-- [[E-001]] --> [[E-002]] <!-- [[E-003]] -->",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "crlf-mixed",
+    "markdown": "<!--\r\n[[E-001]]\r-->\n[[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "unicode",
+    "markdown": "🛰️<!-- [[E-001]] -->\n[[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  }
+]

@@ -65,6 +65,22 @@ class MarkdownCodeTests(unittest.TestCase):
         source = "See E-001 and [[real-note]] without any code fences"
         self.assertIs(_mask_code(source), source)
 
+    def test_comment_fixture_parity(self) -> None:
+        import json
+
+        fixture = Path(__file__).resolve().parent / "fixtures" / "markdown-code-comments.json"
+        cases = json.loads(fixture.read_text(encoding="utf-8"))
+        for case in cases:
+            with self.subTest(id=case["id"]):
+                note = Note(Path("Home.md"), case["markdown"])
+                self.assertEqual(list(note.cited_evidence), case["evidence"])
+                self.assertEqual([entry[0] for entry in note.wikilink_hits], case["wikilinks"])
+                masked = _mask_code(case["markdown"])
+                self.assertEqual(len(masked), len(case["markdown"]))
+                for index, original in enumerate(case["markdown"]):
+                    if original in "\\r\\n":
+                        self.assertEqual(masked[index], original)
+
     def test_many_unmatched_runs_do_not_quadratically_scan(self) -> None:
         content = (BT + " text " + BT * 2 + " x ") * 5000 + " [[E-002]]"
         self.assert_only_real_evidence(content)

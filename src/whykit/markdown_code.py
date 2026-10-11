@@ -3,6 +3,7 @@
 Handles CommonMark backtick and tilde fences (including an unfinished fence),
 and variable-length inline backtick spans. It deliberately does not implement
 all of CommonMark: indented code, HTML blocks and container blocks are separate.
+Also excludes HTML comments (after code spans), including unclosed block comments.
 Masked characters become spaces, with original newlines and offsets preserved.
 """
 from __future__ import annotations
@@ -19,7 +20,7 @@ def mask_code(text: str) -> str:
     """Mask fenced and inline code in linear time, preserving character offsets."""
     # Most notes have no code delimiters. Reuse the original string to avoid
     # one retained allocation per note in large-vault lint/pack runs.
-    if _BT not in text and "~~~" not in text:
+    if _BT not in text and "~~~" not in text and "<!--" not in text:
         return text
     chars = list(text)
     opening: tuple[str, int] | None = None
@@ -62,4 +63,24 @@ def mask_code(text: str) -> str:
             continue
         blank(runs[i].start(), runs[close].end())
         i = close + 1
+
+    # Scan comments only after masking code. An HTML comment marker displayed
+    # inside a code span must not consume ordinary citations after that span.
+    # Only ASCII backslash escapes affect an opening '<' in Markdown.
+    remaining = "".join(chars)
+    cursor = 0
+    while True:
+        start = remaining.find("<!--", cursor)
+        if start < 0:
+            break
+        escapes = 0
+        while start - escapes - 1 >= 0 and remaining[start - escapes - 1] == "\\":
+            escapes += 1
+        if escapes % 2:
+            cursor = start + 4
+            continue
+        closer = remaining.find("-->", start + 4)
+        end = len(remaining) if closer < 0 else closer + 3
+        blank(start, end)
+        cursor = end
     return "".join(chars)

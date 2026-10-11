@@ -64,6 +64,24 @@ export function maskMarkdownCode(text: string): string {
     blank(chars, runs[i]!.start, runs[close]!.end);
     i = close + 1;
   }
+  // Strip comment ranges after masking code spans; <!-- inside inline code
+  // is literal text, not the start of an HTML comment.
+  const visible = chars.join("");
+  let cursor = 0;
+  while (cursor < visible.length) {
+    const start = visible.indexOf("<!--", cursor);
+    if (start < 0) break;
+    let escapes = 0;
+    while (start - escapes - 1 >= 0 && visible[start - escapes - 1] === "\\") escapes++;
+    if (escapes % 2 === 1) {
+      cursor = start + 4;
+      continue;
+    }
+    const endMarker = visible.indexOf("-->", start + 4);
+    const end = endMarker < 0 ? visible.length : endMarker + 3;
+    blank(chars, start, end);
+    cursor = end;
+  }
   return chars.join("");
 }
 
