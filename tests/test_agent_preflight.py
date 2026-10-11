@@ -59,6 +59,29 @@ class PreflightTests(unittest.TestCase):
                 self.assertEqual(report["verdict"], "blocked")
                 self.assertIn(reason, report["findings"][0]["problems"])
 
+    def test_conflicted_or_unsupported_claims_require_manual_resolution(self) -> None:
+        for status in ("disputed", "unsupported", "unknown"):
+            with self.subTest(status=status):
+                record = self.trace(claims=[{"claim_id": "C-001",
+                                            "verification_status": status,
+                                            "binding_valid": True}])
+                output = self.assess(record)
+                self.assertEqual(output["verdict"], "blocked")
+                self.assertIn("unresolved_claim_verification", output["findings"][0]["problems"])
+
+    def test_supported_bound_claim_preserves_review_only_outcome(self) -> None:
+        record = self.trace(claims=[{"claim_id": "C-001",
+                                     "verification_status": "supported",
+                                     "binding_valid": True}])
+        self.assertEqual(self.assess(record)["verdict"], "review_required")
+
+    def test_malformed_claim_projection_fails_closed(self) -> None:
+        for claims in (None, "supported", [{"verification_status": "supported"}]):
+            with self.subTest(claims=claims):
+                record = self.trace(claims=claims)
+                result = self.assess(record)
+                self.assertEqual(result["verdict"], "blocked")
+
     def test_active_evidence_requires_a_valid_non_future_access_date(self) -> None:
         for age in (None, -1, "0"):
             with self.subTest(age=age):
@@ -95,6 +118,32 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(report["referenced_decisions"], 1)
         self.assertNotIn("invalid_decision_record", report["findings"][0]["problems"])
         self.assertNotIn("unverified_local_approval", report["findings"][0]["problems"])
+
+    def test_claims_without_explicit_opt_in_cannot_pass_preflight(self) -> None:
+        import shutil
+        root = self.path.parent / "legacy-claims"
+        shutil.copytree(Path(__file__).resolve().parents[1] / "examples" / "tiny", root)
+        # This fake note is intentionally not a canonical decision; it also
+        # contains a claim reference without enabling the claim contract.
+        note = root / "notes" / "legacy-claim-reference.md"
+        note.write_text(
+            "---\ntype: reference\ndecision_id: D-998\n"
+            "status: approved\nclaim_ids: [C-001]\n"
+            "review_by: 2026-12-01\nlast_updated: 2026-10-09\n"
+            "created: 2026-10-09\nsensitivity: public\n---\n"
+            "Legacy claim without opt-in.\n",
+            encoding="utf-8",
+        )
+        self.valid["decision_ids"] = ["D-998"]
+        self.load(self.valid)
+        # Either an explicit refusal or a blocked outcome is acceptable;
+        # the preflight must never grant a positive structural verdict.
+        try:
+            result = check_proposal(root, self.path, today=TODAY)
+        except ValueError:
+            return
+        self.assertEqual(result["verdict"], "blocked")
+        self.assertIn("missing_claim_assessment", result["findings"][0]["problems"])
 
     def test_invalid_canonical_record_and_missing_approval_receipt_block(self) -> None:
         for finding in ("invalid_decision_record", "unverified_local_approval", "future_record_update"):

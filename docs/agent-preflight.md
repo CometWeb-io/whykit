@@ -55,3 +55,9 @@ approval receipt can pass this structural preflight. Missing/future timestamps
 or duplicate IDs block it. **Local receipts are editable and do not authenticate
 a human reviewer**, and no trusted Git baseline is verified. A separate,
 independently controlled Git review remains mandatory.
+
+Claims with disputed, unsupported or unknown verification status block a
+positive preflight even if a human-approved decision includes a written
+explanation. A supported claim must still have a valid local binding. A
+non-opted-in claim reference or an absent/incomplete claim projection cannot
+be treated as legacy evidence with no claim obligations.

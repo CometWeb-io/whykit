@@ -88,6 +88,21 @@ def assess(proposal: dict[str, Any], trace: dict[str, Any], review_dates: dict[s
                 problems.add("not_binding")
             if record.get("gaps") or record.get("claim_gaps"):
                 problems.add("unresolved_evidence_or_claims")
+            # The trace projection accepts explained disputed/unsupported
+            # claims in human-reviewed decisions. Automated structural
+            # preflight is more conservative: do not emit a green result
+            # for an action grounded on contrary or insufficient evidence.
+            claims = record.get("claims", [])
+            if not isinstance(claims, list):
+                problems.add("incomplete_claim_projection")
+            else:
+                for claim in claims:
+                    if not isinstance(claim, dict) or claim.get("verification_status") not in {
+                        "supported", "disputed", "unsupported", "unknown"
+                    }:
+                        problems.add("incomplete_claim_projection")
+                    elif claim["verification_status"] != "supported" or claim.get("binding_valid") is not True:
+                        problems.add("unresolved_claim_verification")
             # Even when no staleness window is configured, an active evidence
             # entry with an invalid/future access date cannot establish current
             # grounding. The trace's broad gap summary does not cover this case.
@@ -165,6 +180,24 @@ def check_proposal(root: Path, proposal_path: Path, *, today: dt.date | None = N
             )
             if not canonical:
                 integrity.setdefault(did, set()).add("invalid_decision_record")
+            # Claim opt-in is a separate format contract. A decision with
+            # claim_ids but no claim-aware trace projection cannot be treated
+            # as clean legacy evidence.
+            claim_ids = note.front.get("claim_ids", [])
+            if "claim_ids" in note.front:
+                if (not isinstance(claim_ids, list)
+                        or any(not isinstance(cid, str) or re.fullmatch(r"C-[0-9]{3,}", cid) is None
+                               for cid in claim_ids)
+                        or len(set(claim_ids)) != len(claim_ids)):
+                    integrity.setdefault(did, set()).add("invalid_claim_metadata")
+                elif claim_ids:
+                    projected = [
+                        item for item in report.get("decisions", []) if item.get("decision_id") == did
+                    ]
+                    if len(projected) != 1 or not isinstance(projected[0].get("claims"), list):
+                        integrity.setdefault(did, set()).add("missing_claim_assessment")
+                    elif len(projected[0]["claims"]) != len(claim_ids):
+                        integrity.setdefault(did, set()).add("incomplete_claim_projection")
             if note.front.get("status") == "approved":
                 try:
                     updated = dt.date.fromisoformat(str(note.front.get("last_updated") or ""))
