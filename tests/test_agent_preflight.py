@@ -215,6 +215,19 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(before, after)
 
 
+    def test_manifest_schema_enforces_runtime_limits(self) -> None:
+        repo = Path(__file__).resolve().parents[1]
+        schema = json.loads((repo / "schemas/agent-preflight-proposal.schema.json").read_text(encoding="utf-8"))
+        for payload in (
+            {"proposal_id": "x" * 81, "decision_ids": ["D-001"]},
+            {"proposal_id": "x", "decision_ids": [f"D-{i:03d}" for i in range(65)]},
+            {"proposal_id": "x", "decision_ids": ["D-001"], "summary": "x" * 4097},
+        ):
+            with self.subTest(keys=sorted(payload)):
+                self.assertNotEqual(validate(payload, schema), [])
+                with self.assertRaises(PreflightInputError):
+                    self.load(payload)
+
     def test_result_and_proposal_match_public_schemas(self) -> None:
         repo = Path(__file__).resolve().parents[1]
         def read(name: str) -> dict:

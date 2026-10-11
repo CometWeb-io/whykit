@@ -10,7 +10,8 @@
   "properties": {
     "proposal_id": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+      "maxLength": 80
     },
     "decision_ids": {
       "type": "array",
@@ -19,10 +20,12 @@
       "items": {
         "type": "string",
         "pattern": "^D-[0-9]{3,}$"
-      }
+      },
+      "maxItems": 64
     },
     "summary": {
-      "type": "string"
+      "type": "string",
+      "maxLength": 4096
     }
   },
   "additionalProperties": false

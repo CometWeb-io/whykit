@@ -23,7 +23,8 @@
     },
     "proposal_id": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+      "maxLength": 80
     },
     "proposal_sha256": {
       "type": "string",
@@ -53,7 +54,8 @@
     },
     "referenced_decisions": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 1,
+      "maximum": 64
     },
     "findings": {
       "type": "array",
@@ -78,7 +80,8 @@
           }
         },
         "additionalProperties": false
-      }
+      },
+      "maxItems": 64
     },
     "trusted_history_checked": {
       "const": false

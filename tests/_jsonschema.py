@@ -16,7 +16,8 @@ from typing import Any
 ANNOTATIONS = frozenset({"$schema", "$id", "title", "description", "$defs", "$comment", "examples", "default"})
 ASSERTIONS = frozenset({
     "type", "const", "enum", "required", "properties", "additionalProperties",
-    "items", "minItems", "pattern", "minLength", "minimum", "anyOf", "allOf", "$ref",
+    "items", "minItems", "maxItems", "pattern", "minLength", "maxLength",
+    "minimum", "maximum", "anyOf", "allOf", "$ref",
     "if", "then", "else", "uniqueItems",
 })
 SUPPORTED_KEYWORDS = ANNOTATIONS | ASSERTIONS
@@ -101,12 +102,18 @@ def _check(value: Any, schema: Any, root: dict[str, Any], where: str, errors: li
     if isinstance(value, str):
         if "minLength" in schema and len(value) < schema["minLength"]:
             errors.append(f"{where}: shorter than {schema['minLength']}")
+        if "maxLength" in schema and len(value) > schema["maxLength"]:
+            errors.append(f"{where}: longer than {schema['maxLength']}")
         if "pattern" in schema and not re.search(schema["pattern"], value):
             errors.append(f"{where}: {value!r} does not match {schema['pattern']}")
     if _TYPES["number"](value) and "minimum" in schema and value < schema["minimum"]:
         errors.append(f"{where}: {value} is below {schema['minimum']}")
+    if _TYPES["number"](value) and "maximum" in schema and value > schema["maximum"]:
+        errors.append(f"{where}: {value} exceeds {schema['maximum']}")
     if isinstance(value, list) and "minItems" in schema and len(value) < schema["minItems"]:
         errors.append(f"{where}: fewer than {schema['minItems']} items")
+    if isinstance(value, list) and "maxItems" in schema and len(value) > schema["maxItems"]:
+        errors.append(f"{where}: more than {schema['maxItems']} items")
     if isinstance(value, list) and schema.get("uniqueItems"):
         seen = [repr(item) for item in value]
         if len(seen) != len(set(seen)):

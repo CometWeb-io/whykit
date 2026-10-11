@@ -32,7 +32,8 @@
     },
     "count": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 1,
+      "maximum": 10000
     },
     "passed": {
       "type": "integer",
@@ -40,7 +41,8 @@
     },
     "pass_rate": {
       "type": "number",
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 1
     },
     "false_answers": {
       "type": "integer",
@@ -54,13 +56,15 @@
       "type": [
         "number",
         "null"
-      ]
+      ],
+      "maximum": 1
     },
     "required_citation_recall": {
       "type": [
         "number",
         "null"
-      ]
+      ],
+      "maximum": 1
     },
     "unlicensed_citations": {
       "type": "integer",
@@ -83,7 +87,8 @@
         "properties": {
           "id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+            "maxLength": 80
           },
           "pass": {
             "type": "boolean"
@@ -97,7 +102,8 @@
           }
         },
         "additionalProperties": false
-      }
+      },
+      "maxItems": 10000
     }
   },
   "additionalProperties": false
