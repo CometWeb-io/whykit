@@ -73,6 +73,35 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertEqual(report["passed"], 0)
         self.assertIn("empty_answer", report["results"][0]["violations"])
 
+    def test_unlicensed_citations_always_fail_even_with_zero_pass_gate(self) -> None:
+        left, right = self.fixture([self.case()], [
+            {"id": "test-one", "disposition": "answer",
+             "citations": ["E-999"], "answer": "Cites E-999"}
+        ])
+        self.assertEqual(main(["--cases", str(left), "--responses", str(right),
+                               "--min-pass-rate", "0"]), 1)
+
+    def test_missing_response_always_fails_even_with_zero_pass_gate(self) -> None:
+        left, right = self.fixture([self.case(), {"id": "test-two", "expected": {"disposition": "abstain"}}], [
+            {"id": "test-one", "disposition": "answer",
+             "citations": ["E-001"], "answer": "E-001"}
+        ])
+        self.assertEqual(main(["--cases", str(left), "--responses", str(right),
+                               "--min-pass-rate", "0"]), 1)
+
+    def test_nonfinite_json_extensions_are_invalid_input(self) -> None:
+        for invalid in ("NaN", "Infinity", "-Infinity"):
+            left, right = self.fixture([self.case()], [
+                {"id": "test-one", "disposition": "answer", "citations": ["E-001"], "answer": "E-001"}
+            ])
+            right.write_text(
+                '{"id":"test-one","disposition":"answer","answer":"E-001",'
+                '"citations":["E-001"],"unknown":' + invalid + '}\n',
+                encoding="utf-8",
+            )
+            with self.subTest(invalid=invalid), self.assertRaises(EvaluationInputError):
+                evaluate(left, right)
+
     def test_overconfident_answer_and_leak_never_pass(self) -> None:
         left, right = self.fixture([self.case("abstain")], [
             {"id": "test-one", "disposition": "answer", "citations": ["E-001"], "answer": "SENSITIVE-HOLDOUT"}

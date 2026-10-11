@@ -71,3 +71,9 @@ human/semantic validation. This scorer cannot certify factual accuracy.
 The displayed `pass_rate` is rounded to six decimals; the CLI acceptance
 threshold compares the unrounded ratio `passed / count` to avoid borderline
 false-positive acceptances.
+
+**Non-overridable integrity failures:** fabricated/unlicensed E/C/D citations,
+missing per-case responses, overconfident answers where abstention is required,
+and forbidden-phrase exposure always produce exit code 1. Lowering
+`--min-pass-rate` does not waive these failures. NaN and Infinity literals are
+refused as non-JSON inputs rather than silently accepted by Python JSON parsing.

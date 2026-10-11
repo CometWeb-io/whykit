@@ -25,6 +25,11 @@ CLAIM_ID = re.compile(r"C-[0-9]{3,}\Z")
 CLAIM_STATES = {"supported", "disputed", "unsupported", "unknown"}
 
 
+def _invalid_json_constant(_value: str) -> None:
+    """Reject NaN and Infinity extensions that are not JSON values."""
+    raise EvaluationInputError("invalid_json_constant")
+
+
 class EvaluationInputError(ValueError):
     """A malformed or unsupported input; no private values are echoed."""
 
@@ -57,7 +62,8 @@ def _read(path: Path, role: str) -> tuple[dict[str, dict], str]:
             if not line.strip():
                 continue
             try:
-                row = json.loads(line.decode("utf-8"), object_pairs_hook=_unique_object)
+                row = json.loads(line.decode("utf-8"), object_pairs_hook=_unique_object,
+                                 parse_constant=_invalid_json_constant)
             except (UnicodeError, ValueError, RecursionError):
                 raise EvaluationInputError(role + ": invalid JSON at line " + str(line_number)) from None
             if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not CASE_ID.fullmatch(row["id"]):
@@ -217,7 +223,14 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"format": FORMAT, "error": "invalid_input", "kind": type(exc).__name__}))
         return 2
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 0 if (result["passed"] / result["count"] >= args.min_pass_rate
-                 and result["false_answers"] == 0 and result["forbidden_phrase_matches"] == 0) else 1
+    # These are hard integrity failures, even when the operator lowers the
+    # aggregate threshold to inspect an otherwise imperfect evaluation.
+    hard_failure = (
+        result["false_answers"] > 0
+        or result["forbidden_phrase_matches"] > 0
+        or result["unlicensed_citations"] > 0
+        or any("missing_response" in case["violations"] for case in result["results"])
+    )
+    return 0 if result["passed"] / result["count"] >= args.min_pass_rate and not hard_failure else 1
 
 
