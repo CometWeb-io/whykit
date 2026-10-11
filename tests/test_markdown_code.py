@@ -24,6 +24,14 @@ class MarkdownCodeTests(unittest.TestCase):
         self.assert_only_real_evidence(BT * 3 + "code " + BT + "E-001" + BT * 3 + " [[E-002]]")
         self.assert_only_real_evidence(BT * 2 + "first\nE-001\nthird" + BT * 2 + " [[E-002]]")
 
+    def test_cr_only_and_mixed_line_endings_preserve_evidence_extraction(self) -> None:
+        for fence in (BT * 3, "~~~"):
+            with self.subTest(fence=fence):
+                self.assert_only_real_evidence(
+                    fence + "markdown\r[[E-001]]\r" + fence + "\r[[E-002]]"
+                )
+        self.assert_only_real_evidence("~~~\r[[E-001]]\r\n~~~\n[[E-002]]")
+
     def test_unclosed_inline_delimiter_is_literal(self) -> None:
         self.assert_only_real_evidence(BT + "[[E-001]]", ("E-001",))
 

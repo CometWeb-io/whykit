@@ -127,7 +127,7 @@ function splitRow(line: string): string[] {
 
 
 export function parseMarkdown(src: string): MdBlock[] {
-  const lines = src.replace(/\r\n/g, "\n").split("\n");
+  const lines = src.replace(/\r\n?|\n/g, "\n").split("\n");
   const blocks: MdBlock[] = [];
   let i = 0;
 

@@ -49,6 +49,26 @@ test("mask preserves offsets and all original newlines", () => {
   assert.equal(masked.includes(allowed), true);
 });
 
+test("CR-only fenced examples cannot forge Explorer graph links", () => {
+  for (const fence of [BT.repeat(3), "~~~"]) {
+    const src = fence + "md\r" + link + "\r" + fence + "\r" + allowed;
+    assert.deepEqual(extractWikilinks(src), ["E-002"]);
+    const first = parseMarkdown(src)[0];
+    assert.equal(first?.t, "code");
+    if (first?.t === "code") assert.ok(first.code.includes(link));
+  }
+});
+
+test("mixed line endings and CR-only code spans preserve graph semantics", () => {
+  const fence = "~~~\r" + link + "\r\n~~~\n" + allowed;
+  assert.deepEqual(extractWikilinks(fence), ["E-002"]);
+  const src = BT.repeat(2) + "a\rb" + BT.repeat(2) + " " + allowed;
+  const parsed = parseInline(BT.repeat(2) + "a\rb" + BT.repeat(2));
+  assert.equal(parsed[0]?.t, "code");
+  if (parsed[0]?.t === "code") assert.equal(parsed[0].v, "a b");
+  assert.deepEqual(extractWikilinks(src), ["E-002"]);
+});
+
 test("invalid backtick info string is not considered a fence", () => {
   const src = BT.repeat(3) + "bad" + BT + "\n" + allowed;
   assert.deepEqual(extractWikilinks(src), ["E-002"]);
