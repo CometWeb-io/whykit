@@ -164,7 +164,7 @@ def evaluate(cases_path: Path, responses_path: Path) -> dict:
             recovered += len(expected["required"] & response["citations"])
         required_count += len(expected["required"])
         results.append({"id": case_id, "pass": not violations, "violations": sorted(violations)})
-    passed = sum(item["pass"] for item in results)
+    passed = sum(1 for item in results if item["pass"] is True)
     return {
         "format": FORMAT, "cases_sha256": corpus_sha256, "responses_sha256": responses_sha256,
         "count": len(results), "passed": passed, "pass_rate": round(passed / len(results), 6),
