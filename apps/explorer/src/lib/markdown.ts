@@ -279,15 +279,24 @@ export function extractWikilinks(src: string): string[] {
 }
 
 export function extractHeadings(src: string): { id: string; text: string; level: number }[] {
-  return src
-    .split("\n")
-    .map((line) => line.match(/^(#{2,3})\s+(.*)$/))
-    .filter((m): m is RegExpMatchArray => Boolean(m))
-    .map((m) => ({
-      level: m[1]!.length,
-      text: m[2]!.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1"),
-      id: slugify(m[2]!),
-    }));
+  const original = src.replace(/\r\n?|\n/g, "\n").split("\n");
+  const masked = maskMarkdownCode(src).replace(/\r\n?|\n/g, "\n").split("\n");
+  const headings: { id: string; text: string; level: number }[] = [];
+  for (let i = 0; i < original.length; i++) {
+    // Match syntax against masked text: headings inside example fences are
+    // not navigable document sections. Read display text from original bytes
+    // so legitimate inline code within a heading is not erased.
+    const match = masked[i]?.match(/^(#{2,3})\s+(.*)$/);
+    const source = original[i]?.match(/^(#{2,3})\s+(.*)$/);
+    if (!match || !source) continue;
+    const heading = source[2]!;
+    headings.push({
+      level: source[1]!.length,
+      text: heading.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1"),
+      id: slugify(heading),
+    });
+  }
+  return headings;
 }
 
 export function slugify(text: string) {

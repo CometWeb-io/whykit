@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fenceStart, maskMarkdownCode } from "../src/lib/code.ts";
-import { extractWikilinks, parseInline, parseMarkdown } from "../src/lib/markdown.ts";
+import { extractHeadings, extractWikilinks, parseInline, parseMarkdown } from "../src/lib/markdown.ts";
 
 const BT = String.fromCharCode(96);
 const link = "[[E-001]]";
@@ -67,6 +67,13 @@ test("mixed line endings and CR-only code spans preserve graph semantics", () =>
   assert.equal(parsed[0]?.t, "code");
   if (parsed[0]?.t === "code") assert.equal(parsed[0].v, "a b");
   assert.deepEqual(extractWikilinks(src), ["E-002"]);
+});
+
+test("CR-only heading extraction excludes headings hidden inside fences", () => {
+  const body = "## Real\r~~~\r## Example only\r~~~\r## After\r\n";
+  assert.deepEqual(extractHeadings(body).map(h => h.text), ["Real", "After"]);
+  const inline = "## Heading " + BT + "code" + BT + "\r";
+  assert.deepEqual(extractHeadings(inline).map(h => h.text), ["Heading " + BT + "code" + BT]);
 });
 
 test("invalid backtick info string is not considered a fence", () => {
