@@ -217,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"format": FORMAT, "error": "invalid_input", "kind": type(exc).__name__}))
         return 2
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 0 if result["pass_rate"] >= args.min_pass_rate and result["false_answers"] == 0 and result["forbidden_phrase_matches"] == 0 else 1
+    return 0 if (result["passed"] / result["count"] >= args.min_pass_rate
+                 and result["false_answers"] == 0 and result["forbidden_phrase_matches"] == 0) else 1
 
 
