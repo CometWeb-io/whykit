@@ -72,7 +72,7 @@ class PreflightTests(unittest.TestCase):
         for candidate in invalid:
             with self.subTest(candidate=candidate), self.assertRaises(PreflightInputError):
                 self.load(candidate)
-        self.path.write_text('{"proposal_id":"a","proposal_id":"b","decision_ids":["D-001"]}')
+        self.path.write_text('{"proposal_id":"a","proposal_id":"b","decision_ids":["D-001"]}', encoding="utf-8")
         with self.assertRaises(PreflightInputError):
             read_proposal(self.path)
 
