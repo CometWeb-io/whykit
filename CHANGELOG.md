@@ -22,8 +22,8 @@ hello@cometweb.io the contact; CometWeb is not the copyright holder.
   Explorer graph links/navigation. Code spans and comments are masked in
   lexical order, including empty short-comment forms, to avoid hiding real
   citations when a comment contains backticks. Python and TypeScript share
-  a 20-case corpus covering boundaries, escapes, CR/LF/CRLF and Unicode.
-  Parser caches invalidate on source changes. Full CommonMark HTML/container
+  a 27-case corpus covering boundaries, escapes, CR/LF/CRLF and Unicode.
+  Only CR and LF create Markdown physical lines; Unicode NEL, U+2028/U+2029,\n  vertical tab and form feed cannot create phantom code fences.\n  Parser caches invalidate on source changes. Full CommonMark HTML/container
   semantics remain out of scope for this narrow masking fix.
 
 - **Evidence extraction correctness:** shared position-preserving Markdown code
