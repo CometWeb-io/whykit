@@ -78,7 +78,7 @@ class MarkdownCodeTests(unittest.TestCase):
                 masked = _mask_code(case["markdown"])
                 self.assertEqual(len(masked), len(case["markdown"]))
                 for index, original in enumerate(case["markdown"]):
-                    if original in "\\r\\n":
+                    if original in "\r\n":
                         self.assertEqual(masked[index], original)
 
     def test_many_unmatched_runs_do_not_quadratically_scan(self) -> None:
