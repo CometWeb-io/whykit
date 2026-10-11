@@ -21,7 +21,7 @@ class MarkdownCodeTests(unittest.TestCase):
 
     def test_variable_length_inline_code(self) -> None:
         self.assert_only_real_evidence("Preview " + BT * 2 + "[[E-001]]" + BT * 2 + " [[E-002]]")
-        self.assert_only_real_evidence(BT * 3 + BT + "E-001" + BT * 3 + " [[E-002]]")
+        self.assert_only_real_evidence(BT * 3 + "code " + BT + "E-001" + BT * 3 + " [[E-002]]")
         self.assert_only_real_evidence(BT * 2 + "first\nE-001\nthird" + BT * 2 + " [[E-002]]")
 
     def test_unclosed_inline_delimiter_is_literal(self) -> None:
