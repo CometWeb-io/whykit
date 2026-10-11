@@ -50,6 +50,46 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertEqual(main(["--cases", str(left), "--responses", str(right), "--min-pass-rate", "0"]), 1)
         self.assertNotIn("SENSITIVE-HOLDOUT", json.dumps(result))
 
+    def test_unlicensed_identifier_in_answer_even_when_structured_citations_are_correct(self) -> None:
+        left, right = self.fixture([self.case()], [
+            {"id": "test-one", "disposition": "answer", "citations": ["E-001"],
+             "answer": "E-001 supports this, and E-999 apparently confirms it."}
+        ])
+        actual = evaluate(left, right)
+        self.assertEqual(actual["passed"], 0)
+        self.assertEqual(actual["unlicensed_citations"], 1)
+        self.assertIn("unlicensed_citations", actual["results"][0]["violations"])
+
+    def test_citations_can_be_required_in_the_actual_answer(self) -> None:
+        case = self.case()
+        case["expected"]["require_inline_citations"] = True
+        left, right = self.fixture([case], [
+            {"id": "test-one", "disposition": "answer", "citations": ["E-001"], "answer": "No referenced ID."}
+        ])
+        result = evaluate(left, right)
+        self.assertIn("citations_not_in_answer", result["results"][0]["violations"])
+        right.write_text('{"id":"test-one","disposition":"answer","citations":["E-001"],"answer":"See E-001"}\n')
+        self.assertEqual(evaluate(left, right)["passed"], 1)
+
+    def test_unknown_schema_keys_fail_closed(self) -> None:
+        case = self.case()
+        case["expected"]["required_citationz"] = ["E-001"]
+        left, right = self.fixture([case], [{"id":"test-one","disposition":"answer"}])
+        with self.assertRaises(EvaluationInputError):
+            evaluate(left, right)
+        del case["expected"]["required_citationz"]
+        left, right = self.fixture([case], [{"id":"test-one","disposition":"answer","citaitons":["E-001"]}])
+        with self.assertRaises(EvaluationInputError):
+            evaluate(left, right)
+
+    def test_normalized_forbidden_phrase_catches_decomposed_unicode(self) -> None:
+        case = self.case()
+        case["expected"]["forbidden_phrases"] = ["Café"]
+        left, right = self.fixture([case], [
+            {"id": "test-one", "disposition": "answer", "citations":["E-001"], "answer":"Cafe\u0301"}
+        ])
+        self.assertGreater(evaluate(left, right)["forbidden_phrase_matches"], 0)
+
     def test_claims_and_conflict_are_typed(self) -> None:
         case = self.case()
         case["expected"]["claim_states"] = {"C-001": "disputed"}

@@ -22,15 +22,20 @@ Cases must have a unique ASCII id and an expected object with:
 - forbidden_citations: IDs that must never be mentioned;
 - claim_states: C-ID to supported/disputed/unsupported/unknown;
 - conflict: expected explicit disagreement flag;
-- forbidden_phrases: sensitive markers that must not appear in answer.
+- forbidden_phrases: sensitive markers that must not appear in answer;
+- require_inline_citations: optional boolean requiring declared citations to appear
+  as explicit E/C/D IDs in the answer text (default false).
 
 Model responses must be one JSON object per line:
 id, disposition, citations, claim_states, conflict, answer. Unspecified optional
 fields default to empty values. Required citations must be a subset of allowed
 citations. IDs not explicitly allowed for a case count as unlicensed (including
 invented and private IDs). Missing responses are failures; unexpected and duplicate
-IDs invalidate the entire run. Extra model-generated citations never silently
-become evidence.
+IDs invalidate the entire run. Undeclared E/C/D references found in answer
+text are checked too: the model cannot bypass citation checks by leaving a
+reference out of its structured `citations` array. The evaluator uses ASCII
+identifier boundaries, not semantic interpretation of prose. An abstention
+that still mentions record IDs is flagged.
 
 ## Interpreting output
 
@@ -41,6 +46,9 @@ sensitive marker values or source excerpts. Default exit 0 requires all cases
 to pass; 1 denotes a scored failure; 2 denotes invalid input. Even with
 --min-pass-rate 0, a false answer to an abstention case or a forbidden phrase
 match fails the run.
+
+Unknown schema fields fail closed, including misspelled rubric keys. The text
+and structured citation surfaces are checked together for allowed/forbidden IDs.
 
 Security limitations: exact forbidden-phrase matching does not detect paraphrases,
 semantic leakage or all prompt injections. "Grounded" means conforming to this

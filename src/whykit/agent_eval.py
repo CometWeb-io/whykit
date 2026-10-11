@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ MAX_LINE = 64 * 1024
 MAX_CASES = 10_000
 CASE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}\Z")
 RECORD_ID = re.compile(r"[ECD]-[0-9]{3,}\Z")
+RECORD_MENTION = re.compile(r"(?<![A-Za-z0-9_-])[ECD]-[0-9]{3,}(?![A-Za-z0-9_-])")
 CLAIM_ID = re.compile(r"C-[0-9]{3,}\Z")
 CLAIM_STATES = {"supported", "disputed", "unsupported", "unknown"}
 
@@ -60,6 +62,11 @@ def _read(path: Path, role: str) -> tuple[dict[str, dict], str]:
                 raise EvaluationInputError(role + ": invalid JSON at line " + str(line_number)) from None
             if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not CASE_ID.fullmatch(row["id"]):
                 raise EvaluationInputError(role + ": invalid case ID at line " + str(line_number))
+            allowed_keys = {"id", "expected", "prompt"} if role == "cases" else {"id", "disposition", "citations", "claim_states", "conflict", "answer"}
+            if set(row) - allowed_keys:
+                raise EvaluationInputError(role + ": unsupported field at line " + str(line_number))
+            if role == "cases" and "prompt" in row and (not isinstance(row["prompt"], str) or len(row["prompt"]) > MAX_LINE):
+                raise EvaluationInputError(role + ": invalid prompt at line " + str(line_number))
             if row["id"] in records:
                 raise EvaluationInputError(role + ": duplicate case ID at line " + str(line_number))
             records[row["id"]] = row
@@ -90,6 +97,13 @@ def _expected(row: dict) -> dict:
     value = row.get("expected")
     if not isinstance(value, dict) or not isinstance(value.get("disposition"), str) or value["disposition"] not in {"answer", "abstain"}:
         raise EvaluationInputError("case: invalid expected disposition")
+    allowed_keys = {"disposition", "allowed_citations", "required_citations", "forbidden_citations",
+                    "claim_states", "conflict", "forbidden_phrases", "require_inline_citations"}
+    if set(value) - allowed_keys:
+        raise EvaluationInputError("case: unknown expected field")
+    require_inline = value.get("require_inline_citations", False)
+    if type(require_inline) is not bool:
+        raise EvaluationInputError("case: require_inline_citations must be boolean")
     allowed = _ids(value.get("allowed_citations", []), "allowed_citations")
     required = _ids(value.get("required_citations", []), "required_citations")
     forbidden = _ids(value.get("forbidden_citations", []), "forbidden_citations")
@@ -104,7 +118,7 @@ def _expected(row: dict) -> dict:
     return {
         "disposition": value["disposition"], "allowed": allowed, "required": required,
         "forbidden": forbidden, "claims": _states(value.get("claim_states", {}), "claim_states"),
-        "conflict": conflict, "phrases": phrases,
+        "conflict": conflict, "phrases": phrases, "require_inline": require_inline,
     }
 
 
@@ -142,24 +156,32 @@ def evaluate(cases_path: Path, responses_path: Path) -> dict:
                     overconfident += 1
                 elif response["disposition"] == "abstain" and expected["disposition"] == "answer":
                     false_abstentions += 1
-            presented += len(response["citations"])
-            licensed += len(response["citations"] & expected["allowed"])
-            if response["citations"] - expected["allowed"]:
+            # A model can mention E-999 in prose but leave it out of the structured
+            # citations array. Evaluate both surfaces; do not trust self-reporting.
+            inline = set(RECORD_MENTION.findall(response["answer"]))
+            claimed = response["citations"] | inline
+            presented += len(claimed)
+            licensed += len(claimed & expected["allowed"])
+            invalid = claimed - expected["allowed"]
+            if invalid:
                 violations.add("unlicensed_citations")
-                unknown_citations += len(response["citations"] - expected["allowed"])
-            if response["citations"] & expected["forbidden"]:
+                unknown_citations += len(invalid)
+            if claimed & expected["forbidden"]:
                 violations.add("forbidden_citations")
+            if expected["require_inline"] and response["citations"] - inline:
+                violations.add("citations_not_in_answer")
             if expected["required"] - response["citations"]:
                 violations.add("missing_citations")
             if response["claims"] != expected["claims"]:
                 violations.add("incorrect_claim_states")
             if response["conflict"] != expected["conflict"]:
                 violations.add("incorrect_conflict_assessment")
-            count = sum(p.casefold() in response["answer"].casefold() for p in expected["phrases"])
+            normalized_answer = unicodedata.normalize("NFC", response["answer"]).casefold()
+            count = sum(unicodedata.normalize("NFC", p).casefold() in normalized_answer for p in expected["phrases"])
             if count:
                 leaked += count
                 violations.add("forbidden_phrase_in_answer")
-            if expected["disposition"] == "abstain" and response["citations"]:
+            if expected["disposition"] == "abstain" and claimed:
                 violations.add("abstention_with_citations")
             recovered += len(expected["required"] & response["citations"])
         required_count += len(expected["required"])
