@@ -1,6 +1,8 @@
 """Inbound link discovery for documents, decisions and evidence."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import json
 import sys
@@ -52,6 +54,7 @@ def _normalize_target(root: Path, target: str, vault: VaultIndex) -> tuple[str, 
     return "document", strip_markdown_suffix(raw)
 
 
+@consistent_read
 @path_cache()
 def build_backlinks(root: Path, target: str, *, vault: VaultIndex | None = None) -> dict:
     root = root.resolve()

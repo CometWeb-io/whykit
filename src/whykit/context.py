@@ -1,6 +1,8 @@
 """Build bounded, evidence-aware context packs for people and AI agents."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import json
 import re
@@ -76,6 +78,7 @@ def _budgeted(note: Note, max_chars: int) -> tuple[str, bool]:
     return body[:max_chars], True
 
 
+@consistent_read
 @path_cache()
 def build_context(
     root: Path,

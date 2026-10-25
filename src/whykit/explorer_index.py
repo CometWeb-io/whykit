@@ -1,6 +1,8 @@
 """Canonical Explorer index export — one Python parser for the UI contract."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import datetime as dt
 import json
@@ -100,6 +102,7 @@ def _policy(root: Path) -> dict:
     }
 
 
+@consistent_read
 @path_cache()
 def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
     """Build the Explorer vault.json payload from the canonical Python parser."""

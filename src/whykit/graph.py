@@ -5,6 +5,8 @@ documents can also cite evidence and decisions can supersede one another.
 """
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import json
 import re
@@ -49,6 +51,7 @@ def wikilink_resolutions(note, vault_index: VaultIndex) -> Iterator[tuple[str, P
         yield target, resolved, ambiguous
 
 
+@consistent_read
 @path_cache()
 def build_graph(
     root: Path,
@@ -293,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
         rendered = json.dumps(graph, ensure_ascii=False, indent=2)
         text_mode = True
     if args.output:
-        from .io import atomic_write_text, safe_vault_target
+        from .io import atomic_write_text, safe_export_target
         target = Path(args.output).expanduser()
         try:
             if target.is_absolute():
@@ -303,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
                     relative = target.relative_to(requested_root)
             else:
                 relative = target
-            target = safe_vault_target(root, relative)
+            target = safe_export_target(root, relative)
         except (OSError, RuntimeError, ValueError) as exc:
             return emit_error(
                 "unsafe_path",

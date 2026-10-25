@@ -30,6 +30,7 @@ from pathlib import Path, PurePath
 from collections.abc import Callable, Iterator
 from typing import Iterable
 
+from .io import _lock_owner, consistent_read
 from .config import CONFIG_FILE, ConfigError, load_config
 from .markdown_code import mask_code as _mask_code
 from .rule_policy import EMPTY_POLICY, Override, check_custom_rules, policy_from_config, secret_scan_skipped
@@ -57,9 +58,11 @@ class VaultPathError(ValueError):
 # once.  The scope is request-sized on purpose: a long-lived process such as the
 # MCP server must not see a stale answer after the vault changes on disk.
 class _RequestCache:
-    __slots__ = ("realpaths", "relative", "within", "registers")
+    __slots__ = ("realpaths", "relative", "within", "registers", "owner", "active")
 
     def __init__(self) -> None:
+        self.owner = _lock_owner()
+        self.active = True
         # Keyed by the path string, not the Path: Windows paths compare
         # case-insensitively, and a cache must never merge two spellings.
         self.realpaths: dict[str, Path] = {}
@@ -75,19 +78,26 @@ _REQUEST: contextvars.ContextVar[_RequestCache | None] = contextvars.ContextVar(
 )
 
 
+def _request_cache() -> _RequestCache | None:
+    cache = _REQUEST.get()
+    return cache if cache is not None and cache.active and cache.owner == _lock_owner() else None
+
+
 @contextlib.contextmanager
-def path_cache():
+def path_cache(*, fresh: bool = False):
     """Memoise ``Path.resolve()`` (and register parsing) for one read-only request.
 
-    Re-entrant: a nested scope reuses the outer cache.  Usable as a decorator.
+    Nested reads reuse the outer cache; protocol requests can force a fresh one.
     """
-    if _REQUEST.get() is not None:
+    if not fresh and _request_cache() is not None:
         yield
         return
-    token = _REQUEST.set(_RequestCache())
+    cache = _RequestCache()
+    token = _REQUEST.set(cache)
     try:
         yield
     finally:
+        cache.active = False
         _REQUEST.reset(token)
 
 
@@ -95,7 +105,7 @@ _POSIX = os.name == "posix"
 
 
 def _real(path: Path) -> Path:
-    cache = _REQUEST.get()
+    cache = _request_cache()
     if cache is None:
         return path.resolve()
     key = os.fspath(path)
@@ -206,7 +216,7 @@ def _relative_text(path: Path, root: Path) -> str | None:
 
 
 def _within(root: Path, path: Path) -> bool:
-    cache = _REQUEST.get()
+    cache = _request_cache()
     key = (os.fspath(root), os.fspath(path))
     if cache is not None:
         hit = cache.within.get(key)
@@ -855,7 +865,7 @@ def load_note(path: Path, *, text: str | None = None) -> Note:
 def rel(root: Path, path: Path) -> str:
     # Resolve both sides so macOS /var vs /private/var (and similar aliasing)
     # does not break relative paths or silently fall back to absolutes.
-    cache = _REQUEST.get()
+    cache = _request_cache()
     key = (os.fspath(root), os.fspath(path))
     if cache is not None:
         hit = cache.relative.get(key)
@@ -1218,7 +1228,7 @@ def evidence_register(root: Path) -> tuple[dict[str, dict[str, str]], dict[str, 
     path = root / "00-context" / "evidence-register.md"
     if not path.exists():
         return {}, {}, []
-    cache = _REQUEST.get()
+    cache = _request_cache()
     if cache is None:
         return _parse_evidence_register(path)
     try:
@@ -1937,6 +1947,7 @@ def _path_order(path: Path) -> list[str]:
     return os.path.normcase(os.fspath(path)).split(os.sep)
 
 
+@consistent_read
 @path_cache()
 def lint(
     root: Path,

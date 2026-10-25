@@ -102,6 +102,7 @@ class OfflineTests(unittest.TestCase):
                 ("check", "--root", r, "--profile", "local", "--base", "HEAD"),
                 ("install-hooks", "--root", r),
                 ("doctor", "--root", r),
+                ("recover", "--root", r, "--json"),
                 ("evidence", "--root", r, "retire", "E-001", "--why", "Example retirement"),
             ):
                 with self.subTest(command=argv[0]):
@@ -147,7 +148,7 @@ class OfflineTests(unittest.TestCase):
         covered = {
             "init", "new", "lint", "status", "graph", "backlinks", "impact", "query", "context",
             "pack", "review", "evidence", "snapshot", "verify-snapshot", "policy", "rules",
-            "adopt", "explorer-index", "history", "check", "install-hooks", "doctor",
+            "adopt", "explorer-index", "history", "check", "install-hooks", "doctor", "recover",
             "trace", "completion", "diff", "lsp",
         }
         excluded = {"serve"}  # starts the optional Explorer dev server

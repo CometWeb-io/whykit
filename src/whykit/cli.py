@@ -879,6 +879,21 @@ def _non_public_docs(vault: Path) -> list[str]:
     return result
 
 
+def cmd_recover(args: argparse.Namespace) -> int:
+    import json
+    from .io import vault_mutation_lock
+
+    root = _resolve_vault(args.root)
+    if root is None:
+        return vault_not_found(args.root, json_mode=args.json)
+    with vault_mutation_lock(root):
+        pass  # Recovery and terminal-journal collection finish before the lock yields.
+    if args.json:
+        emit_machine(json.dumps({"contract_version": 1, "recovery_completed": True}))
+    else:
+        print("Vault recovery completed.")
+    return 0
+
 def cmd_explorer_index(args: argparse.Namespace) -> int:
     argv: list[str] = []
     if args.root:
@@ -1031,7 +1046,7 @@ COMMAND_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("check", "gate a vault or a change", ("lint", "check", "status", "trace", "history", "diff", "snapshot", "verify-snapshot")),
     ("explore", "find and hand over context", ("query", "context", "pack", "graph", "backlinks", "impact")),
     ("integrate", "connect hooks, viewers and shells", ("install-hooks", "explorer-index", "serve", "lsp", "completion")),
-    ("maintain", "inspect policy, rules and setup", ("policy", "rules", "doctor")),
+    ("maintain", "inspect policy, rules and setup", ("policy", "rules", "doctor", "recover")),
 )
 
 COMMANDS_PREAMBLE = (
@@ -1446,6 +1461,11 @@ def build_parser() -> argparse.ArgumentParser:
     hooks.add_argument("--force", action="store_true", help="replace an existing pre-commit hook")
     hooks.set_defaults(func=cmd_install_hooks)
 
+    recover = sub.add_parser("recover", help="recover interrupted writes and collect completed transaction journals")
+    recover.add_argument("--root", help=ROOT_HELP)
+    recover.add_argument("--json", action="store_true", help=JSON_HELP)
+    recover.set_defaults(func=cmd_recover)
+
     explorer_index = sub.add_parser(
         "explorer-index",
         help="export the Explorer vault index from the canonical Python parser",
@@ -1555,6 +1575,47 @@ def _silence_stdout() -> None:
         pass
 
 
+def _run_command(args: argparse.Namespace, func) -> int:
+    """Bind config, data and rendered output to one read; discard raced output."""
+    from contextlib import redirect_stdout
+    import tempfile
+    from .io import vault_read_lock, vault_mutation_lock
+
+    read_only = args.command in _CACHED_COMMANDS | {"policy", "rules", "history"}
+    read_only = read_only or (args.command == "evidence" and getattr(args, "evidence_command", None) == "list")
+    read_only = read_only or (args.command == "review" and args.review_command == "list")
+    root = _resolve_vault(getattr(args, "root", None)) if read_only else None
+    if args.command == "lint":
+        from .lint import resolve_root
+        resolved, _, _note = resolve_root(args.root, args.paths)
+        root = resolved if is_vault_root(resolved) else None
+    if root is None:
+        return func(args)
+    # Spill large reports to a private temporary file instead of doubling their RAM.
+    scope = vault_mutation_lock(root) if args.command in {"graph", "snapshot"} and args.output else vault_read_lock(root)
+    with tempfile.SpooledTemporaryFile(max_size=1024 * 1024, mode="w+", encoding="utf-8", errors="surrogateescape") as output:
+        with redirect_stdout(output), scope:
+            result = func(args)
+        output.seek(0)
+        stream = sys.stdout
+        machine = _wants_json(args) or args.command in {"graph", "pack"} or (args.command in {"lint", "check"} and args.format in {"sarif", "github"})
+        from .console import is_utf
+        reconfigure = getattr(stream, "reconfigure", None)
+        switch = machine and not is_utf(stream) and reconfigure is not None
+        if switch:
+            assert reconfigure is not None
+            encoding, errors = stream.encoding, stream.errors
+            stream.flush()
+            reconfigure(encoding="utf-8", errors="surrogateescape")
+        try:
+            shutil.copyfileobj(output, stream)
+        finally:
+            if switch:
+                assert reconfigure is not None
+                stream.flush()
+                reconfigure(encoding=encoding, errors=errors)
+        return result
+
 def main(argv: list[str] | None = None) -> int:
     # Before any output: an ASCII or legacy code-page console must degrade
     # glyphs, not abort the report with UnicodeEncodeError.
@@ -1577,7 +1638,7 @@ def main(argv: list[str] | None = None) -> int:
         from .parse_cache import persistent
 
         with persistent(_uses_parse_cache(args)):
-            code = func(args)
+            code = _run_command(args, func)
         # Flush here, not at interpreter exit: a short report sits in the buffer
         # until then, and a reader that already left (`| head -1`) would turn
         # into an "Exception ignored" message and exit status 120.

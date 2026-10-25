@@ -1,6 +1,8 @@
 """Build deterministic multi-record context bundles for agent handoffs."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import json
 from pathlib import Path
@@ -75,6 +77,7 @@ def _record_key(context: dict[str, Any]) -> str:
     return f"target:{context.get('target')}"
 
 
+@consistent_read
 @path_cache()
 def build_pack(
     root: Path,

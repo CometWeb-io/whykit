@@ -7,6 +7,14 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+- Retain transaction payloads through durable commit and collect terminal journals
+  without replaying later edits. Validate recovery paths and legacy payload hashes;
+  `whykit recover` explicitly repairs interrupted writes. Cooperating reports and
+  MCP reads share the mutation boundary, with scoped lock/cache ownership and
+  buffered CLI output. Transactions reject case and filesystem aliases of
+  `.whykit` during staging and recovery, preserving the active lock inode.
+  Graph and snapshot exports protect coordination state.
+
 - Link and evidence extraction share position-preserving Markdown code/comment
   masking with the Explorer's code recognition. Fences inside comments no
   longer hide later prose, and inline backticks cannot span blank lines,

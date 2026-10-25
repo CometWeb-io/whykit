@@ -1,6 +1,8 @@
 """Deterministic vault snapshots and drift verification."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import datetime as dt
 import hashlib
@@ -10,7 +12,7 @@ from typing import Any
 
 from .contract import emit_error, vault_not_found
 from .graph import build_graph
-from .io import atomic_write_text, safe_vault_target
+from .io import atomic_write_text, safe_export_target
 from .lint import collect_markdown, find_vault_root, is_markdown_name, is_vault_root, load_note, rel, path_cache
 from .status import build_status
 from .vault_index import VaultIndex
@@ -102,6 +104,7 @@ def _snapshot_id(entries: list[dict[str, Any]]) -> str:
     return digest.hexdigest()
 
 
+@consistent_read
 @path_cache()
 def build_snapshot(
     root: Path, *, today: dt.date | None = None, snapshot_format: str = SNAPSHOT_FORMAT,
@@ -150,6 +153,7 @@ def build_snapshot(
     }
 
 
+@consistent_read
 @path_cache()
 def compare_snapshot(root: Path, baseline: dict[str, Any], *, today: dt.date | None = None) -> dict[str, Any]:
     snapshot_format = baseline.get("format")
@@ -261,7 +265,7 @@ def main_snapshot(argv: list[str] | None = None) -> int:
                     relative = target.relative_to(requested_root)
             else:
                 relative = target
-            target = safe_vault_target(root, relative)
+            target = safe_export_target(root, relative)
         except (OSError, RuntimeError, ValueError) as exc:
             return emit_error("unsafe_path", f"--output must be a safe path inside the vault: {exc}", json_mode=json_mode)
         atomic_write_text(target, rendered + "\n")

@@ -4,13 +4,15 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import os
+import stat
 import threading
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .lint import Note, _build_index, _link_key, _real, _resolve, _within, collect_markdown, load_note, path_cache, rel, strip_markdown_suffix
+from .io import vault_read_lock
+from .lint import Note, _normalise, _build_index, _link_key, _real, _resolve, _within, collect_markdown, load_note, path_cache, rel, strip_markdown_suffix
 
 
 class NoteCache:
@@ -19,7 +21,8 @@ class NoteCache:
     A long-lived reader (the MCP server) would otherwise read and parse every
     note on every call.  Each entry is keyed by the file's path and checked
     against its current ``stat`` signature (modification and change time,
-    size, inode) before it is reused, so an edit, an atomic replace, a rename
+    size, inode), link metadata and content when change time is untrusted,
+    so an edit, an atomic replace, a rename
     or a deletion is always picked up by the next call.
 
     A file whose timestamps are within :attr:`racy_ns` of the clock is never
@@ -36,27 +39,37 @@ class NoteCache:
     racy_ns = 2_000_000_000
 
     def __init__(self) -> None:
-        self._entries: dict[str, tuple[tuple[int, int, int, int], Note]] = {}
+        self._entries: dict[str, tuple[tuple[int, ...], Note]] = {}
         self._lock = threading.Lock()
         self.hits = 0
         self.misses = 0
 
     def load_all(self, paths: list[Path]) -> list[Note]:
         now = time.time_ns()
-        fresh: dict[str, tuple[tuple[int, int, int, int], Note]] = {}
+        fresh: dict[str, tuple[tuple[int, ...], Note]] = {}
         notes: list[Note] = []
         with self._lock:
             entries = self._entries
         for path in paths:
             key = os.fspath(path)
             try:
-                info = os.stat(path)
+                link = os.lstat(path)
+                info = os.stat(path) if stat.S_ISLNK(link.st_mode) else link
             except OSError:
                 notes.append(load_note(path))  # raises like an uncached load
                 continue
-            signature = (info.st_mtime_ns, info.st_ctime_ns, info.st_size, info.st_ino)
+            signature = (info.st_mtime_ns, info.st_ctime_ns, info.st_size, info.st_ino, info.st_dev,
+                         link.st_mtime_ns, link.st_ctime_ns, link.st_size, link.st_ino, link.st_dev)
             cached = entries.get(key)
-            if cached is not None and cached[0] == signature:
+            same = cached is not None and cached[0] == signature
+            from .parse_cache import CHANGE_TIME_TRUSTED
+            if same and cached is not None and not CHANGE_TIME_TRUSTED:
+                try:
+                    text = _normalise(path.read_text(encoding="utf-8"))
+                    same = text == cached[1].text
+                except UnicodeError:
+                    same = False
+            if same and cached is not None:
                 self.hits += 1
                 note = cached[1]
             else:
@@ -64,7 +77,7 @@ class NoteCache:
                 note = load_note(path)
             notes.append(note)
             if now - max(info.st_mtime_ns, info.st_ctime_ns) >= self.racy_ns:
-                fresh[key] = (signature, note)
+                fresh[key] = cached if same and cached is not None else (signature, note)
         # Only the files of this load survive: a deleted note is dropped.
         with self._lock:
             self._entries = fresh
@@ -108,22 +121,23 @@ class VaultIndex:
     @classmethod
     @path_cache()
     def load(cls, root: Path) -> VaultIndex:
-        root = Path(root).resolve()
-        paths = collect_markdown(root, [])
-        cache = _NOTE_CACHE.get()
-        if cache is not None:
-            notes = cache.load_all(paths)
-        else:
-            from .parse_cache import current
+        with vault_read_lock(root):
+            root = Path(root).resolve()
+            paths = collect_markdown(root, [])
+            cache = _NOTE_CACHE.get()
+            if cache is not None:
+                notes = cache.load_all(paths)
+            else:
+                from .parse_cache import current
 
-            disk = current(root)
-            notes = disk.load_all(paths) if disk is not None else [load_note(path) for path in paths]
-        return cls(
-            root=root,
-            notes=notes,
-            by_path={_real(note.path): note for note in notes},
-            link_index=_build_index(notes),
-        )
+                disk = current(root)
+                notes = disk.load_all(paths) if disk is not None else [load_note(path) for path in paths]
+            return cls(
+                root=root,
+                notes=notes,
+                by_path={_real(note.path): note for note in notes},
+                link_index=_build_index(notes),
+            )
 
     def subset(self, keep: Callable[[Note], bool]) -> VaultIndex:
         """Return a confined index over the notes for which *keep* is true.

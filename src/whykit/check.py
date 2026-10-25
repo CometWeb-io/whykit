@@ -1,6 +1,8 @@
 """Policy-profile quality gates for local work, CI and releases."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import datetime as dt
 import json
@@ -29,6 +31,7 @@ def _git_clean(root: Path) -> bool:
     return result.returncode == 0 and not result.stdout.strip()
 
 
+@consistent_read
 @path_cache()
 def run_check(
     root: Path,

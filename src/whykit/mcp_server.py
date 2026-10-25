@@ -20,6 +20,7 @@ a loopback port (a non-loopback address requires a bearer token).
 # closures whose ``Annotated[..., Field(...)]`` metadata must be real objects.
 
 import argparse
+import contextvars
 import base64
 import copy
 import datetime as dt
@@ -589,6 +590,16 @@ def _validate_cursor(value: object) -> str | None:
 # Tool handlers (SDK-free)
 # ---------------------------------------------------------------------------
 
+_MCP_REQUEST: contextvars.ContextVar[tuple[object, object] | None] = contextvars.ContextVar("whykit_mcp_request", default=None)
+
+
+def _vault_request(handler):
+    @functools.wraps(handler)
+    def guarded(self, *args, **kwargs):
+        return self.scoped(handler, self, *args, **kwargs)
+    return guarded
+
+
 class VaultTools:
     """Read-only tool handlers bound to one vault root and sensitivity ceiling.
 
@@ -648,6 +659,7 @@ class VaultTools:
         if not is_vault_root(self.vault):
             raise ToolFailure("vault_unavailable", "the configured vault is no longer a WhyKit vault")
 
+    @_vault_request
     def query(
         self,
         text: str | None = None,
@@ -703,6 +715,7 @@ class VaultTools:
             "max_sensitivity": self.policy,
         }
 
+    @_vault_request
     def context(self, target: str, max_chars: int = 4000) -> dict:
         from whykit.context import build_context
 
@@ -723,6 +736,7 @@ class VaultTools:
         filtered["content_trust"] = "untrusted_data"
         return filtered
 
+    @_vault_request
     def impact(self, target: str) -> dict:
         from whykit.impact import analyze_impact
 
@@ -744,6 +758,7 @@ class VaultTools:
             # particular, do not reveal a hidden record's sensitivity label.
             return _missing_impact(target, kind)
 
+    @_vault_request
     def status(self, today: str | None = None, due_days: int | None = None) -> dict:
         from whykit.config import ConfigError, load_config
         from whykit.status import build_status, is_decision_record
@@ -833,6 +848,7 @@ class VaultTools:
             "findings": findings,
         }
 
+    @_vault_request
     def pack(
         self,
         targets: list[str] | None = None,
@@ -875,6 +891,7 @@ class VaultTools:
         assert isinstance(filtered, dict)
         return {**filtered, "max_sensitivity": self.policy}
 
+    @_vault_request
     def trace(
         self,
         decision: str | None = None,
@@ -915,6 +932,7 @@ class VaultTools:
         assert isinstance(filtered, dict)
         return filtered
 
+    @_vault_request
     def backlinks(self, target: str, limit: int = 100, cursor: str | None = None) -> dict:
         from whykit.backlinks import build_backlinks
 
@@ -950,6 +968,7 @@ class VaultTools:
 
     # -- resources and prompts (SDK-free) ------------------------------------
 
+    @_vault_request
     def read_record(self, target: str) -> dict | None:
         """Body of the ``whykit://record/{+target}`` resource, or ``None``.
 
@@ -959,6 +978,7 @@ class VaultTools:
         report = self.context(target, max_chars=RESOURCE_BODY_CHARS)
         return report if report.get("exists") else None
 
+    @_vault_request
     def decision_index(self, limit: int | None = MAX_RESOURCE_ROWS, *, index: Any = None) -> dict:
         """Body of the ``whykit://decisions`` resource: visible decisions only."""
         self._check_vault()
@@ -985,6 +1005,7 @@ class VaultTools:
             "truncated": len(shown) < len(rows),
         }
 
+    @_vault_request
     def resource_page(self, cursor: str | None = None) -> tuple[list[dict], str | None]:
         """One page of ``resources/list``: the decision index, then each visible decision.
 
@@ -1000,6 +1021,7 @@ class VaultTools:
         )
         return page, next_cursor
 
+    @_vault_request
     def resource_rows(self, *, index: Any = None) -> list[dict]:
         """Every row ``resources/list`` pages through, in order."""
         self._check_vault()
@@ -1022,6 +1044,7 @@ class VaultTools:
             })
         return rows
 
+    @_vault_request
     def complete(self, ref_type: str, ref_name: str, argument: str, value: object) -> dict:
         """Completion values for a prompt or resource-template argument.
 
@@ -1066,6 +1089,7 @@ class VaultTools:
         index = self.visible_index()
         return sorted(index.relative(note.path) for note in index.notes)
 
+    @_vault_request
     def summarize_decision_prompt(self, decision_id: str) -> str:
         """Text of the ``summarize_decision`` prompt for one visible decision."""
         decision_id = _validate_text(decision_id, "decision_id", max_chars=MAX_FILTER_CHARS) or ""
@@ -1093,6 +1117,7 @@ class VaultTools:
             "</whykit-data>"
         )
 
+    @_vault_request
     def evidence_gaps_prompt(self, today: str | None = None) -> str:
         """Text of the ``review_evidence_gaps`` prompt: live decisions with gaps."""
         trace = self.trace(today=today, gaps_only=True, limit=PROMPT_TRACE_DECISIONS)
@@ -1138,15 +1163,21 @@ class VaultTools:
             return ToolFailure("internal_error", f"{name} failed while reading the vault").payload(), True
 
     def scoped(self, handler: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        """Run one request with a fresh resolve cache and the shared note cache."""
-        from whykit.lint import path_cache
-        from whykit.vault_index import reuse_notes
+        """Keep one live request under the read lock and fresh path cache."""
+        from .io import vault_read_lock
+        from .lint import path_cache, _request_cache
+        from .vault_index import reuse_notes
 
-        # One resolve cache per request, never per process: the vault may change
-        # on disk between requests and the next one must see it.  Parsed notes
-        # are reused only after their stat signature is re-checked.
-        with path_cache(), reuse_notes(self.notes):
-            return handler(*args, **kwargs)
+        current = _MCP_REQUEST.get()
+        request = _request_cache()
+        nested = current is not None and current[0] is self and request is not None and current[1] is request
+        self._check_vault()
+        with vault_read_lock(self.vault), path_cache(fresh=not nested), reuse_notes(self.notes):
+            token = _MCP_REQUEST.set((self, _request_cache()))
+            try:
+                return handler(*args, **kwargs)
+            finally:
+                _MCP_REQUEST.reset(token)
 
 
 class VaultWatcher:
@@ -1206,6 +1237,9 @@ class VaultWatcher:
         return signature
 
     def _snapshot(self) -> tuple[dict[str, str], str]:
+        return self.tools.scoped(self._scoped_snapshot)
+
+    def _scoped_snapshot(self) -> tuple[dict[str, str], str]:
         from whykit.lint import evidence_register, path_cache
         from whykit.vault_index import reuse_notes
 

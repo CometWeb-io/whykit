@@ -1,6 +1,8 @@
 """Evidence lifecycle operations."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import datetime as dt
 import json
@@ -14,6 +16,7 @@ from .scaffold import _frontmatter_replace, _table_cell
 from .console import emit_machine
 
 
+@consistent_read
 def list_evidence(root: Path, *, state: str = "all") -> dict:
     active, retired, _ = evidence_register(root)
     items: list[dict] = []

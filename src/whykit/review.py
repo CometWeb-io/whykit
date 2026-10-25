@@ -1,6 +1,8 @@
 """Operational review queue and append-only review events."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import datetime as dt
 import json
@@ -89,6 +91,7 @@ def _resolve_note(root: Path, target: str):
     return by_path.get(path.resolve()), ambiguous
 
 
+@consistent_read
 @path_cache()
 def review_queue(root: Path, *, today: dt.date | None = None, due_days: int = 30, owner: str | None = None, overdue_only: bool = False) -> list[dict]:
     today = today or dt.date.today()

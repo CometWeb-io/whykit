@@ -422,11 +422,11 @@ def _resolve_link_from(vault: Path, value: str) -> Path:
     return path
 
 
-def _append_note_link(vault: Path, map_path: Path, note_path: Path, title: str, today: dt.date) -> None:
+def _append_note_link(vault: Path, map_path: Path, note_path: Path, title: str, today: dt.date) -> str:
     text = map_path.read_text(encoding="utf-8")
     target = note_path.relative_to(vault).with_suffix("").as_posix()
     if re.search(rf"\[\[{re.escape(target)}(?:\||\]\])", text):
-        return
+        return text
     bullet = f"- [[{target}|{title}]]"
     lines = text.splitlines()
     heading = "## Linked notes"
@@ -447,7 +447,7 @@ def _append_note_link(vault: Path, map_path: Path, note_path: Path, title: str, 
         lines.insert(insert_at, bullet)
     updated = "\n".join(lines) + ("\n" if text.endswith("\n") else "")
     updated = _frontmatter_replace(updated, "last_updated", today.isoformat())
-    atomic_write_text(map_path, updated)
+    return updated
 
 
 def _note_exists_message(vault: Path, path: Path) -> str:
@@ -500,7 +500,6 @@ def create_note(
         if map_path:
             # Fail before the note exists rather than half-way through.
             ensure_writable(map_path)
-        map_before = map_path.read_text(encoding="utf-8") if map_path else None
         body = f'''---
 title: {_yaml_string(title)}
 aliases: []
@@ -534,15 +533,10 @@ Separate verified facts from hypotheses, recommendations and open questions.
 
 -
 '''
-        try:
-            atomic_write_text(path, body)
-            if map_path:
-                _append_note_link(vault, map_path, path, title, today)
-        except Exception:
-            path.unlink(missing_ok=True)
-            if map_path and map_before is not None:
-                atomic_write_text(map_path, map_before)
-            raise
+        updates = {path: body}
+        if map_path:
+            updates[map_path] = _append_note_link(vault, map_path, path, title, today)
+        apply_transaction(vault, updates)
         return path
 
 

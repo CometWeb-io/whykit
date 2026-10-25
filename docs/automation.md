@@ -163,6 +163,7 @@ CLI actually prints.
 | Command | Schema |
 |---|---|
 | `init --json` | `init-result.schema.json` |
+| `recover --json` | `recovery-result.schema.json` |
 | `lint --json` | `lint-report.schema.json` |
 | `new decision\|evidence\|note --json` | `record-create.schema.json` |
 | `status --json` | `status-report.schema.json` |

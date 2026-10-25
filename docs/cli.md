@@ -16,7 +16,7 @@ From a source checkout, prefix commands with `uv run` (see
   `diff`, `snapshot`, `verify-snapshot`), **explore** (`query`, `context`,
   `pack`, `graph`, `backlinks`, `impact`), **integrate** (`install-hooks`,
   `explorer-index`, `serve`, `completion`) and **maintain** (`policy`, `rules`,
-  `doctor`). The table below follows the same order.
+  `doctor`, `recover`). The table below follows the same order.
 - `--root DIR` selects the vault. Every command that reads a vault accepts it
   after the command name, before the command name (`whykit --root DIR lint`),
   and, for `new`, `review` and `evidence`, before or after the action. `adopt`
@@ -76,6 +76,7 @@ From a source checkout, prefix commands with `uv run` (see
 | `policy` | Show the effective repository policy | `--json`, `--root` | [Configuration](configuration.md) |
 | `rules [code]` | List the lint rules, or explain one; with a vault, its custom rules and overrides too | `--json`, `--markdown`, `--root` | [Rules](rules.md), [Team rules](configuration.md#team-rules) |
 | `doctor` | Check prerequisites, integrity and review hygiene | `--today`, `--json`, `--root` | [Troubleshooting](troubleshooting.md) |
+| `recover` | Finish interrupted READY transactions and collect completed or old pre-READY journals under the mutation lock | `--root`, `--json` | [Recovery](security-model.md#transaction-reads-and-recovery) |
 
 ## `whykit-mcp`
 

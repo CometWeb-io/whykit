@@ -13,6 +13,8 @@ than the vault's ``[evidence_access_age_days]`` policy for its source type.
 """
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import datetime as dt
 import json
@@ -80,6 +82,7 @@ def _evidence_state(
     }
 
 
+@consistent_read
 @path_cache()
 def build_trace(
     root: Path,
