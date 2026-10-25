@@ -79,6 +79,7 @@ test("search covers note text, which only the embedded bodies contain", async ({
   const phrase = probe!.replace(/[*_`>]/g, "").trim().split(/\s+/).slice(2, 6).join(" ");
   await openFile(page);
   await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("combobox", { name: "Search vault" })).toBeFocused();
   await page.keyboard.type(phrase);
   await expect(page.getByRole("option").first()).toBeVisible();
   await expect(page.locator(".palette-status")).not.toContainText("Still loading");

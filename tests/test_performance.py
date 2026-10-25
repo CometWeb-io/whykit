@@ -8,6 +8,7 @@ quadratic behaviour, which costs tens of seconds even at 1,000 notes. Set
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import hashlib
 import io
 import os
@@ -16,6 +17,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -105,6 +107,24 @@ def _tree_digest(root: Path) -> str:
 
 
 class SyntheticVaultTest(unittest.TestCase):
+    def test_command_digests_do_not_depend_on_the_host_date(self) -> None:
+        class HostDate(dt.date):
+            day = 4
+
+            @classmethod
+            def today(cls):
+                return cls(2026, 10, cls.day)
+
+        command = tuple(item for item in DIGEST_COMMANDS if item[0] == "pack")
+        digests = []
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = generate(Path(tmp) / "vault", 400)
+            with mock.patch("datetime.date", HostDate):
+                for day in (4, 25):
+                    HostDate.day = day
+                    digests.append(output_digests(vault, command))
+        self.assertEqual(digests[0], digests[1])
+
     def test_generator_is_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
             generate(Path(a), 120)

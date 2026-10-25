@@ -14,6 +14,7 @@ for (const hash of [...PAGES.map(p => p.hash), ...EXTRA]) {
 test("no serious or critical axe violations with the search dialog open", async ({ page }) => {
   await open(page);
   await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("combobox", { name: "Search vault" })).toBeFocused();
   await page.keyboard.type("decision");
   await expect(page.getByRole("option").first()).toBeVisible();
   expect(await seriousViolations(page)).toEqual([]);

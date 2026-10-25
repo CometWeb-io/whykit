@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import datetime as dt
 import hashlib
 import io
 import json
 import random
 import re
 from pathlib import Path
+from unittest import mock
 
 WORKSTREAMS = (
     "01-strategy", "02-discoverability", "03-website", "04-automation",
@@ -301,11 +303,18 @@ DIGEST_COMMANDS: tuple[tuple[str, list[str]], ...] = (
 _GENERATED_AT = re.compile(r'"generatedAt": "[^"]*"')
 
 
+class _GoldenDate(dt.date):
+    @classmethod
+    def today(cls):
+        # context/pack lint implicitly; retain the date of the recorded goldens.
+        return cls(2026, 10, 4)
+
+
 def output_digests(root: Path, commands: tuple[tuple[str, list[str]], ...] = DIGEST_COMMANDS) -> dict[str, str]:
     """SHA-256 of each pinned command's exit code and stdout, run in-process.
 
-    The vault's absolute path and the Explorer's wall-clock stamp are the only
-    values that legitimately vary between runs; both are normalised away.
+    Pin implicit lint dates as well as explicit --today arguments. Normalise
+    the vault's absolute path and the Explorer's wall-clock stamp away.
     """
     from whykit.cli import main as whykit_main
 
@@ -313,7 +322,7 @@ def output_digests(root: Path, commands: tuple[tuple[str, list[str]], ...] = DIG
     digests: dict[str, str] = {}
     for name, argv in commands:
         out = io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), mock.patch("datetime.date", _GoldenDate):
             try:
                 code = whykit_main([argv[0], "--root", str(root), *argv[1:]])
             except SystemExit as exc:  # argparse paths

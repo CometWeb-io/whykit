@@ -7,6 +7,16 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+- Link and evidence extraction share position-preserving Markdown code/comment
+  masking with the Explorer's code recognition. Fences inside comments no
+  longer hide later prose, and inline backticks cannot span blank lines,
+  fenced blocks, ATX headings or thematic breaks. Headings retain their own
+  inline code. Variable fence widths and CR/LF/CRLF endings are supported;
+  this remains a Markdown subset rather than a full CommonMark parser.
+- Golden command-output tests pin implicit lint dates to their recorded
+  2026-10-04 baseline, so evidence aging no longer changes the `pack` digest
+  with the host clock. Runtime freshness checks and recorded hashes are unchanged.
+
 The draft for **0.3.0**, the first public package release. It covers every
 change since the internal 0.2.0 milestone, including the `0.3.0.dev0` source
 preview that source checkouts report until the release. Upgrading from a

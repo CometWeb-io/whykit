@@ -1,3 +1,4 @@
+import { fenceStart, fenceEnd, findCodeSpan, maskMarkdownCode, maskMarkdownComments, thematicBreak } from "./code.ts";
 export type MdInline =
   | { t: "text"; v: string }
   | { t: "strong"; v: MdInline[] }
@@ -26,7 +27,7 @@ export function parseInline(input: string): MdInline[] {
   while (rest.length) {
     const wiki = rest.match(WIKI);
     const link = rest.match(LINK);
-    const code = rest.match(/`([^`]+)`/);
+    const code = findCodeSpan(rest);
     const strong = rest.match(/\*\*([^*]+)\*\*/);
     const em = rest.match(/(?<!\*)\*([^*]+)\*(?!\*)/);
 
@@ -46,8 +47,8 @@ export function parseInline(input: string): MdInline[] {
         node: { t: "link", href: link[2]!, label: link[1]! },
       });
     }
-    if (code && code.index != null) {
-      hits.push({ i: code.index, n: code[0].length, node: { t: "code", v: code[1]! } });
+    if (code) {
+      hits.push({ i: code.index, n: code.length, node: { t: "code", v: code.value } });
     }
     if (strong && strong.index != null) {
       hits.push({
@@ -110,7 +111,7 @@ function splitRow(line: string): string[] {
 
 
 export function parseMarkdown(src: string): MdBlock[] {
-  const lines = src.replace(/\r\n/g, "\n").split("\n");
+  const lines = maskMarkdownComments(src).replace(/\r\n?|\n/g, "\n").split("\n");
   const blocks: MdBlock[] = [];
   let i = 0;
 
@@ -123,21 +124,22 @@ export function parseMarkdown(src: string): MdBlock[] {
       continue;
     }
 
-    if (trimmed === "---") {
+    if (thematicBreak(line)) {
       blocks.push({ t: "hr" });
       i += 1;
       continue;
     }
 
-    if (trimmed.startsWith("```")) {
-      const lang = trimmed.slice(3).trim();
+    const fence = fenceStart(line);
+    if (fence) {
+      const lang = fence.info.split(/\s+/, 1)[0] || "";
       const buf: string[] = [];
-      i += 1;
-      while (i < lines.length && !(lines[i] ?? "").trim().startsWith("```")) {
+      i++;
+      while (i < lines.length && !fenceEnd(lines[i] ?? "", fence)) {
         buf.push(lines[i] ?? "");
-        i += 1;
+        i++;
       }
-      i += 1;
+      if (i < lines.length) i++;
       blocks.push({ t: "code", lang, code: buf.join("\n") });
       continue;
     }
@@ -220,11 +222,11 @@ export function parseMarkdown(src: string): MdBlock[] {
       const t = l.trim();
       if (
         !t ||
-        t === "---" ||
+        thematicBreak(l) ||
         t.startsWith("#") ||
         t.startsWith(">") ||
         t.startsWith("|") ||
-        t.startsWith("```") ||
+        fenceStart(l) !== null ||
         /^[-*]\s+/.test(t) ||
         /^\d+\.\s+/.test(t)
       ) {
@@ -249,7 +251,7 @@ export function parseMarkdown(src: string): MdBlock[] {
 }
 
 export function extractWikilinks(src: string): string[] {
-  const masked = src.replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`/g, "");
+  const masked = maskMarkdownCode(src);
   const out: string[] = [];
   const re = /\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]*)?\]\]/g;
   let m: RegExpExecArray | null;
@@ -261,15 +263,24 @@ export function extractWikilinks(src: string): string[] {
 }
 
 export function extractHeadings(src: string): { id: string; text: string; level: number }[] {
-  return src
-    .split("\n")
-    .map((line) => line.match(/^(#{2,3})\s+(.*)$/))
-    .filter((m): m is RegExpMatchArray => Boolean(m))
-    .map((m) => ({
-      level: m[1]!.length,
-      text: m[2]!.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1"),
-      id: slugify(m[2]!),
-    }));
+  const original = src.replace(/\r\n?|\n/g, "\n").split("\n");
+  const masked = maskMarkdownCode(src).replace(/\r\n?|\n/g, "\n").split("\n");
+  const headings: { id: string; text: string; level: number }[] = [];
+  for (let i = 0; i < original.length; i++) {
+    // Match syntax against masked text: headings inside example fences are
+    // not navigable document sections. Read display text from original bytes
+    // so legitimate inline code within a heading is not erased.
+    const match = masked[i]?.match(/^(#{2,3})\s+(.*)$/);
+    const source = original[i]?.match(/^(#{2,3})\s+(.*)$/);
+    if (!match || !source) continue;
+    const heading = source[2]!;
+    headings.push({
+      level: source[1]!.length,
+      text: heading.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1"),
+      id: slugify(heading),
+    });
+  }
+  return headings;
 }
 
 export function slugify(text: string) {
