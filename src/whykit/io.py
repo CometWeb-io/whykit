@@ -319,6 +319,7 @@ def vault_read_lock(root: Path, *, timeout: float = 15.0) -> Iterator[None]:
     except FileNotFoundError:
         handle = None
     token = None
+    acquired = False
     ownership = _HeldLock("read", _lock_owner())
     try:
         if handle is not None:
@@ -326,6 +327,7 @@ def vault_read_lock(root: Path, *, timeout: float = 15.0) -> Iterator[None]:
             while True:
                 try:
                     _acquire_shared(handle)
+                    acquired = True
                     break
                 except OSError as exc:
                     if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
@@ -345,7 +347,8 @@ def vault_read_lock(root: Path, *, timeout: float = 15.0) -> Iterator[None]:
             _HELD_LOCKS.reset(token)
         if handle is not None:
             try:
-                _release_exclusive(handle)
+                if acquired:
+                    _release_exclusive(handle)
             finally:
                 handle.close()
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import concurrent.futures
 import asyncio
 import contextvars
+import errno
 import tempfile
 import os
 import subprocess
@@ -151,3 +152,23 @@ class ReadIsolationTests(unittest.TestCase):
             io.stage_transaction(root, {root / "notes/a.md": "# A\n"})
             with self.assertRaises(OSError):
                 context.run(VaultIndex.load, root)
+
+    def test_failed_shared_acquisition_does_not_unlock_or_mask_busy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".whykit").mkdir()
+            (root / ".whykit/mutation.lock").write_bytes(b"writer")
+            handles = []
+            def denied(handle):
+                handles.append(handle)
+                raise PermissionError(errno.EACCES, "writer owns range")
+            with patch.object(io, "_acquire_shared", side_effect=denied), patch.object(
+                io, "_release_exclusive", side_effect=PermissionError(errno.EACCES, "not owned")
+            ) as release:
+                with self.assertRaises(OSError) as caught:
+                    with io.vault_read_lock(root, timeout=0):
+                        self.fail("busy lock yielded a reader")
+                self.assertEqual(caught.exception.errno, errno.EBUSY)
+                release.assert_not_called()
+            self.assertTrue(handles)
+            self.assertTrue(all(handle.closed for handle in handles))
