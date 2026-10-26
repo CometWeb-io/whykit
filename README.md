@@ -12,7 +12,7 @@ what is known, what was decided, and what still needs checking.
 
 **Python 3.11+ · No runtime dependencies · Apache-2.0**
 
-**Status:** `0.3.0` release preparation. No GitHub Release and no public PyPI release yet. Install from a source checkout until publication is verified. This checkout is not a tagged release.
+**Status:** `0.3.1` release preparation. No GitHub Release and no public PyPI release yet. Install from a source checkout until publication is verified. This checkout is not a tagged release.
 
 [![CI](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml/badge.svg)](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml)
 
