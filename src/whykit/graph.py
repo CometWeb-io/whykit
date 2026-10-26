@@ -8,7 +8,6 @@ from __future__ import annotations
 from .io import consistent_read
 
 import argparse
-import json
 import re
 from collections.abc import Iterator
 from pathlib import Path
@@ -24,7 +23,7 @@ from .lint import (
     rel,
 )
 from .vault_index import VaultIndex
-from .console import emit_machine
+from .console import emit_json, emit_machine
 
 
 def document_node(note, node_id: str) -> dict:
@@ -283,20 +282,14 @@ def main(argv: list[str] | None = None) -> int:
     if root is None or not is_vault_root(root):
         return vault_not_found(args.root, json_mode=args.format == "json")
     graph = build_graph(root, canonical_only=args.canonical_only)
+    payload = as_obsidian(graph) if args.format == "obsidian" else graph
+    rendered = None
     if args.format == "dot":
         rendered = as_dot(graph)
-        text_mode = True
     elif args.format == "mermaid":
         rendered = as_mermaid(graph)
-        text_mode = True
-    elif args.format == "obsidian":
-        rendered = json.dumps(as_obsidian(graph), ensure_ascii=False, indent=2)
-        text_mode = True
-    else:
-        rendered = json.dumps(graph, ensure_ascii=False, indent=2)
-        text_mode = True
     if args.output:
-        from .io import atomic_write_text, safe_export_target
+        from .io import atomic_write_json, atomic_write_text, safe_export_target
         target = Path(args.output).expanduser()
         try:
             if target.is_absolute():
@@ -313,8 +306,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"--output must be a safe path inside the vault: {exc}",
                 json_mode=args.format == "json",
             )
-        atomic_write_text(target, rendered + ("\n" if text_mode else ""))
+        if rendered is None:
+            atomic_write_json(target, payload)
+        else:
+            atomic_write_text(target, rendered + "\n")
         print(f"wrote {rel(root, target)}")
+    elif rendered is None:
+        emit_json(payload)
     else:
         emit_machine(rendered)
     return 0
