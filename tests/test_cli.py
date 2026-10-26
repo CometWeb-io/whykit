@@ -422,12 +422,18 @@ class ContractTests(unittest.TestCase):
             "private-preview or access-required notice",
             "Python 3.11–3.14",
             "exact tag",
-            "independent reviewer",
+            "required maintainer approval",
+            "allows the maintainer to approve their own release run",
+            "administrator bypass remains disabled",
             "does not reserve the project name",
             "real, private vault",
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, normalized_checklist)
+
+        release_guide = (ROOT / "docs/releasing.md").read_text(encoding="utf-8")
+        self.assertIn("Choose a new version and a new tag", release_guide)
+        self.assertNotIn("Delete the unpublished tag", release_guide)
 
         # Release guidance is public and evergreen; transient private-repo
         # review findings belong in the maintainer's private launch record.
@@ -478,7 +484,7 @@ class ContractTests(unittest.TestCase):
                 if "uses: astral-sh/setup-uv@" in line:
                     config = "\n".join(lines[index + 1 : index + 6])
                     with self.subTest(workflow=workflow_path.name, action="setup-uv"):
-                        self.assertIn('version: "0.12.17"', config)
+                        self.assertIn('version: "0.13.5"', config)
 
     def test_ci_cancels_superseded_refs_and_bounds_each_runner(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
@@ -520,6 +526,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn("environment: pypi", release)
         self.assertIn("id-token: write", release)
         self.assertIn("pypa/gh-action-pypi-publish@", release)
+        self.assertIn("pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3", release)
         # The build runs without the OIDC token, in the reusable job pull
         # requests also run; the publish job holds the token and only
         # downloads the archives that job checked, from this same run.

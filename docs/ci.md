@@ -240,6 +240,10 @@ against the PR base. New workflows should use `profile`, so the policy lives in
 The CLI has no runtime dependencies, so any image with Python 3.11+ works.
 Install WhyKit from a pinned checkout, then run the named gate:
 
+Use pip 26.2.2 or newer for installation. The
+[PSF certificate incident guidance](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576)
+includes a SHA-256-pinned bootstrap for older installers.
+
 ```bash
 python -m pip install "git+https://github.com/CometWeb-io/whykit@<reviewed-40-character-commit-sha>"
 whykit check --root . --profile ci --base origin/main --head HEAD

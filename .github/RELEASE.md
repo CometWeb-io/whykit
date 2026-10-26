@@ -70,11 +70,15 @@ Before tagging, confirm all of the following:
 - The tagged commit is reachable from `main` and its working tree passes the
   release profile.
 - GitHub reports successful required checks for that exact tag.
-- The GitHub `pypi` environment is restricted to release tags and has an
-  independent reviewer configured. Do not push a release tag while that
+- The GitHub `pypi` environment is restricted to release tags and has a
+  required maintainer approval configured. Do not push a release tag while that
   environment is absent: a workflow referencing a missing environment can
   create it without protection rules. See GitHub's
   [environment guidance](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
+
+The current single-maintainer policy allows the maintainer to approve their
+own release run. This is explicit owner approval, not independent review;
+administrator bypass remains disabled.
 
 ## Configure PyPI publishing
 

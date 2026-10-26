@@ -13,8 +13,10 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -72,6 +74,45 @@ def _action_step_script(name: str) -> str:
 
 
 class PinnedAndLeastPrivilegeTests(unittest.TestCase):
+    def test_locked_certifi_excludes_the_compromised_ca(self) -> None:
+        lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+        certifi = next(package for package in lock["package"] if package["name"] == "certifi")
+        self.assertGreaterEqual(tuple(map(int, certifi["version"].split("."))), (2026, 10, 19))
+
+    @unittest.skipIf(os.name == "nt", "the POSIX shell stub runs on Unix; CI exercises the real Action on Windows")
+    def test_failed_pip_bootstrap_stops_before_installing_the_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fake = root / "python3"
+            fake.write_text(f"#!{sys.executable}\n" + textwrap.dedent('''\
+                import json, os, pathlib, sys
+                if sys.argv[1:3] == ['-m', 'venv']:
+                    target = pathlib.Path(sys.argv[3]) / 'bin' / 'python'
+                    target.parent.mkdir(parents=True)
+                    target.write_bytes(pathlib.Path(__file__).read_bytes())
+                    target.chmod(0o755)
+                elif sys.argv[1:4] == ['-m', 'pip', 'install']:
+                    with open(os.environ['CALLS'], 'a', encoding='utf-8') as out:
+                        out.write(json.dumps(sys.argv[1:]) + '\\n')
+                    if any(arg.startswith('pip @ https://') for arg in sys.argv):
+                        sys.exit(37)
+                elif sys.argv[1] == '-c' and 'sysconfig.get_path' in sys.argv[2]:
+                    print(pathlib.Path(__file__).parent)
+                '''), encoding="utf-8")
+            fake.chmod(0o755)
+            calls = root / "calls.jsonl"
+            result = subprocess.run(
+                ["bash", "-c", _action_step_script("Install the exact WhyKit action revision")],
+                env={**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
+                     "RUNNER_TEMP": str(root), "WHYKIT_ACTION_PATH": str(ROOT), "CALLS": str(calls)},
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 37, result.stdout + result.stderr)
+            argv = [json.loads(line) for line in calls.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(argv), 1)
+            self.assertIn('--isolated', argv[0])
+            self.assertIn('pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70', argv[0])
+
     def test_every_remote_action_is_pinned_to_a_commit_with_a_version_comment(self) -> None:
         for path in [*WORKFLOWS, ACTION]:
             for ref in _uses(path):
