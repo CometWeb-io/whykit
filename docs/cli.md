@@ -46,7 +46,7 @@ From a source checkout, prefix commands with `uv run` (see
 | Command | Does | Options | More |
 |---|---|---|---|
 | `init <dir>` | Create a vault from the bundled template | `--force`, `--full`, `--minimal`, `--json` | [How-to](guide.md#create-a-vault) |
-| `adopt <source>` | Inventory existing Markdown; stage it with `--write` | `--into` (or `--root`), `--profile`, `--owner`, `--write`, `--json` | [How-to](guide.md#already-have-a-pile-of-markdown) |
+| `adopt <source>` | Inventory existing Markdown; stage it with `--write`, or compare a normalized tree read-only with `--compare DIR` | `--into` (or `--root`), `--profile`, `--owner`, `--write`, `--compare`, `--json` | [How-to](guide.md#already-have-a-pile-of-markdown) |
 | `new decision <title>` | Create a decision record and its decision-log row; with `--from FILE`, promote an existing ADR into one (a dry run that prints the mapping until `--write`) | `--from`, `--write`, `--owner`, `--status`, `--source`, `--supersedes`, `--review-by`, `--sensitivity`, `--json`, `--root` | [How-to](guide.md#promote-an-adopted-adr) |
 | `new evidence` | Append a source to the evidence register | `--source`, `--type`, `--location`, `--claims`, `--date`, `--accessed`, `--sensitivity`, `--json`, `--root` | [Classification](data-classification.md#evidence-rows) |
 | `new note <title>` | Create a draft note in a workstream | `--workstream`, `--type`, `--owner`, `--sensitivity`, `--link-from`, `--json`, `--root` | [How-to](guide.md#create-records) |

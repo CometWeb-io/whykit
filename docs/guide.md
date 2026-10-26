@@ -82,6 +82,26 @@ fails, nothing from that run is left behind. The ingestion record lands in
 `notes/`; link it from a map or lint reports `note.orphan`. A person decides
 what becomes canonical.
 
+### Check a normalized copy before adopting it
+
+Keep the original snapshot, then compare files at the same relative paths:
+
+```bash
+whykit adopt ../original-docs --into ../my-ledger --compare ../normalized-docs --json
+```
+
+This is read-only and cannot be combined with `--write`. Exit 1 means a
+preservation check failed; exit 2 means the comparison could not run.
+The optional `preservation` report lists byte hashes and changes, lost wikilink
+occurrences and IDs, changed decision/source declarations, weakened note or
+evidence-row sensitivity, and rewritten review rows. Unreadable or escaping
+files fail the check. A staged baseline under `.import-staging/` can be used
+for comparison, while adoption writes still reject overlapping directories.
+
+A passing comparison covers those checks. Review every `unchanged: false`
+file: prose meaning, code examples, attachments and Git commit history are
+outside the comparison. It does not approve a decision or certify source truth.
+
 ## Promote an adopted ADR
 
 Once a person has decided that a staged ADR should become a decision record,
