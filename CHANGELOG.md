@@ -7,6 +7,14 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+- Stream graph JSON and Obsidian exports without a second complete JSON string;
+  retain byte format, UTF-8 output, CRLF, permissions and atomic replacement.
+
+- Add read-only `adopt --compare DIR` reports for matching-path migration
+  snapshots: lost references/IDs/declarations, weakened sensitivity and
+  rewritten review rows fail the check. Preserve ordinary adoption semantics;
+  comparison cannot write and does not certify prose or Git history.
+
 - Bound MCP HTTP input to 1 MiB and 30 seconds, eight active authorized
   requests, and a shared burst of 60 requests refilling at two per second.
   Authentication/Host checks precede the application budgets. Validate frame

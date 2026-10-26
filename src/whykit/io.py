@@ -19,6 +19,7 @@ import time
 from contextlib import contextmanager
 from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import TextIO
 
 
 def _sync_directory(path: Path) -> None:
@@ -70,17 +71,11 @@ def match_line_endings(path: Path, text: str) -> str:
     return text.replace("\r\n", "\n").replace("\n", "\r\n")
 
 
-def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
-    """Replace *path* atomically after flushing the complete new contents.
-
-    The temporary file is created beside the target so ``os.replace`` stays on
-    the same filesystem. Existing permission bits are preserved. The helper is
-    intentionally dependency-free and leaves the original file untouched if
-    writing or fsyncing the replacement fails.
-    """
+@contextmanager
+def _atomic_text_writer(path: Path, *, encoding: str = "utf-8", newline: str = "") -> Iterator[TextIO]:
+    """Flush a complete replacement before the atomic rename, including on cancellation."""
     path = Path(path)
     ensure_writable(path)
-    text = match_line_endings(path, text)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.whykit-tmp-{secrets.token_hex(6)}")
     previous_mode = None
@@ -93,8 +88,8 @@ def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None
         # an owner) arrives with surrogates for its UTF-8 bytes; write those
         # bytes back instead of refusing the record.
         errors = "surrogateescape" if codecs.lookup(encoding).name == "utf-8" else "strict"
-        with tmp.open("x", encoding=encoding, errors=errors, newline="") as handle:
-            handle.write(text)
+        with tmp.open("x", encoding=encoding, errors=errors, newline=newline) as handle:
+            yield handle
             handle.flush()
             os.fsync(handle.fileno())
     except BaseException:
@@ -113,6 +108,20 @@ def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None
             tmp.unlink()
         except FileNotFoundError:
             pass
+
+
+def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
+    """Atomically replace text, preserving permissions and existing line endings."""
+    with _atomic_text_writer(path, encoding=encoding) as handle:
+        handle.write(match_line_endings(path, text))
+
+
+def atomic_write_json(path: Path, value: object) -> None:
+    """Stream pretty JSON through the same durable replacement as text writes."""
+    newline = match_line_endings(path, "\n")
+    with _atomic_text_writer(path, newline=newline) as handle:
+        json.dump(value, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
 
 
 def atomic_write_bytes(path: Path, data: bytes) -> None:

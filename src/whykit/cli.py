@@ -603,6 +603,8 @@ def cmd_adopt(args: argparse.Namespace) -> int:
         argv += ["--owner", args.owner]
     if args.profile:
         argv += ["--profile", args.profile]
+    if args.compare is not None:
+        argv += ["--compare", args.compare]
     if args.write:
         argv.append("--write")
     if args.json:
@@ -1449,6 +1451,7 @@ def build_parser() -> argparse.ArgumentParser:
     adopt.add_argument("--profile", choices=("generic", "adr-only", "obsidian-loose"), default="generic", help="how to interpret the source (default: %(default)s)")
     adopt.add_argument("--write", action="store_true", help="write the staged files (default: dry run)")
     adopt.add_argument("--json", action="store_true", help=JSON_HELP)
+    adopt.add_argument("--compare", metavar="DIR", help="read-only preservation check at matching relative paths; cannot combine with --write")
     adopt.set_defaults(func=cmd_adopt)
 
     history = sub.add_parser("history", help="verify that accepted decisions were not rewritten")
