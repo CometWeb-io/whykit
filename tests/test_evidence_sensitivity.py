@@ -371,13 +371,18 @@ class EvidenceRegisterAliasTests(unittest.TestCase):
         self.register.write_text("\n".join("| " + " | ".join(split_table_row(line)[:7]) + " |"
                                            if line.startswith("|") and len(split_table_row(line)) == 8 else line
                                            for line in lines) + "\n", encoding="utf-8")
+        checkout = Path(self.tmp.name) / "checkout"
+        explorer = checkout / "apps" / "explorer"
+        explorer.mkdir(parents=True)
+        (explorer / "package.json").write_text("{}", encoding="utf-8")
+        (explorer / "node_modules").mkdir()
         for name in self.aliases:
             with self.subTest(name=name), self.alias(name) as target:
                 payload = build_explorer_index(self.root)
                 self.assertEqual([row["id"] for row in payload["evidence"]], ["E-002"])
                 self.assertTrue(VaultTools(self.root, max_sensitivity="public").context(target)["exists"])
                 self.assertEqual(_non_public_docs(self.root), [])
-                with patch("whykit.cli.shutil.which", return_value="npm"), patch("whykit.cli.subprocess.run") as run:
+                with patch("whykit.cli.SOURCE_ROOT", checkout), patch("whykit.cli.shutil.which", return_value="npm"), patch("whykit.cli.subprocess.run") as run:
                     run.return_value.returncode = 0
                     self.assertEqual(main(["serve", str(self.root), "--host", "0.0.0.0"]), 0)
                     run.assert_called_once()
