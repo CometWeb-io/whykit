@@ -7,6 +7,11 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+- Require uv 0.13.4 or newer, pin CI to uv 0.13.5 and update certifi after the
+  CA certificate incident. Bootstrap the Action's pip from a SHA-256-pinned
+  fixed wheel before package resolution; failed bootstrap stops installation.
+  Use the patched PyPI publish Action with fixed certifi and Sigstore.
+
 - Add an executable ADR-to-review-to-public-export walkthrough, including
   retained source provenance, explicit approval and restricted-data checks.
 

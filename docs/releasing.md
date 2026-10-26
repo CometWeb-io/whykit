@@ -40,6 +40,13 @@ publishing. No API token exists anywhere.
 
 ## One-time setup
 
+Use uv 0.13.4 or newer for local release tooling; the project refuses older
+versions. CI pins uv 0.13.5, the lockfile carries a fixed certifi bundle, and
+the composite Action bootstraps pip 26.2.2 from a SHA-256-pinned wheel before
+its first package-index request. The PyPI publish Action is pinned to v1.14.3,
+which fixes its certifi and Sigstore runtime. These floors follow the
+[PSF certificate incident guidance](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576).
+
 1. **Create the `pypi` environment** in the repository settings before any tag
    exists. Restrict deployments to tags matching `v*` and add a required
    reviewer. A workflow that references a missing environment creates it
@@ -137,8 +144,9 @@ publishing. No API token exists anywhere.
 ## If something goes wrong
 
 - **A gate fails before publishing.** Fix it on `main` through a pull request.
-  Delete the unpublished tag only if no upload happened, then tag the fixed
-  commit with the same version.
+  Keep the failed tag as evidence; release tags cannot be deleted or moved.
+  Choose a new version and a new tag for the fixed commit, even when no upload
+  happened. Rerun the release checks and compare the new artifact digests.
 - **A broken version reached PyPI.** Yank it on PyPI with a reason, publish a
   fixed patch version, and record both in the changelog. Never reuse a
   version number.
