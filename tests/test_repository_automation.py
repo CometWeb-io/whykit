@@ -369,8 +369,9 @@ class DecisionDiffCommentTests(unittest.TestCase):
         self.assertLess(text.index(self.STEP), text.index("Repository policy gate"))
         self.assertLess(text.index(self.STEP), text.index("Lint the vault (legacy mode)"))
 
-    def test_ci_grants_pull_request_write_to_one_same_repository_job(self) -> None:
-        text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    def test_only_comment_workflow_grants_pull_request_write_to_one_same_repository_job(self) -> None:
+        text = (ROOT / ".github" / "workflows" / "decision-diff.yml").read_text(encoding="utf-8")
+        self.assertEqual([line.strip() for line in _block(text, "on") if line.strip()], ["pull_request:"])
         jobs = _children(_block(text, "jobs"), 2)
         writers = [name for name, body in jobs.items() if any("pull-requests: write" in line for line in body)]
         self.assertEqual(writers, ["decision-diff"])
@@ -384,7 +385,7 @@ class DecisionDiffCommentTests(unittest.TestCase):
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", job)
         self.assertIn('comment: "true"', job)
         for path in WORKFLOWS:
-            if path.name != "ci.yml":
+            if path.name != "decision-diff.yml":
                 with self.subTest(file=path.name):
                     self.assertNotIn("pull-requests: write", path.read_text(encoding="utf-8"))
 
