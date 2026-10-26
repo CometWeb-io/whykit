@@ -196,9 +196,10 @@ class TransactionRecoveryTests(unittest.TestCase):
                 root = Path(tmp).resolve()
                 with io.vault_mutation_lock(root):
                     lock = root / ".whykit/mutation.lock"
-                    before = lock.stat()
                     # Windows denies reading the byte range held by our writer.
                     before_bytes = lock.read_bytes() if os.name != "nt" else None
+                    # Capture metadata after our own read can update access time.
+                    before = lock.stat()
                     with self.assertRaisesRegex(ValueError, "cannot replace its own state"):
                         io.apply_transaction(root, {root / destination: "replacement\n"})
                     self.assertEqual(lock.stat(), before)
@@ -230,9 +231,10 @@ class TransactionRecoveryTests(unittest.TestCase):
                     manifest[-1]["target"] = destination
                     (tx / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
                     lock = root / ".whykit/mutation.lock"
-                    before = lock.stat()
                     # Windows denies reading the byte range held by our writer.
                     before_bytes = lock.read_bytes() if os.name != "nt" else None
+                    # Capture metadata after our own read can update access time.
+                    before = lock.stat()
                     with self.assertRaisesRegex(RuntimeError, "cannot replace its own state"):
                         io.recover_pending_transactions(root)
                     self.assertFalse((root / "first.md").exists())

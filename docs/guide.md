@@ -105,6 +105,9 @@ outside the comparison. It does not approve a decision or certify source truth.
 
 ## Promote an adopted ADR
 
+For an executable example through approval, changed evidence and public export,
+follow [Import, review and export](tutorials/review-and-export.md).
+
 Once a person has decided that a staged ADR should become a decision record,
 `new decision --from` does the retyping. It is a dry run that prints the
 mapping until you pass `--write`:

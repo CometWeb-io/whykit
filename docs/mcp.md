@@ -79,6 +79,28 @@ Invalid row labels and duplicate IDs are withheld. See
 [data classification](data-classification.md) for replacement inheritance and
 public export behavior.
 
+### Codex configuration
+
+Codex uses a `[mcp_servers.<name>]` table in `~/.codex/config.toml`, rather than the
+`mcpServers` JSON shape above. After installing the extra in your checkout,
+configure the equivalent stdio command with absolute paths:
+
+```toml
+[mcp_servers.whykit]
+command = "uv"
+args = ["run", "--locked", "--project", "/absolute/path/to/whykit", "--extra", "mcp", "whykit-mcp", "--root", "/absolute/path/to/vault", "--max-sensitivity", "public"]
+required = true
+```
+
+This example exposes public records only. Choose the vault and ceiling that
+the host is authorized to read. `required = true` makes a failed server startup
+visible instead of continuing without the configured server. Native file tools
+in the same host retain their own filesystem permissions; the MCP ceiling
+controls responses from this server.
+
+See the [official Codex MCP configuration guide](https://learn.chatgpt.com/docs/extend/mcp)
+for configuration locations, CLI setup and tool controls.
+
 ## Protocol versions
 
 The server speaks both MCP protocol eras, and the client's opening picks one
