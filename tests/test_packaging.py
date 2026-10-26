@@ -48,8 +48,10 @@ def metadata(
     classifiers: tuple[str, ...] = ("Programming Language :: Python :: 3",),
     requires: tuple[str, ...] = ("mcp<3,>=2; extra == 'mcp'",),
     license_expression: str | None = "Apache-2.0",
-    body: str = f"# WhyKit\n\nSee the [guide]({README_LINK}) and [start](#start-here).\n",
+    body: str | None = None,
 ) -> str:
+    if body is None:
+        body = hatch_build.pin_readme_links(f"# WhyKit\n\nSee the [guide]({README_LINK}) and [start](#start-here).\n", version)
     lines = ["Metadata-Version: 2.4", "Name: whykit", f"Version: {version}"]
     if license_expression:
         lines.append(f"License-Expression: {license_expression}")
@@ -292,6 +294,11 @@ class PyprojectMetadataTests(unittest.TestCase):
 
 
 class CheckDistTests(unittest.TestCase):
+    def test_default_metadata_links_match_release_and_development_versions(self) -> None:
+        for version in ("1.2.3", "1.2.3rc1", "1.2.3.dev0"):
+            with self.subTest(version=version):
+                self.assertEqual(check_dist.check_metadata(metadata(version=version), version, "fixture"), [])
+
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
