@@ -457,14 +457,14 @@ def build_and_check(rehearsal: Rehearsal, version: str, epoch: str) -> dict[str,
     return digests
 
 
-def mcp_constraints(rehearsal: Rehearsal) -> Path | None:
+def mcp_constraints(rehearsal: Rehearsal) -> Path:
     """Pin the MCP SDK and its dependencies to uv.lock, so the smoke uses the locked set."""
     result = rehearsal.run([
         "uv", "export", "--locked", "--no-dev", "--extra", "mcp", "--no-emit-project",
         "--no-hashes", "--no-header", "--no-annotate",
     ], timeout=120)
-    if result.returncode != 0:
-        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        raise RehearsalError("cannot export locked MCP constraints: " + (_tail(result) or "empty export"))
     path = rehearsal.work / "mcp-constraints.txt"
     path.write_text(result.stdout, encoding="utf-8")
     return path
@@ -506,6 +506,8 @@ def rehearse(args: argparse.Namespace, root: Path = ROOT) -> int:
             rehearsal.record("PASS", "commit is on origin/main", "as of the last fetch; this rehearsal does not fetch")
         else:
             rehearsal.record("PENDING", "commit is on origin/main", "not yet; the release workflow refuses a tag that is not on main")
+    else:
+        rehearsal.record("PENDING", "commit is on origin/main", "origin/main is unavailable locally; fetch the main reference and rerun")
 
     # 2. Version and notes from the changelog.
     tags = _tags(root)
