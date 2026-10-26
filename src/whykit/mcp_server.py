@@ -20,6 +20,7 @@ a loopback port (a non-loopback address requires a bearer token).
 # closures whose ``Annotated[..., Field(...)]`` metadata must be real objects.
 
 import argparse
+import asyncio
 import contextvars
 import contextlib
 import base64
@@ -69,6 +70,11 @@ DEFAULT_HTTP_HOST = "127.0.0.1"
 DEFAULT_HTTP_PORT = 8000
 TOKEN_ENV = "WHYKIT_MCP_TOKEN"
 MIN_TOKEN_CHARS = 32
+MAX_HTTP_REQUEST_BYTES = 1_048_576
+MAX_HTTP_INFLIGHT = 8
+HTTP_REQUEST_BURST = 60
+HTTP_REQUESTS_PER_SECOND = 2
+HTTP_BODY_TIMEOUT_SECONDS = 30
 
 TOOL_NAMES = ("query", "context", "impact", "status", "pack", "trace", "backlinks")
 RECORD_TEMPLATE = "whykit://record/{+target}"
@@ -1586,6 +1592,7 @@ def build_server(
         Resource,
         TextContent,
         ToolAnnotations,
+        jsonrpc_message_adapter,
     )
     from pydantic import Field, ValidationError
 
@@ -1742,6 +1749,8 @@ def build_server(
     mcp = WhyKitServer(
         "whykit", version=__version__, instructions=SERVER_INSTRUCTIONS, subscriptions=bus, lifespan=lifespan,
     )
+
+    mcp.validate_transport_message = jsonrpc_message_adapter.validate_python
 
     async def bound_result(ctx, call_next):  # type: ignore[no-untyped-def]
         try:
@@ -2095,9 +2104,111 @@ def require_local_host(app: Callable[..., Any], host: str, port: int) -> Callabl
     return guarded
 
 
+def limit_http_requests(app: Callable[..., Any], *, validate_message: Callable[..., Any] | None = None) -> Callable[..., Any]:
+    """Bound authenticated HTTP work and buffer size before the SDK parses JSON."""
+    # shortcut: one shared budget per process; use a gateway for multi-process hosting.
+    tokens = float(HTTP_REQUEST_BURST)
+    updated = time.monotonic()
+    inflight = 0
+
+    async def limited(scope: dict[str, Any], receive: Callable[..., Any], send: Callable[..., Any]) -> None:
+        nonlocal tokens, updated, inflight
+        if scope.get("type") != "http":
+            await app(scope, receive, send)
+            return
+
+        async def reject(status: int, failure: ToolFailure) -> None:
+            body = json.dumps(failure.payload()).encode("ascii")
+            headers = [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode("ascii"))]
+            if status in {429, 503}:
+                headers.append((b"retry-after", b"1"))
+            if status in {400, 408, 413}:
+                # An unread upload may reset TCP; draining it would defeat the input budget.
+                headers.append((b"connection", b"close"))
+            await send({"type": "http.response.start", "status": status, "headers": headers})
+            await send({"type": "http.response.body", "body": body})
+
+        now = time.monotonic()
+        tokens = min(float(HTTP_REQUEST_BURST), tokens + max(0, now - updated) * HTTP_REQUESTS_PER_SECOND)
+        updated = now
+        if tokens < 1:
+            await reject(429, ToolFailure("rate_limited", "request budget exhausted; retry later"))
+            return
+        tokens -= 1
+        if inflight >= MAX_HTTP_INFLIGHT:
+            await reject(503, ToolFailure("server_busy", "too many active requests; retry later"))
+            return
+        inflight += 1
+        try:
+            lengths = [value.strip() for name, value in scope.get("headers") or () if name.lower() == b"content-length"]
+            if len(lengths) > 1 or (lengths and (not lengths[0].isdigit() or len(lengths[0]) > 10)):
+                await reject(400, ToolFailure("invalid_argument", "invalid content length"))
+                return
+            if lengths and int(lengths[0]) > MAX_HTTP_REQUEST_BYTES:
+                await reject(413, ToolFailure("request_too_large", "request exceeds the body budget"))
+                return
+            body = bytearray()
+            try:
+                async with asyncio.timeout(HTTP_BODY_TIMEOUT_SECONDS):
+                    while True:
+                        event = await receive()
+                        if event["type"] == "http.disconnect":
+                            return
+                        if event["type"] != "http.request":
+                            await reject(400, ToolFailure("invalid_argument", "invalid request body"))
+                            return
+                        chunk = event.get("body", b"")
+                        if len(body) + len(chunk) > MAX_HTTP_REQUEST_BYTES:
+                            await reject(413, ToolFailure("request_too_large", "request exceeds the body budget"))
+                            return
+                        body.extend(chunk)
+                        if not event.get("more_body", False):
+                            break
+            except TimeoutError:
+                await reject(408, ToolFailure("request_timeout", "request body did not arrive in time"))
+                return
+            if body:
+                failure: ToolFailure | None = None
+                code = -32600
+                try:
+                    raw = json.loads(body)
+                except (ValueError, UnicodeError, RecursionError):
+                    failure = ToolFailure("invalid_argument", "invalid JSON frame")
+                    code = -32700
+                else:
+                    try:
+                        _validate_rpc_id(raw)
+                        if validate_message is not None:
+                            validate_message(raw, by_name=False)
+                    except ToolFailure as exc:
+                        failure = exc
+                    except Exception:  # noqa: BLE001 - validation errors may echo request bodies
+                        failure = ToolFailure("invalid_argument", "invalid JSON-RPC frame")
+                if failure is not None:
+                    encoded = json.dumps(_rpc_error(failure, code), separators=(",", ":")).encode("utf-8")
+                    await send({"type": "http.response.start", "status": 400,
+                                "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(encoded)).encode("ascii"))]})
+                    await send({"type": "http.response.body", "body": encoded})
+                    return
+            pending = True
+
+            async def buffered_receive() -> dict[str, Any]:
+                nonlocal pending
+                if pending:
+                    pending = False
+                    return {"type": "http.request", "body": bytes(body), "more_body": False}
+                return await receive()
+
+            await app(scope, buffered_receive, send)
+        finally:
+            inflight -= 1
+
+    return limited
+
+
 def http_app(server: Any, host: str, port: int, token: str | None) -> Callable[..., Any]:
     """The ASGI app ``--http`` serves: bearer-guarded with a token, host-guarded without."""
-    app = server.streamable_http_app(host=host)
+    app = limit_http_requests(server.streamable_http_app(host=host), validate_message=getattr(server, "validate_transport_message", None))
     if token is not None:
         return require_bearer(app, token)
     return require_local_host(app, host, port)
@@ -2169,7 +2280,7 @@ def main(argv: list[str] | None = None) -> int:
     app = http_app(server, host, port, token)
     shown = f"[{host}]" if ":" in host else host
     print(f"whykit-mcp: serving streamable HTTP at http://{shown}:{port}/mcp", file=sys.stderr, flush=True)
-    config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning", limit_concurrency=32)
     anyio.run(uvicorn.Server(config).serve)
     return 0
 

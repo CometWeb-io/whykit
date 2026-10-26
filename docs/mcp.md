@@ -316,6 +316,25 @@ machines. Sensitivity remains a response filter, not an access-control
 boundary, so the token decides who can ask and the ceiling decides what they
 see.
 
+HTTP requests have a **1 MiB body limit**, including chunked bodies, and
+**30 seconds** to receive the complete body. At most **eight authorized
+requests** are active at once, including open streams. One shared bucket per
+process permits a burst of **60 requests** and refills **two requests per
+second**. Authentication and Host/Origin checks run first; rejected callers do
+not consume this application budget. Uvicorn additionally limits concurrent
+connections/tasks to 32 before those checks.
+
+Rate and busy responses include `Retry-After: 1`. Rejected bodies return fixed
+errors before SDK parsing; malformed JSON, IDs or schemas return HTTP 400 with
+`id: null`, without echoing the input. The ID limit described below applies to
+HTTP as well as stdio. Body, rate and active-request limits are shared across
+clients in one process. They exclude headers and cumulative SSE traffic;
+multi-process hosting still needs gateway controls. The 30-second timeout is
+for receiving the body, not for completing a tool call or an open stream.
+An early rejection closes an oversized upload without draining its remainder.
+A client still transmitting the body may observe a connection reset instead of
+the error response; a header-only request can receive the rejection immediately.
+
 ## Errors
 
 A tool call the server cannot answer comes back as a tool result with
@@ -336,8 +355,11 @@ A tool call the server cannot answer comes back as a tool result with
 | `unauthorized` | Streamable HTTP only: the request lacks the bearer token (HTTP 401, before any MCP processing) |
 | `forbidden_host` | Streamable HTTP without a token only: the `Host` or `Origin` header does not name this machine (HTTP 421, before any MCP processing) |
 | `internal_error` | Anything unexpected; the message is fixed and never carries exception text |
-| `request_too_large` | A stdio input frame exceeds 1 MiB; the connection closes after the error |
-| `invalid_request_id` | A stdio request ID has an invalid type or does not fit 1024 bytes of UTF-8 JSON |
+| `rate_limited` | HTTP 429: the shared request bucket is exhausted; retry later |
+| `server_busy` | HTTP 503: eight authorized requests are already active |
+| `request_timeout` | HTTP 408: the complete request body did not arrive within 30 seconds |
+| `request_too_large` | HTTP 413 for a body over 1 MiB; stdio rejects a line over 1 MiB and closes the connection |
+| `invalid_request_id` | A request ID has an invalid type or does not fit 1024 bytes of UTF-8 JSON; rejected IDs use `id: null` |
 | `response_too_large` | The complete result exceeds 1 MiB, or a JSON-RPC response frame exceeds 2 MiB |
 
 Stdio input errors use a JSON-RPC error with `id: null` and the same error
@@ -383,7 +405,8 @@ Buffered stdout remains separate from the protocol stream. Descriptor isolation
 uses private SDK interfaces; startup checks that they exist, and CI exercises
 the transport on SDK 2.2.0 and 2.3.0. The checks do not limit total process memory,
 SDK task concurrency or vault-reading time: reports are still built before their
-serialized size is checked. HTTP request-body/rate/time limits are separate.
+serialized size is checked. HTTP request limits bound separate costs, as
+described above.
 
 ## Freshness
 

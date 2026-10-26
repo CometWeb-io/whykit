@@ -7,6 +7,13 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+- Bound MCP HTTP input to 1 MiB and 30 seconds, eight active authorized
+  requests, and a shared burst of 60 requests refilling at two per second.
+  Authentication/Host checks precede the application budgets. Validate frame
+  schemas and IDs before SDK entry, return fixed errors, and release active
+  slots on rejection, disconnect, failure or cancellation. Cap Uvicorn
+  connections/tasks at 32 and exercise HTTP boundaries on both supported SDKs.
+
 - Cap complete MCP results at 1 MiB, stdio input/output frames at 1/2 MiB
   and request IDs at 1024 bytes of UTF-8 JSON. Replace oversized results and
   invalid input with bounded errors; preserve the session after malformed

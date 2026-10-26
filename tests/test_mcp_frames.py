@@ -9,10 +9,60 @@ import unittest
 from types import SimpleNamespace
 
 from test_mcp_handshake import HAVE_MCP, VAULT, RawStdioServer, initialize
+import test_mcp_http_limits as http_limits
+from whykit import mcp_server as mcp
 from whykit.mcp_server import ToolFailure, build_server
 
 MAX_STDIO_REQUEST_BYTES = 1_048_576
 MAX_RPC_FRAME_BYTES = 2_097_152
+
+
+class HTTPFrameTests(unittest.IsolatedAsyncioTestCase):
+    @unittest.skipUnless(HAVE_MCP, "install the optional whykit[mcp] extra")
+    async def test_sdk_schema_errors_do_not_echo_request_data(self) -> None:
+        from mcp_types import jsonrpc_message_adapter
+
+        harness = http_limits.HTTPBudgetTests()
+        reached = []
+
+        async def consume(scope, receive, send):
+            reached.append(True)
+            await harness.ok(scope, receive, send)
+
+        app = mcp.limit_http_requests(consume, validate_message=jsonrpc_message_adapter.validate_python)
+        body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": ["private-sentinel"]}).encode()
+        sent = await harness.request(app, events=[{"type": "http.request", "body": body}])
+        self.assertEqual(harness.status(sent), 400)
+        self.assertEqual(reached, [])
+        reply = json.loads(sent[1]["body"])
+        self.assertIsNone(reply["id"])
+        self.assertEqual(reply["error"]["data"]["error"]["code"], "invalid_argument")
+        self.assertNotIn(b"private-sentinel", sent[1]["body"])
+
+    async def test_invalid_id_and_json_are_rejected_before_application_entry(self) -> None:
+        harness = http_limits.HTTPBudgetTests()
+        reached = []
+
+        async def consume(scope, receive, send):
+            reached.append(await receive())
+            await harness.ok(scope, receive, send)
+
+        app = mcp.limit_http_requests(consume)
+        for body, code in ((json.dumps({"jsonrpc": "2.0", "id": "private-sentinel" * 100}).encode(), "invalid_request_id"),
+                           (b'{"jsonrpc":"2.0","id":"\\ud800","method":"ping"}', "invalid_request_id"),
+                           (b'{"private-sentinel":', "invalid_argument")):
+            sent = await harness.request(app, events=[{"type": "http.request", "body": body}])
+            self.assertEqual(harness.status(sent), 400)
+            reply = json.loads(sent[1]["body"])
+            self.assertIsNone(reply["id"])
+            self.assertEqual(reply["error"]["data"]["error"]["code"], code)
+            self.assertNotIn("private-sentinel", sent[1]["body"].decode())
+        self.assertEqual(reached, [])
+        valid = b'{"jsonrpc":"2.0","id":1,"method":"ping"}'
+        sent = await harness.request(app, events=[{"type": "http.request", "body": valid}])
+        self.assertEqual(harness.status(sent), 200)
+        self.assertEqual(reached[0]["body"], valid)
+
 
 
 class RpcIdTests(unittest.TestCase):

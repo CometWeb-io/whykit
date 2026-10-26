@@ -224,6 +224,7 @@ class McpSensitivityTests(unittest.TestCase):
             setattr(mcp_types, name, type(name, (Model,), {}))
         mcp_types.INTERNAL_ERROR = -32603  # type: ignore[attr-defined]
         mcp_types.INVALID_PARAMS = -32602  # type: ignore[attr-defined]
+        mcp_types.jsonrpc_message_adapter = types.SimpleNamespace(validate_python=lambda value, **kwargs: value)  # type: ignore[attr-defined]
         exceptions = types.ModuleType("mcp.server.mcpserver.exceptions")
         for name in ("ResourceError", "ResourceNotFoundError", "ToolError"):
             setattr(exceptions, name, type(name, (Exception,), {}))

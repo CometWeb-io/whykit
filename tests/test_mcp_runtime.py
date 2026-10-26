@@ -620,6 +620,28 @@ class McpHttpTransportTests(unittest.IsolatedAsyncioTestCase):
                     wrong = await http.post(url, json={}, headers={"Authorization": "Bearer " + "y" * 46})
                     self.assertEqual(wrong.status_code, 401)
                     async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"}) as authorized:
+                        # Send headers only: rejection must not wait for the oversized upload.
+                        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+                        try:
+                            async with asyncio.timeout(5):
+                                writer.write((
+                                    f"POST /mcp HTTP/1.1\r\nHost: localhost:{port}\r\n"
+                                    f"Authorization: Bearer {token}\r\nContent-Length: 1048577\r\n\r\n"
+                                ).encode("ascii"))
+                                await writer.drain()
+                                headers = await reader.readuntil(b"\r\n\r\n")
+                                body = await reader.read()
+                            self.assertTrue(headers.startswith(b"HTTP/1.1 413"), headers)
+                            self.assertEqual(json.loads(body)["error"]["code"], "request_too_large")
+                        finally:
+                            writer.close()
+                            await writer.wait_closed()
+                        malformed = await authorized.post(url, json={
+                            "jsonrpc": "2.0", "id": 1, "method": ["private-request-sentinel"],
+                        })
+                        self.assertEqual(malformed.status_code, 400)
+                        self.assertIsNone(malformed.json()["id"])
+                        self.assertNotIn("private-request-sentinel", malformed.text)
                         async with Client(streamable_http_client(url, http_client=authorized)) as client:
                             listed = await client.list_tools()
                             self.assertEqual(len(listed.tools), 7)
@@ -631,6 +653,7 @@ class McpHttpTransportTests(unittest.IsolatedAsyncioTestCase):
                 _, stderr = await server.communicate()
             self.assertIn(f"http://127.0.0.1:{port}/mcp", stderr.decode("utf-8"))
             self.assertNotIn(token, stderr.decode("utf-8"))
+            self.assertNotIn(b"private-request-sentinel", stderr)
 
 
 if __name__ == "__main__":
