@@ -25,6 +25,7 @@ the test suite fails if it drifts.
 | <a name="decision.id_missing"></a>`decision.id_missing` | error | A decision record has no D-NNN identifier. | Add decision_id and a matching d-NNN-*.md filename. |
 | <a name="decision.placeholder"></a>`decision.placeholder` | warning | A draft, in-review or approved decision record still holds template placeholder text. | Replace the prompt with the real context, decision and rationale, fill the alternatives table or say there was one option, and list the consequences. |
 | <a name="decision.review_missing"></a>`decision.review_missing` | warning | An approved decision has no review_by date. | Set a realistic review_by date. |
+| <a name="decision.unreviewed"></a>`decision.unreviewed` | warning | An approved decision's provenance denies human review. | Keep the record draft or in_review until an authorized person reviews it; changing a boolean is not authentication. |
 | <a name="decision.superseded_by_missing"></a>`decision.superseded_by_missing` | warning | A superseded decision has no newer record pointing back to it. | Create or fix the newer decision's supersedes field. |
 | <a name="decision.superseded_by_format"></a>`decision.superseded_by_format` | warning | superseded_by is not a D-NNN identifier. | Use a D-NNN identifier or remove the convenience field. |
 | <a name="decision.superseded_by_mismatch"></a>`decision.superseded_by_mismatch` | warning | superseded_by disagrees with the approved reverse supersedes edge. | Align superseded_by with the approved record whose supersedes field points here. |
@@ -106,6 +107,7 @@ override is printed with each `lint` and `check` run, listed in the JSON
 `overrides` array with the findings it suppressed, kept in SARIF as a
 suppressed result, and annotated as a `::notice` in GitHub format:
 
+- `decision.unreviewed`
 - `markdown_link.outside`
 - `secret.detected`
 - `secret.scan_non_utf8`

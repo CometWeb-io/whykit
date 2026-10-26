@@ -51,6 +51,7 @@ From a source checkout, prefix commands with `uv run` (see
 | `new evidence` | Append a source to the evidence register | `--source`, `--type`, `--location`, `--claims`, `--date`, `--accessed`, `--json`, `--root` | [Concepts](concepts.md#evidence) |
 | `new note <title>` | Create a draft note in a workstream | `--workstream`, `--type`, `--owner`, `--sensitivity`, `--link-from`, `--json`, `--root` | [How-to](guide.md#create-records) |
 | `review list` | Show upcoming and overdue reviews | `--due-days`, `--overdue-only`, `--owner`, `--today`, `--json`, `--root` | [How-to](guide.md#record-a-review) |
+| `review approve <target>` | Preview approval; apply the unchanged snapshot with its reviewed hash | `--reviewer`, `--next-review`, `--today`, `--write`, `--expect-hash`, `--json`, `--root` | [How-to](guide.md#approve-a-decision) |
 | `review record <target>` | Append a review event; `confirmed` moves `review_by` forward | `--reviewer`, `--outcome`, `--next-review`, `--note`, `--today`, `--json`, `--root` | [Concepts](concepts.md#the-review-cycle) |
 | `evidence list` | List active and retired evidence | `--state`, `--json`, `--root` | [How-to](guide.md#retire-evidence) |
 | `evidence retire <E-NNN>` | Retire a source without deleting its ID | `--why`, `--replaced-by`, `--today`, `--json`, `--root` | [How-to](guide.md#retire-evidence) |

@@ -25,7 +25,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _jsonschema import validate  # noqa: E402
-from _vaults import CLI, fresh_vault  # noqa: E402
+from _vaults import CLI, fresh_vault, historical_decision  # noqa: E402
 
 from whykit import cli  # noqa: E402
 from whykit.contract import OUTPUT_SCHEMAS  # noqa: E402
@@ -72,16 +72,16 @@ def build_repository(repo: Path) -> dict[str, str]:
     """Create the repository; return the base ref, head ref and a main-only change."""
     git(repo, "init", "-q")
     vault = repo / "kb"
-    fresh_vault(vault)
+    stamped = fresh_vault(vault)
     whykit(vault, "new", "evidence", "--source", "Example survey", "--location", "https://example.com/survey",
            "--type", "survey", "--claims", "Respondents prefer email", "--date", "2026-09-01", "--accessed", "2026-09-01")
     whykit(vault, "new", "evidence", "--source", "Example interviews", "--location", "https://example.com/interviews",
            "--type", "interview", "--claims", "Ops leads own the budget", "--date", "2026-09-01", "--accessed", "2026-09-01")
     for title, source in (("Use email", "E-001"), ("Sell to ops", "E-002"), ("Keep the ledger in Git", "E-002")):
-        whykit(vault, "new", "decision", title, "--owner", "Pat Example", "--status", "approved",
-               "--source", source, "--review-by", "2027-01-01")
-    whykit(vault, "new", "decision", "Café pricing révision", "--owner", "Pat Example", "--status", "approved",
-           "--review-by", "2027-01-01")
+        historical_decision(vault, title, owner="Pat Example", source_ids=[source],
+                            review_by="2027-01-01", today=stamped)
+    historical_decision(vault, "Café pricing révision", owner="Pat Example",
+                        review_by="2027-01-01", today=stamped)
     decisions = vault / "06-decisions"
     created = next(decisions.glob("d-004-*.md"))
     git(repo, "add", "-A")
@@ -95,8 +95,8 @@ def build_repository(repo: Path) -> dict[str, str]:
     base = git(repo, "rev-parse", "HEAD").strip()
 
     git(repo, "checkout", "-q", "-b", "feature")
-    whykit(vault, "new", "decision", "Use chat", "--owner", "Pat Example", "--status", "approved",
-           "--supersedes", "D-001", "--review-by", "2027-01-01")
+    historical_decision(vault, "Use chat", owner="Pat Example", supersedes="D-001",
+                        review_by="2027-01-01", today=stamped)
     whykit(vault, "evidence", "retire", "E-001", "--why", "Survey sample was too small", "--today", TODAY)
     register = vault / "00-context" / "evidence-register.md"
     replace(register, "https://example.com/interviews", "https://example.com/interviews-v2")

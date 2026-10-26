@@ -7,6 +7,15 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+- Add decision approval previews bound to captured bytes and parameters, atomic
+  apply/supersession and append-only approval/re-review receipts. New decisions
+  and imports start as draft or in_review; reviewer attribution is not identity
+  authentication. `check --base` applies both current and trusted-base policy
+  to current content and reports whether history ran. Approved provenance denying
+  human review emits `decision.unreviewed` (warning). Hidden review events and
+  comment-only decision sections are rejected; visible code remains valid content.
+
+
 - Retain transaction payloads through durable commit and collect terminal journals
   without replaying later edits. Validate recovery paths and legacy payload hashes;
   `whykit recover` explicitly repairs interrupted writes. Cooperating reports and

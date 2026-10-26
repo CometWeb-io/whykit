@@ -40,35 +40,92 @@ whykit new evidence \
 created E-001: 00-context/evidence-register.md
 ```
 
-Now record the decision and cite that source. `--status approved` makes it an
-accepted record, and WhyKit gives it a review date 90 days out.
+Now create a draft decision citing that source. Completion and approval are
+separate steps; a new scaffold is not an accepted decision.
 
 ```bash
 whykit new decision "Offer a free plan for teams of up to three" \
-  --owner Product --status approved --source E-001
+  --owner Product --status draft --source E-001
 ```
 
 ```text
 created D-001: 06-decisions/d-001-offer-a-free-plan-for-teams-of-up-to-three.md
 ```
 
-In a real vault you would now open that file and write the context, the
-rationale and the alternatives you rejected. Check the vault and commit:
+Write the reasoning before acceptance. In this synthetic tutorial save the
+following as `d-001-body.md`; in a real vault write your own analysis.
+
+<!-- tutorial: file=d-001-body.md -->
+```markdown
+# Decision record: Offer a free plan for teams of up to three
+
+## Decision ID
+
+D-001
+
+## Status
+
+Proposed
+
+## Context
+
+Price is the most common cancellation reason in the survey (E-001).
+
+## Decision
+
+Offer a free plan for teams of up to three.
+
+## Rationale
+
+Test whether removing the price barrier helps small teams adopt the product.
+The survey supports the problem; conversion remains a hypothesis.
+
+## Evidence
+
+- E-001 — churn survey, September.
+
+## Alternatives considered
+
+| Alternative | Upside | Risk | Why rejected |
+|---|---|---|---|
+| Lower all prices | Simple | Reduces revenue from larger teams | Does not isolate the small-team hypothesis |
+
+## Consequences
+
+- Small teams can try the product without paying.
+- Support costs may rise without enough upgrades.
+
+## Ownership and review
+
+- Owner: Product
+```
+
+Keep the front matter, replace the scaffold body and inspect the approval:
 
 ```bash
+record=06-decisions/d-001-offer-a-free-plan-for-teams-of-up-to-three.md
+awk 'n < 2 { print } /^---$/ { n++ }' "$record" > front.md
+cat front.md d-001-body.md > "$record"
+rm front.md d-001-body.md
+whykit review approve D-001 --reviewer Product --json > ../pricing-approval.json
+cat ../pricing-approval.json
+```
+
+After reading the preview and checking its evidence, apply that exact hash:
+
+```bash
+whykit review approve D-001 --reviewer Product --write \
+  --expect-hash "$(python3 -c 'import json; print(json.load(open("../pricing-approval.json"))["expected_sha256"])')"
 whykit lint --quiet
 git add .
 git commit -q -m "Record D-001"
 ```
 
 ```text
-24 files — 0 error(s), 5 warning(s)
+24 files — 0 error(s), 4 warning(s)
 ```
 
-Four warnings are the questions in `AGENTS.md` that only your team can answer.
-The fifth, `decision.placeholder`, is the record you just created: it still
-holds the prompts `whykit new decision` writes, and lint keeps saying so until
-the context, decision and rationale are real. None of them block local work; the
+The remaining warnings are unanswered questions in `AGENTS.md`. The
 [pull request tutorial](gate-pull-requests.md) shows how to clear them.
 
 ## 3. Change your mind: supersede, do not rewrite
@@ -90,16 +147,79 @@ Do not edit `D-001`. Record a new decision that supersedes it:
 
 ```bash
 whykit new decision "Replace the free plan with a 30-day trial" \
-  --owner Product --status approved --source E-002 --supersedes D-001
-git add .
-git commit -q -m "Supersede D-001 with D-002"
+  --owner Product --status draft --source E-002 --supersedes D-001
 ```
 
 ```text
 created D-002: 06-decisions/d-002-replace-the-free-plan-with-a-30-day-trial.md
 ```
 
-WhyKit marked `D-001` as `superseded` with `superseded_by: D-002` and updated
+The draft leaves D-001 accepted. Save the new reasoning as `d-002-body.md`:
+
+<!-- tutorial: file=d-002-body.md -->
+```markdown
+# Decision record: Replace the free plan with a 30-day trial
+
+## Decision ID
+
+D-002
+
+## Status
+
+Proposed
+
+## Context
+
+The free cohort rarely upgraded and doubled support load (E-002).
+
+## Decision
+
+Replace the free plan with a 30-day trial.
+
+## Rationale
+
+A time-limited trial tests adoption while bounding ongoing support costs.
+The cohort data motivates this revision; trial conversion is still uncertain.
+
+## Evidence
+
+- E-002 — free plan cohort, first quarter.
+
+## Alternatives considered
+
+| Alternative | Upside | Risk | Why rejected |
+|---|---|---|---|
+| Keep the free plan | Familiar | High support cost | Few upgrades in the observed cohort |
+
+## Consequences
+
+- Small teams can try the product for 30 days.
+- Trial deadlines may discourage some teams.
+
+## Ownership and review
+
+- Owner: Product
+```
+
+```bash
+record=06-decisions/d-002-replace-the-free-plan-with-a-30-day-trial.md
+awk 'n < 2 { print } /^---$/ { n++ }' "$record" > front.md
+cat front.md d-002-body.md > "$record"
+rm front.md d-002-body.md
+whykit review approve D-002 --reviewer Product --json > ../pricing-approval-2.json
+cat ../pricing-approval-2.json
+```
+
+Read the new record, its source and all four file diffs. After accepting them:
+
+```bash
+whykit review approve D-002 --reviewer Product --write \
+  --expect-hash "$(python3 -c 'import json; print(json.load(open("../pricing-approval-2.json"))["expected_sha256"])')"
+git add .
+git commit -q -m "Supersede D-001 with D-002"
+```
+
+Approval marked `D-001` as `superseded` with `superseded_by: D-002` and updated
 both rows of the decision log. The reasoning in `D-001` is untouched, so the
 ledger still shows what you believed in September and what replaced it.
 `whykit trace` shows which decision is live and what each one rests on:

@@ -311,8 +311,8 @@ class ErrorObjectTests(unittest.TestCase):
     def test_status_accepted_names_the_valid_value(self) -> None:
         argv = ["new", "--root", str(self.vault), "decision", "X", "--status", "accepted"]
         payload = self.assertJsonError([*argv, "--json"], "usage", human_argv=argv)
-        self.assertIn("approved", payload["error"]["message"])
-        self.assertIn("--status approved", payload["error"]["hint"])
+        self.assertIn("draft", payload["error"]["message"])
+        self.assertIn("whykit review approve", payload["error"]["hint"])
         _, _, err = call(*argv)
         self.assertIn("hint: decision logs display approved decisions", err)
 

@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
+from _vaults import historical_decision  # noqa: E402
 from synthetic_vault import AS_OF, DIGEST_COMMANDS, generate, output_digests  # noqa: E402
 from whykit import lint as lint_mod  # noqa: E402
 from whykit.cli import main as whykit_main  # noqa: E402
@@ -61,8 +62,9 @@ INTENTIONAL_CHANGES: dict[str, tuple[str, str]] = {
         "evidence.retired is not reported on superseded or archived records",
     ),
     "check": (
-        "4546eeb029d91e55c1c6417b3e1d2f414f5ac0c65c6d6a38440845a43cec5a37",
-        "evidence.retired is not reported on superseded or archived records",
+        "e87802143d77a232e8de0517a4e1633e9f346a13261a80344bf2c2b97887366c",
+        "evidence.retired is not reported on superseded or archived records; "
+        "explicit history_checked and checks.history.checked (false without base)",
     ),
     "status": (
         "677e6cdb9a16bba31c24756a7b724b4fb96c854995b2c73b6307050ae31f02db",
@@ -304,8 +306,8 @@ class CacheScopeAcrossCommandsTest(unittest.TestCase):
 
         self.assertEqual(self.cli("new", "evidence", "--source", "Export", "--type", "dataset",
                                   "--location", "https://example.com/export.csv", "--claims", "c")[0], 0)
-        self.assertEqual(self.cli("new", "decision", "First", "--owner", "Ops", "--status", "approved",
-                                  "--source", "E-001")[0], 0)
+        historical_decision(self.vault, "First", owner="Ops", source_ids=["E-001"], today=dt.date.today(),
+                            review_by=(dt.date.today() + dt.timedelta(days=90)).isoformat())
         self.assertIn(self.cli("status", "--json")[0], (0, 1))
         log = self.vault / "00-context" / "review-log.md"
         os.chmod(log, stat.S_IREAD)

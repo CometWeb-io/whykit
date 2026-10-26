@@ -128,6 +128,9 @@ answers it. Promoting the same bytes twice is refused with `target_exists`.
 
 ## Create records
 
+Decision scaffolds start as `draft` or `in_review`. Complete the record and use
+[preview/apply approval](#approve-a-decision) before accepting it.
+
 Create records through the CLI so IDs and indexes move together. The records
 below are fictional; store only evidence that is safe for the repository the
 vault lives in.
@@ -139,7 +142,7 @@ whykit new evidence \
   --claims "Repeated procurement delay"
 
 whykit new decision "Narrow the first ICP" \
-  --owner Product --status approved --source E-001
+  --owner Product --status draft --source E-001
 
 whykit new note "Interview synthesis" \
   --workstream notes \
@@ -158,9 +161,50 @@ map unless asked. When it is given, the note and the link are created in one
 atomic operation, and the note is rolled back if the map update fails.
 
 An approved decision gets a `review_by` date from `defaults.decision_review_days`
-unless you pass `--review-by`. `--supersedes D-NNN` replaces an earlier decision
-and marks it `superseded` in the same operation; see
+unless you pass `--next-review` to `review approve`. `--supersedes D-NNN` declares
+a replacement; approving that replacement marks the predecessor `superseded`
+in the same transaction; see
 [Concepts](concepts.md#changing-your-mind-supersede-do-not-rewrite).
+
+## Approve a decision
+
+Create a draft or in-review decision, then write the Context, Decision,
+Rationale, Evidence, Alternatives considered and Consequences. Approval
+requires a real owner and cited active evidence. It refuses empty sections,
+placeholders, stale evidence and failed vault checks.
+
+```bash
+whykit review approve D-001 --reviewer "Ada Example" --json
+```
+
+This previews the complete record, cited register rows and exact changes without
+writing. Read the record, inspect its sources and check every diff. After you
+accept that specific preview, copy its `expected_sha256` into:
+
+```bash
+whykit review approve D-001 --reviewer "Ada Example" \
+  --write --expect-hash HASH_FROM_PREVIEW
+```
+
+Keep `--today`, `--next-review` and reviewer identical if you supplied them.
+The hash binds the draft bytes, register, policy, ledgers, predecessor and
+proposed changes. Changed inputs or parameters require a new preview. The
+record, decision log, approval event and any predecessor lifecycle change are
+written in one recoverable transaction. The default review deadline comes from
+`defaults.decision_review_days`.
+
+The new `approved` event stores `record-sha256:<hash>; snapshot-sha256:<hash>`.
+The snapshot hash identifies the original draft bytes; the record hash binds
+reasoning and provenance while excluding the mutable lifecycle keys `status`,
+`review_by`, `last_updated` and `superseded_by`, normalizing line endings and BOM.
+`whykit history` requires a matching newly appended event for a new acceptance;
+editing only the metadata or replaying an old event fails.
+
+Reviewer names and hashes establish attribution and consistency, not identity
+or truth. WhyKit does not fetch or freeze remote source contents during approval.
+Use your repository's protected review process for authenticated acceptance.
+MCP stays read-only and has no approval tool.
+
 
 ## Record a review
 

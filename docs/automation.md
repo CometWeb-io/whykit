@@ -28,6 +28,11 @@ JSON mode when `--format` is `json` (their default), `lint`, `check` and `diff` 
 `explorer-index` always. The CI formats (`--format sarif` and
 `--format github`) are not JSON mode; see [CI formats](#ci-formats).
 
+`history --json` and history inside `check --json` can report `approval_without_event`
+for new acceptance without a fresh matching receipt, or `review_without_event` for
+a changed review deadline without a matching new event. Existing rewrites retain
+their status/path report. GitHub annotations explain the missing event.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -81,7 +86,7 @@ Schema: [`schemas/error.schema.json`](../schemas/error.schema.json).
 
 | Code | Exit | When |
 |---|---|---|
-| `usage` | 2 | The command line could not be parsed, or options conflict (`--json` with `--format dot`, `pack` with no target). An invalid choice names the valid values; `--status accepted` also points at `--status approved`. |
+| `usage` | 2 | The command line could not be parsed, or options conflict (`--json` with `--format dot`, `pack` with no target). An invalid choice names the valid values; `--status accepted` points at creating a draft and using `review approve`. |
 | `invalid_argument` | 2 | An option value is malformed or out of range: a date that does not exist, a negative count, an ID in the wrong form, an unknown rule code, an unreadable snapshot file, a lint path outside the vault. |
 | `invalid_target` | 2 | The named source or destination exists but cannot be used, e.g. `adopt` pointed at a file, or overlapping source and vault. |
 | `vault_not_found` | 2 | No vault at `--root`, or at or above the working directory. |
@@ -150,8 +155,8 @@ edits are not part of it.
 
 `history --staged` compares the Git index with `--base` (default `HEAD`), which
 is what a pre-commit hook needs. Its report has `"head": "INDEX"` and
-`"staged": true`. Before the first commit there is nothing accepted to rewrite,
-so it passes.
+`"staged": true`. Before the first commit there is no prior reasoning to compare,
+but newly accepted decisions still require matching approval events.
 
 ## Schemas
 
@@ -175,6 +180,7 @@ CLI actually prints.
 | `context --json` | `context-pack.schema.json` |
 | `pack --json` | `context-bundle.schema.json` |
 | `review list --json` | `review-queue.schema.json` |
+| `review approve --json` | `decision-approval-result.schema.json` |
 | `review record --json` | `review-record-result.schema.json` |
 | `snapshot` | `snapshot.schema.json` |
 | `verify-snapshot --json` | `snapshot-verify.schema.json` |

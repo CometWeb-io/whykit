@@ -105,7 +105,7 @@ the one allowed transition. Undo the edit to the old record and create a new one
 instead:
 
 ```bash
-whykit new decision "New title" --owner Platform --status approved \
+whykit new decision "New title" --owner Platform --status draft \
   --source E-001 --supersedes D-001
 ```
 
@@ -237,3 +237,5 @@ hashes and an ingestion record. A person still decides what becomes canonical.
 Yes. Point `--root` (or the Action's `root` input) at the subdirectory. Keep it
 out of the WhyKit source checkout itself, and keep a real company vault private:
 sensitivity labels are metadata, not access control.
+
+Complete the replacement draft, then [preview and approve it](guide.md#approve-a-decision).

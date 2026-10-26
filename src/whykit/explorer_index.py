@@ -9,6 +9,7 @@ import json
 import re
 from pathlib import Path
 
+from .tables import review_table_header
 from .config import ConfigError, load_config
 from .contract import CONTRACT_VERSION, emit_error, vault_not_found
 from .lint import (
@@ -203,8 +204,7 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
     reviews = []
     if review_path.is_file():
         lines = read_vault_lines(review_path)
-        header = "| Date | Target | Reviewer | Outcome | Previous review | Next review | Note |"
-        at = next((i for i, line in enumerate(lines) if line.strip() == header), None)
+        at = review_table_header(lines)
         if at is not None:
             for line in lines[at + 2 :]:
                 if not line.lstrip().startswith("|"):

@@ -480,10 +480,16 @@ def cmd_review(args: argparse.Namespace) -> int:
             argv.append("--json")
     else:
         argv.append(args.target)
-        argv += ["--reviewer", args.reviewer, "--outcome", args.outcome]
+        argv += ["--reviewer", args.reviewer]
+        if args.review_command == "record":
+            argv += ["--outcome", args.outcome]
+        if getattr(args, "write", False):
+            argv.append("--write")
+        if getattr(args, "expected_sha256", None):
+            argv += ["--expect-hash", args.expected_sha256]
         if args.next_review:
             argv += ["--next-review", args.next_review]
-        if args.note_text:
+        if getattr(args, "note_text", None):
             argv += ["--note", args.note_text]
         if args.today:
             argv += ["--today", args.today]
@@ -1087,9 +1093,9 @@ class _Parser(argparse.ArgumentParser):
 
 def _usage_hint(message: str, command_path: str = "") -> str | None:
     """A next step for argparse errors where the message alone misleads."""
-    if "invalid choice: 'accepted'" in message and "approved" in message:
+    if "invalid choice: 'accepted'" in message and "draft" in message:
         # Decision logs render the approved state as "Accepted", so people type it.
-        return "decision logs display approved decisions as \"Accepted\"; on the command line use --status approved"
+        return "decision logs display approved decisions as \"Accepted\"; create a draft, complete it, then use `whykit review approve`"
     if message.startswith("unrecognized arguments") and command_path:
         # argparse reports these from the top-level parser, whose usage line
         # lists no subcommand options at all.
@@ -1233,7 +1239,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_decision.add_argument("--from", dest="from_path", metavar="FILE", help="promote an existing ADR (MADR, Nygard, Y-statement or Polish headings), e.g. one staged by `adopt`; prints the mapping unless --write")
     new_decision.add_argument("--write", action="store_true", help="with --from: create the record and its decision-log row (default: dry run)")
     new_decision.add_argument("--owner", help="accountable person (default: policy defaults.owner)")
-    new_decision.add_argument("--status", choices=("draft", "in_review", "approved", "superseded", "archived"), default="draft", help="initial status (default: %(default)s)")
+    new_decision.add_argument("--status", choices=("draft", "in_review"), default="draft", help="initial status (default: %(default)s)")
     new_decision.add_argument("--sensitivity", choices=SENSITIVITIES, help="default: policy defaults.sensitivity")
     new_decision.add_argument("--source", action="append", default=[], dest="source_ids", metavar="E-NNN", help="supporting evidence ID (repeatable)")
     new_decision.add_argument("--review-by", metavar="YYYY-MM-DD", help="date by which the decision must be re-checked")
@@ -1357,6 +1363,17 @@ def build_parser() -> argparse.ArgumentParser:
     review_record.add_argument("--json", action="store_true", help=JSON_HELP)
     _add_leaf_root(review_record)
     review_record.set_defaults(func=cmd_review)
+
+    review_approve = review_sub.add_parser("approve", help="preview approval, then apply the reviewed snapshot")
+    review_approve.add_argument("target", help="vault-relative decision path or D-NNN")
+    review_approve.add_argument("--reviewer", required=True, help="who reviewed the snapshot; an attribution, not authentication")
+    review_approve.add_argument("--next-review", metavar="YYYY-MM-DD", help="default: policy decision_review_days after approval")
+    review_approve.add_argument("--today", help="approval date as YYYY-MM-DD")
+    review_approve.add_argument("--write", action="store_true", help="apply only the snapshot identified by --expect-hash")
+    review_approve.add_argument("--expect-hash", dest="expected_sha256", help="expected_sha256 from a reviewed preview")
+    review_approve.add_argument("--json", action="store_true", help=JSON_HELP)
+    _add_leaf_root(review_approve)
+    review_approve.set_defaults(func=cmd_review)
 
     snapshot = sub.add_parser("snapshot", help="create a deterministic vault snapshot")
     snapshot.add_argument("--root", help=ROOT_HELP)

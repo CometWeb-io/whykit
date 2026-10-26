@@ -17,8 +17,8 @@ _TOKENS = re.compile(_BT + r"+|<!--")
 _MARKDOWN_LINE = re.compile(r"[^\r\n]*(?:\r\n|\n|\r)|[^\r\n]+$")
 
 
-def mask_code(text: str) -> str:
-    """Mask comments, fences and inline spans in linear time; retain offsets."""
+def mask_code(text: str, *, keep_code: bool = False) -> str:
+    """Mask comments and, unless keep_code, code; retain offsets in linear time."""
     if _BT not in text and "~~~" not in text and "<!--" not in text:
         return text
     chars = list(text)
@@ -63,7 +63,8 @@ def mask_code(text: str) -> str:
             continue
         body = line.group().rstrip("\r\n")
         if opening:
-            blank(line.start(), line.end())
+            if not keep_code:
+                blank(line.start(), line.end())
             match = _FENCE_CLOSE.fullmatch(body)
             if match and match[1][0] == opening[0] and len(match[1]) >= opening[1]:
                 opening = None
@@ -72,7 +73,8 @@ def mask_code(text: str) -> str:
         fence = fences[line_index]
         if cursor <= line.start() and fence:
             opening = (fence[1][0], len(fence[1]))
-            blank(line.start(), line.end())
+            if not keep_code:
+                blank(line.start(), line.end())
             cursor = line.end()
             continue
         while token_index < len(tokens) and tokens[token_index].start() < line.end():
@@ -85,7 +87,7 @@ def mask_code(text: str) -> str:
             if token[0][0] == _BT:
                 end_index = closing[index]
                 cursor = token.end() if end_index is None else tokens[end_index].end()
-                if end_index is not None:
+                if end_index is not None and not keep_code:
                     blank(start, cursor)
                 continue
             escapes = 0

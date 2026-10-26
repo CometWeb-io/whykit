@@ -202,3 +202,17 @@ Process-death tests do not qualify recovery after physical power loss.
 Graph and snapshot exports use the writer lock and refuse Git state, the mutation
 lock, transaction journals and parse-cache paths. `.whykit/snapshot.json` remains
 a valid explicit output. Metadata readers never replay pending writes implicitly.
+
+## Decision approval and trusted policy
+
+`review approve` previews the reviewed decision, cited evidence rows and exact
+file diffs. `--write --expect-hash` applies only the same inputs and parameters
+under the mutation lock. Decision, ledger rows and supersession are one transaction.
+Reviewer names and receipts provide attribution and content binding, not identity
+authentication, factual verification or permission to publish.
+
+`check --base REF` evaluates both the current and base policies against current
+vault content. CI must choose REF from a trusted source and fetch its commit;
+unreadable or malformed base policy fails closed. A supplied ref is not trusted
+merely because the command accepts it. History compares the selected Git trees
+or index, not uncommitted files. Without a base, optional history is unchecked.

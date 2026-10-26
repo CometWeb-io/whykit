@@ -5,11 +5,24 @@ import unittest
 from pathlib import Path
 
 from whykit.lint import Note, _mask_code
+from whykit.markdown_code import mask_code
 
 BT = chr(96)
 
 
 class MarkdownCodeTests(unittest.TestCase):
+    def test_keep_code_masks_only_real_comments_and_preserves_offsets(self) -> None:
+        for newline in ("\n", "\r\n", "\r"):
+            with self.subTest(newline=repr(newline)):
+                source = newline.join(("Shown ``<!-- literal -->``.", "~~~html", "<!-- literal -->",
+                                       "~~~", "<!-- hidden", "`code inside a comment`", "-->", "Shown again."))
+                start = source.index("<!-- hidden")
+                stop = source.index("-->", start) + 3
+                expected = source[:start] + "".join(c if c in "\r\n" else " " for c in source[start:stop]) + source[stop:]
+                self.assertEqual(mask_code(source, keep_code=True), expected)
+                self.assertEqual(len(mask_code(source)), len(source))
+                self.assertNotIn("literal", mask_code(source))
+
     def assert_only_real_evidence(self, content: str, expected: tuple[str, ...] = ("E-002",)) -> None:
         note = Note(Path("06-decisions/d-001-test.md"), content)
         self.assertEqual(note.cited_evidence, expected)

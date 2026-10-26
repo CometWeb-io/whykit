@@ -26,6 +26,7 @@ from whykit.lint import lint  # noqa: E402
 from whykit.query import query_vault  # noqa: E402
 from whykit.scaffold import create_decision  # noqa: E402
 from whykit.trace import build_trace  # noqa: E402
+from _vaults import historical_decision  # noqa: E402
 
 TINY = ROOT / "examples" / "tiny"
 DAY = dt.date(2026, 9, 17)
@@ -45,7 +46,8 @@ class _TinyCopy(unittest.TestCase):
     def decision(self, title: str, *, status: str = "approved", **kwargs) -> Path:
         if status == "approved":
             kwargs.setdefault("review_by", "2027-01-01")
-        _, path = create_decision(
+        factory = historical_decision if status == "approved" else create_decision
+        _, path = factory(
             self.vault, title, owner="Example owner", status=status,
             source_ids=kwargs.pop("source_ids", ["E-001"]), today=DAY, **kwargs,
         )

@@ -51,7 +51,7 @@ class DecisionImmutabilityTests(unittest.TestCase):
         proc = self.check()
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
-    def test_approved_record_allows_review_date_refresh_only(self) -> None:
+    def test_approved_record_blocks_review_date_refresh_without_event(self) -> None:
         p = self.root / "06-decisions/d-001-accepted.md"
         p.write_text(
             "---\nstatus: approved\nlast_updated: 2026-09-22\nreview_by: 2027-03-22\n---\n# Accepted\n", encoding="utf-8"
@@ -59,7 +59,7 @@ class DecisionImmutabilityTests(unittest.TestCase):
         run("git", "add", ".", cwd=self.root)
         run("git", "commit", "-qm", "refresh review metadata", cwd=self.root)
         proc = self.check()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.returncode, 1, proc.stderr)
 
     def test_approved_record_allows_metadata_only_supersession(self) -> None:
         p = self.root / "06-decisions/d-001-accepted.md"

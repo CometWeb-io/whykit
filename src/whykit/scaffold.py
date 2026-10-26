@@ -90,19 +90,21 @@ def _next_id(values: list[str], prefix: str) -> str:
 
 
 def _frontmatter_replace(text: str, key: str, value: str) -> str:
+    bom = "\ufeff" if text.startswith("\ufeff") else ""
+    text = text.removeprefix("\ufeff")
     if not text.startswith("---\n"):
         return text
     end = text.find("\n---\n", 4)
     if end < 0:
         return text
     head = text[:end]
-    pattern = re.compile(rf"(?m)^{re.escape(key)}:\s*.*$")
+    pattern = re.compile(rf"(?m)^{re.escape(key)}:[ \t]*.*$")
     replacement = f"{key}: {value}"
     if pattern.search(head):
         head = pattern.sub(replacement, head, count=1)
     else:
         head += "\n" + replacement
-    return head + text[end:]
+    return bom + head + text[end:]
 
 
 def _append_table_row_text(text: str, header_prefix: str, row: str, today: dt.date, *, record_id: str, path_label: str = "table") -> str:
@@ -207,6 +209,10 @@ def create_decision(
     promotion: Promotion | None = None,
 ) -> tuple[str, Path]:
     today = today or dt.date.today()
+    if promotion is not None and status not in {"draft", "in_review"}:
+        raise ValueError("imported decisions must start as draft or in_review; the original status is retained in provenance")
+    if status not in {"draft", "in_review"}:
+        raise ValueError("new decisions must start as draft or in_review; complete the record, then use `whykit review approve`")
     title = title.strip() or (promotion.title if promotion else "")
     if not title:
         raise ValueError("decision title cannot be empty")
@@ -229,14 +235,8 @@ def create_decision(
         )
         if path.exists():
             raise FileExistsError(path)
-        if status == "approved" and not review_by:
-            raise ValueError("approved decisions require --review-by")
-        if status == "approved" and owner.strip() in {"", "TODO"}:
-            raise ValueError("approved decisions require a real --owner")
         if review_by:
             parse_iso_date("--review-by", review_by)
-        predecessor_path: Path | None = None
-        predecessor_text: str | None = None
         if supersedes:
             if not DECISION_ID_RE.fullmatch(supersedes):
                 raise ValueError("--supersedes must be a D-NNN identifier")
@@ -246,7 +246,6 @@ def create_decision(
             predecessor_note = load_note(predecessor_path)
             if predecessor_note.front.get("status") != "approved":
                 raise ValueError(f"{supersedes} must be approved before it can be superseded")
-            predecessor_text = predecessor_path.read_text(encoding="utf-8")
         source_ids = source_ids or []
         invalid = [value for value in source_ids if not EVIDENCE_ID_RE.fullmatch(value)]
         if invalid:
@@ -360,19 +359,6 @@ tags: []
                 log_before, "| ID | Decision |", row, today, record_id=decision_id, path_label=str(log)
             ),
         }
-        if status == "approved" and supersedes and predecessor_path and predecessor_text is not None:
-            predecessor_path = safe_vault_target(
-                vault,
-                # The record was globbed under `vault` as given, so it is relative
-                # to that spelling even when the vault sits behind a symlink.
-                predecessor_path.relative_to(vault),
-                create_parents=False,
-            )
-            updated_predecessor = _frontmatter_replace(predecessor_text, "status", "superseded")
-            updated_predecessor = _frontmatter_replace(updated_predecessor, "last_updated", today.isoformat())
-            updated_predecessor = _frontmatter_replace(updated_predecessor, "superseded_by", decision_id)
-            updates[predecessor_path] = updated_predecessor
-            updates[log] = _update_decision_log_status_text(updates[log], supersedes, "superseded", today)
         apply_transaction(vault, updates)
         return decision_id, path
 
@@ -559,6 +545,8 @@ def _promote(vault: Path, args: argparse.Namespace, *, owner: str, sensitivity: 
         return emit_error("invalid_target", str(exc), json_mode=args.json)
     except OSError as exc:
         return emit_error("io_error", describe_os_error(exc), json_mode=args.json)
+    if args.status not in {"draft", "in_review"}:
+        return emit_error("operation_rejected", "imported decisions must start as draft or in_review; review the imported record before approval", json_mode=args.json)
     earlier = promoted_from(vault, promotion.sha256)
     if earlier and not args.write:
         return emit_error(
@@ -646,7 +634,7 @@ def main(argv: list[str] | None = None) -> int:
     decision.add_argument("--from", dest="from_path", metavar="FILE")
     decision.add_argument("--write", action="store_true")
     decision.add_argument("--owner")
-    decision.add_argument("--status", choices=tuple(DECISION_STATUS_TO_LOG), default="draft")
+    decision.add_argument("--status", choices=("draft", "in_review"), default="draft")
     decision.add_argument("--sensitivity", choices=VALID_SENSITIVITY)
     decision.add_argument("--source", action="append", default=[], dest="source_ids", help="supporting E-NNN (repeatable)")
     decision.add_argument("--review-by")
@@ -684,8 +672,6 @@ def main(argv: list[str] | None = None) -> int:
     owner = getattr(args, "owner", None) or default_owner
     sensitivity = getattr(args, "sensitivity", None) or default_sensitivity
     review_by = getattr(args, "review_by", None)
-    if args.kind == "decision" and args.status == "approved" and not review_by:
-        review_by = (dt.date.today() + dt.timedelta(days=int(config["defaults"]["decision_review_days"]))).isoformat()
     if args.kind == "decision" and (args.from_path or args.write):
         return _promote(vault, args, owner=owner, sensitivity=sensitivity, review_by=review_by)
     if args.kind == "decision" and not (args.title or "").strip():

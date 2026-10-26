@@ -26,7 +26,7 @@ from whykit.evidence import retire_evidence  # noqa: E402
 from whykit.lint import lint  # noqa: E402
 from whykit.review import record_review, review_queue  # noqa: E402
 from whykit.scaffold import create_decision, create_evidence  # noqa: E402
-from _vaults import fresh_vault  # noqa: E402
+from _vaults import approved_decision, fresh_vault, historical_decision  # noqa: E402
 
 
 def call(main, *argv: str) -> tuple[int, str, str]:
@@ -68,9 +68,9 @@ class LedgerFixture(unittest.TestCase):
         review_by = (day + dt.timedelta(days=60)).isoformat()
         for source, location in (("First survey", "https://example.com/one"), ("Second survey", "https://example.com/two")):
             create_evidence(vault, source=source, location=location, kind="survey", claims=f"{source} claim", today=day)
-        create_decision(vault, "Adopt the ledger", owner="Research", status="approved",
+        historical_decision(vault, "Adopt the ledger", owner="Research",
                         source_ids=["E-001"], review_by=review_by, today=day)
-        create_decision(vault, "Adopt the ledger everywhere", owner="Research", status="approved",
+        historical_decision(vault, "Adopt the ledger everywhere", owner="Research",
                         source_ids=["E-002"], review_by=review_by, supersedes="D-001", today=day)
         create_decision(vault, "Maybe archive old notes", owner="Ops", today=day)
         retire_evidence(vault, "E-001", reason="Superseded survey", replaced_by="E-002", today=day)
@@ -467,9 +467,10 @@ class SymlinkedVaultTests(unittest.TestCase):
             except (OSError, NotImplementedError):
                 self.skipTest("symlinks are not available")
             review_by = (day + dt.timedelta(days=30)).isoformat()
-            create_decision(link, "First", owner="Research", status="approved", review_by=review_by, today=day)
-            decision_id, path = create_decision(link, "Second", owner="Research", status="approved",
-                                                review_by=review_by, supersedes="D-001", today=day)
+            create_evidence(link, source="Process study", location="https://example.com/study", kind="report", claims="Supports the process", today=day)
+            approved_decision(link, "First", owner="Research", source_ids=["E-001"], review_by=review_by, today=day)
+            decision_id, path = approved_decision(link, "Second", owner="Research", source_ids=["E-001"],
+                                                 review_by=review_by, supersedes="D-001", today=day)
             self.assertEqual(decision_id, "D-002")
             first = next((real / "06-decisions").glob("d-001-*.md")).read_text(encoding="utf-8")
             self.assertEqual(front(first, "status"), "superseded")

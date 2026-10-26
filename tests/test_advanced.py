@@ -20,7 +20,7 @@ from whykit.context import build_context  # noqa: E402
 from whykit.pack import build_pack  # noqa: E402
 from whykit.query import query_vault  # noqa: E402
 from whykit.snapshot import build_snapshot, compare_snapshot  # noqa: E402
-from _vaults import fresh_vault  # noqa: E402
+from _vaults import fresh_vault, historical_decision  # noqa: E402
 
 
 def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -43,12 +43,11 @@ class AdvancedWorkflowTests(unittest.TestCase):
             "--location", "07-research/raw", "--claims", "Supports the decision",
         )
         self.assertEqual(evidence.returncode, 0, evidence.stderr)
-        decision = run(
-            "new", "--root", str(self.vault), "decision", "Use append-only review history",
-            "--owner", "Product", "--status", "approved", "--source", "E-001",
-        )
-        self.assertEqual(decision.returncode, 0, decision.stderr)
-        return next((self.vault / "06-decisions").glob("d-001-*.md"))
+        # Reader/re-review tests cover accepted records created before approval receipts.
+        _, path = historical_decision(self.vault, "Use append-only review history",
+                                      owner="Product", source_ids=["E-001"], today=self.init_day,
+                                      review_by=(self.init_day + dt.timedelta(days=90)).isoformat())
+        return path
 
     def test_init_includes_versioned_policy_and_review_log(self) -> None:
         self.assertTrue((self.vault / "whykit.toml").exists())

@@ -31,6 +31,7 @@ from collections.abc import Callable, Iterator
 from typing import Iterable
 
 from .io import _lock_owner, consistent_read
+from .tables import split_table_row as _split_table_row, review_table_header
 from .config import CONFIG_FILE, ConfigError, load_config
 from .markdown_code import mask_code as _mask_code
 from .rule_policy import EMPTY_POLICY, Override, check_custom_rules, policy_from_config, secret_scan_skipped
@@ -1182,48 +1183,6 @@ def check_markdown_links(
             add(findings, root, note.path, line, "warning", "markdown_link.missing", f"local Markdown {kind} does not exist: ({target})")
 
 
-def _split_table_row(line: str) -> list[str]:
-    text = line.strip()
-    if text.startswith("|"):
-        text = text[1:]
-    if text.endswith("|"):
-        text = text[:-1]
-    cells: list[str] = []
-    buf: list[str] = []
-    wiki_depth = 0
-    # Searching for a closer after every opener made a row of `[[` quadratic;
-    # a closer exists later on the line exactly when the last one is further on.
-    last_close = text.rfind("]]")
-    i = 0
-    while i < len(text):
-        ch = text[i]
-        nxt = text[i + 1] if i + 1 < len(text) else ""
-        if ch == "\\" and nxt == "|":
-            buf.append("|")
-            i += 2
-            continue
-        # Only a `[[` that is closed later on the line opens a wikilink. A stray
-        # `[[` in free text must not swallow every following cell separator.
-        if ch == "[" and nxt == "[" and last_close >= i + 2:
-            wiki_depth += 1
-            buf.extend((ch, nxt))
-            i += 2
-            continue
-        if ch == "]" and nxt == "]" and wiki_depth:
-            wiki_depth -= 1
-            buf.extend((ch, nxt))
-            i += 2
-            continue
-        if ch == "|" and wiki_depth == 0:
-            cells.append("".join(buf).strip())
-            buf = []
-        else:
-            buf.append(ch)
-        i += 1
-    cells.append("".join(buf).strip())
-    return cells
-
-
 def evidence_register(root: Path) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]], list[tuple[str, int]]]:
     path = root / "00-context" / "evidence-register.md"
     if not path.exists():
@@ -1291,13 +1250,14 @@ def evidence_rows(root: Path) -> dict[str, dict[str, str]]:
     return evidence_register(root)[0]
 
 
-def check_evidence_register(root: Path, findings: list[Finding], today: dt.date) -> None:
+def check_evidence_register(root: Path, findings: list[Finding], today: dt.date, config: dict | None = None) -> None:
     path = root / "00-context" / "evidence-register.md"
     if not path.exists():
         return
     active, retired, occurrences = evidence_register(root)
     try:
-        config, _ = load_config(root)
+        if config is None:
+            config, _ = load_config(root)
         access_age_policy = config["evidence_access_age_days"]
     except ConfigError:
         # check_config reports the malformed policy once, without extra findings.
@@ -1615,6 +1575,10 @@ def check_decision_review(root: Path, notes: list[Note], findings: list[Finding]
             continue
         if note.front.get("status") != "approved":
             continue
+        provenance = note.front.get("provenance")
+        if isinstance(provenance, dict) and "human_reviewed" in provenance and provenance["human_reviewed"] is not True:
+            add(findings, root, note.path, 1, "warning", "decision.unreviewed",
+                "approved decision declares it was not human-reviewed — keep it in review until an authorized person checks the record")
         review_by = str(note.front.get("review_by", "")).strip()
         if not review_by or review_by == PLACEHOLDER_DATE:
             add(findings, root, note.path, 1, "warning", "decision.review_missing",
@@ -1694,7 +1658,7 @@ def check_decision_placeholders(root: Path, notes: list[Note], findings: list[Fi
         )
 
 
-REVIEW_OUTCOMES = {"confirmed", "update-required", "supersede-required", "archived"}
+REVIEW_OUTCOMES = {"confirmed", "update-required", "supersede-required", "archived", "approved"}
 
 def check_config(root: Path, findings: list[Finding]) -> None:
     path = root / CONFIG_FILE
@@ -1713,15 +1677,7 @@ def check_review_log(root: Path, notes: list[Note], findings: list[Finding], res
     real = _real(path)
     note = next((item for item in notes if _real(item.path) == real), None) or load_note(path)
     lines = note.text.splitlines()
-    header = ["date", "target", "reviewer", "outcome", "previous review", "next review", "note"]
-    # Compare cells, not the raw line: Markdown formatters pad table columns.
-    header_idx = next(
-        (
-            i for i, line in enumerate(lines)
-            if line.lstrip().startswith("|") and [c.lower() for c in _split_table_row(line)] == header
-        ),
-        None,
-    )
+    header_idx = review_table_header(lines)
     if header_idx is None or header_idx + 1 >= len(lines):
         add(findings, root, path, None, "error", "review_log.table", "review log table is missing or malformed")
         return
@@ -1959,6 +1915,7 @@ def lint(
     today: dt.date | None = None,
     vault: object | None = None,
     overrides: list[Override] | None = None,
+    config: dict | None = None,
 ) -> tuple[list[Path], list[Finding]]:
     """Lint *root* (or the scoped *paths* inside it).
 
@@ -2004,16 +1961,17 @@ def lint(
         check_wikilinks(root, note, index, findings, attachments, index_model.resolve_link)
         check_markdown_links(root, note, findings, link_exists)
         check_fact_evidence(root, note, findings, known_evidence)
-    check_evidence_register(root, findings, today)
+    check_evidence_register(root, findings, today, config)
     check_evidence_ids(root, notes, findings)
     check_decision_ids(root, notes, findings)
     check_decision_log(root, all_notes, findings, index_model.resolve_link)
     check_decision_review(root, notes, findings)
     check_decision_placeholders(root, notes, findings)
-    try:
-        config: dict | None = load_config(root)[0]
-    except Exception:  # noqa: BLE001 — reported as config.invalid by check_config
-        config = None
+    if config is None:
+        try:
+            config = load_config(root)[0]
+        except Exception:  # noqa: BLE001 — reported as config.invalid by check_config
+            config = None
     policy = policy_from_config(config) if config is not None else EMPTY_POLICY
     if policy.custom:
         check_custom_rules(policy, notes, findings, today, lambda path: rel(root, path))

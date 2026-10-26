@@ -91,6 +91,7 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "pack": "context-bundle.schema.json",
     "review list": "review-queue.schema.json",
     "review record": "review-record-result.schema.json",
+    "review approve": "decision-approval-result.schema.json",
     "snapshot": "snapshot.schema.json",
     "verify-snapshot": "snapshot-verify.schema.json",
     "check": "check-report.schema.json",

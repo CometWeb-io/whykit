@@ -91,7 +91,7 @@ evidence, which alternatives lost, and when someone should look at it again.
 
 ```bash
 whykit new decision "Ship SSO before audit logs" \
-  --owner Platform --status approved --source E-001
+  --owner Platform --status draft --source E-001
 ```
 
 This creates `06-decisions/d-001-ship-sso-before-audit-logs.md` from the
@@ -99,6 +99,10 @@ decision template **and** adds the matching row to the decision log in the same
 operation, so the index and the records cannot drift apart. Fill in the
 *Context*, *Decision*, *Rationale* and *Alternatives considered* sections while
 the record is still `draft` or `in_review`.
+
+A new scaffold is unaccepted. Complete its sections, then use
+[`review approve`](guide.md#approve-a-decision) to inspect and apply the exact
+reviewed snapshot. Supersession happens when its replacement is approved.
 
 ### Lifecycle
 
@@ -112,7 +116,7 @@ draft ──> in_review ──> approved ──> superseded
   **historical**. `whykit history` and `whykit check --base <ref>` refuse any
   diff that rewrites it.
 - An approved decision needs a `review_by` date. If you do not pass
-  `--review-by`, WhyKit sets one from `defaults.decision_review_days` in
+  `--next-review` to `review approve`, WhyKit sets one from `defaults.decision_review_days` in
   `whykit.toml` (90 days in a fresh vault).
 
 ### Changing your mind: supersede, do not rewrite
@@ -121,10 +125,10 @@ When an accepted decision turns out to be wrong or outdated, record a new one:
 
 ```bash
 whykit new decision "Ship audit logs first" \
-  --owner Platform --status approved --source E-001 --supersedes D-001
+  --owner Platform --status draft --source E-001 --supersedes D-001
 ```
 
-WhyKit creates `D-002`, marks `D-001` as `superseded` with
+After you complete and approve `D-002`, WhyKit marks `D-001` as `superseded` with
 `superseded_by: D-002`, and updates both decision-log rows. The old reasoning
 stays exactly as written. That is the point: six months later, the record shows
 what was believed at the time *and* what replaced it.

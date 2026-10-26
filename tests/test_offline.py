@@ -61,7 +61,7 @@ class OfflineTests(unittest.TestCase):
                 ("new", "--root", r, "evidence", "--source", "Example export", "--type", "dataset",
                  "--location", "https://example.com/export.csv", "--claims", "Example claim"),
                 ("new", "--root", r, "decision", "Example decision", "--owner", "Team",
-                 "--status", "approved", "--source", "E-001"),
+                 "--status", "draft", "--source", "E-001"),
                 ("new", "--root", r, "note", "Example note", "--workstream", "notes", "--link-from", "Home.md"),
                 ("lint", "--root", r),
                 ("status", "--root", r),
@@ -89,6 +89,14 @@ class OfflineTests(unittest.TestCase):
             for argv in steps:
                 with self.subTest(command=argv[0]):
                     self.assertEqual(self._run(*argv), 0, argv)
+                    if argv[:4] == ("new", "--root", r, "decision"):
+                        from _vaults import fill_decision
+                        from whykit.review import approve_decision
+                        fill_decision(next((vault / "06-decisions").glob("d-001-*.md")))
+                        with _no_network():
+                            plan = approve_decision(vault, "D-001", reviewer="Team")
+                            approve_decision(vault, "D-001", reviewer="Team", write=True,
+                                             expected_sha256=plan["expected_sha256"])
 
             subprocess.run(["git", "init", "-q", r], check=True, capture_output=True)
             subprocess.run(["git", "-C", r, "add", "-A"], check=True, capture_output=True)
