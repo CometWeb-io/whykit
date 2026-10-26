@@ -359,6 +359,13 @@ CLI's `whykit status --json` includes.
 
 ## Freshness
 
+The stdio protocol negotiator buffers up to 32 messages while its consumer is
+busy, then waits for the consumer. Discovery bookkeeping is bounded in batches
+and discarded once the protocol era is settled; ordinary reply IDs are not
+retained. This limits queued message count, not frame bytes, process memory or
+the time needed to read a vault. CI checks negotiation and backpressure on
+both supported MCP SDK versions, 2.2.0 and 2.3.0.
+
 Every call reads the vault as it is on disk at that moment. The server keeps
 the parsed notes between calls and reuses a note only while its file's
 modification time, change time, size and inode are all unchanged, so an edit,

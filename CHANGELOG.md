@@ -7,6 +7,11 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+- Bound the MCP protocol negotiator's queue to 32 messages and apply
+  backpressure to a slow consumer. Track only pending discovery reply IDs,
+  retire probe batches and clear bookkeeping when negotiation settles.
+  Preserve discovery-to-initialize fallback; CI checks both supported SDKs.
+
 - Add optional final evidence-row `Sensitivity` columns with register floors,
   replacement inheritance and fail-closed filtered reads. Creation and retirement
   preserve labels; malformed tables cannot become write targets. MCP captures

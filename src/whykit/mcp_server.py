@@ -1311,6 +1311,7 @@ PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion"
 DISCOVER_METHOD = "server/discover"
 # How long a handover to the handshake era waits for in-flight probe replies.
 PROBE_DRAIN_SECONDS = 5.0
+NEGOTIATION_BUFFER_SIZE = 32
 
 
 async def serve_negotiated_stream(lowlevel, read_stream, write_stream, *, lifespan_state, init_options) -> None:  # type: ignore[no-untyped-def]
@@ -1330,8 +1331,6 @@ async def serve_negotiated_stream(lowlevel, read_stream, write_stream, *, lifesp
     connection the probe opened. Both loops are the SDK's own
     ``serve_dual_era_loop`` and share the server's lifespan state.
     """
-    import math
-
     import anyio
     from mcp.server.runner import serve_dual_era_loop
     from mcp_types import JSONRPCError, JSONRPCRequest, JSONRPCResponse
@@ -1341,12 +1340,13 @@ async def serve_negotiated_stream(lowlevel, read_stream, write_stream, *, lifesp
 
         def __init__(self) -> None:
             self.answered: set[Any] = set()
+            self.awaited: set[Any] = set()
             self.progress = anyio.Event()
 
         async def send(self, item):  # type: ignore[no-untyped-def]
             await write_stream.send(item)
             message = getattr(item, "message", None)
-            if isinstance(message, (JSONRPCResponse, JSONRPCError)):
+            if isinstance(message, (JSONRPCResponse, JSONRPCError)) and message.id in self.awaited:
                 self.answered.add(message.id)
                 self.progress.set()
                 self.progress = anyio.Event()
@@ -1376,7 +1376,7 @@ async def serve_negotiated_stream(lowlevel, read_stream, write_stream, *, lifesp
     async with anyio.create_task_group() as group:
 
         async def start_loop():  # type: ignore[no-untyped-def]
-            send, receive = anyio.create_memory_object_stream(math.inf)
+            send, receive = anyio.create_memory_object_stream(NEGOTIATION_BUFFER_SIZE)
             finished = anyio.Event()
 
             async def run() -> None:
@@ -1399,7 +1399,13 @@ async def serve_negotiated_stream(lowlevel, read_stream, write_stream, *, lifesp
                     message = getattr(item, "message", None)
                     if open_era and isinstance(message, JSONRPCRequest):
                         if is_probe(message):
+                            if len(probes) >= NEGOTIATION_BUFFER_SIZE:
+                                await drain(probes)
+                                probes.clear()
+                                outbound.awaited.clear()
+                                outbound.answered.clear()
                             probes.append(message.id)
+                            outbound.awaited.add(message.id)
                         elif message.method == "initialize" and probes:
                             # The client gave up on its probe: finish answering
                             # it, then serve the handshake on a fresh loop.
@@ -1410,6 +1416,10 @@ async def serve_negotiated_stream(lowlevel, read_stream, write_stream, *, lifesp
                             open_era = False
                         else:
                             open_era = False
+                        if not open_era:
+                            probes.clear()
+                            outbound.awaited.clear()
+                            outbound.answered.clear()
                     await send.send(item)
         finally:
             await send.aclose()
