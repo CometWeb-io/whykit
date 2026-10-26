@@ -196,11 +196,14 @@ class TransactionRecoveryTests(unittest.TestCase):
                 root = Path(tmp).resolve()
                 with io.vault_mutation_lock(root):
                     lock = root / ".whykit/mutation.lock"
-                    before = lock.stat(), lock.read_bytes()
+                    before = lock.stat()
+                    # Windows denies reading the byte range held by our writer.
+                    before_bytes = lock.read_bytes() if os.name != "nt" else None
                     with self.assertRaisesRegex(ValueError, "cannot replace its own state"):
                         io.apply_transaction(root, {root / destination: "replacement\n"})
-                    self.assertEqual(lock.stat().st_ino, before[0].st_ino)
-                    self.assertEqual(lock.read_bytes(), before[1])
+                    self.assertEqual(lock.stat(), before)
+                    if before_bytes is not None:
+                        self.assertEqual(lock.read_bytes(), before_bytes)
                     self.assertEqual(list((root / ".whykit/transactions").glob("*/READY")), [])
 
                     def read(root=root):
@@ -211,6 +214,7 @@ class TransactionRecoveryTests(unittest.TestCase):
                         with self.assertRaises(OSError) as caught:
                             pool.submit(read).result(timeout=5)
                     self.assertEqual(caught.exception.errno, errno.EBUSY)
+                self.assertEqual(json.loads(lock.read_bytes())["pid"], os.getpid())
                 with io.vault_read_lock(root):
                     pass
 
@@ -226,16 +230,20 @@ class TransactionRecoveryTests(unittest.TestCase):
                     manifest[-1]["target"] = destination
                     (tx / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
                     lock = root / ".whykit/mutation.lock"
-                    before = lock.stat(), lock.read_bytes()
+                    before = lock.stat()
+                    # Windows denies reading the byte range held by our writer.
+                    before_bytes = lock.read_bytes() if os.name != "nt" else None
                     with self.assertRaisesRegex(RuntimeError, "cannot replace its own state"):
                         io.recover_pending_transactions(root)
                     self.assertFalse((root / "first.md").exists())
                     self.assertFalse((root / "last.md").exists())
-                    self.assertEqual(lock.stat().st_ino, before[0].st_ino)
-                    self.assertEqual(lock.read_bytes(), before[1])
+                    self.assertEqual(lock.stat(), before)
+                    if before_bytes is not None:
+                        self.assertEqual(lock.read_bytes(), before_bytes)
                     self.assertTrue((tx / "READY").exists())
                     self.assertFalse((tx / "COMMITTED").exists())
                     self.assertEqual(len(list(tx.glob("*.new"))), 2)
+                self.assertEqual(json.loads(lock.read_bytes())["pid"], os.getpid())
 
     def test_transaction_allows_similar_names_outside_root_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
