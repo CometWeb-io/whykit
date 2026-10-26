@@ -7,6 +7,8 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-26
+
 - Require uv 0.13.4 or newer, pin CI to uv 0.13.5 and update certifi after the
   CA certificate incident. Bootstrap the Action's pip from a SHA-256-pinned
   fixed wheel before package resolution; failed bootstrap stops installation.
@@ -93,10 +95,9 @@ CLI and the lint rule codes.
   2026-10-04 baseline, so evidence aging no longer changes the `pack` digest
   with the host clock. Runtime freshness checks and recorded hashes are unchanged.
 
-The draft for **0.3.0**, the first public package release. It covers every
+Prepared for **0.3.0**, the first public package release. It covers every
 change since the internal 0.2.0 milestone, including the `0.3.0.dev0` source
-preview that source checkouts report until the release. Upgrading from a
-checkout of 0.2.0 or the preview: read the
+preview. Upgrading from a checkout of 0.2.0 or the preview: read the
 [0.3 migration guide](docs/migration-0.3.md) first.
 
 Copyright is held by Maciej Zmitrukiewicz. CometWeb is the product name and
@@ -890,8 +891,9 @@ Each entry says what an existing vault, script or pipeline has to change. The
 
 ## [0.2.0] — 2026-09-17
 
-Internal milestone. It was never tagged and never published. Source checkouts
-after it report `0.3.0.dev0`; their changes are listed under [Unreleased].
+Internal milestone. It was never tagged and never published. Development
+checkouts before the 0.3.0 release preparation reported `0.3.0.dev0`; their
+changes are included in [0.3.0].
 
 ### Added
 
@@ -964,3 +966,6 @@ Initial implementation. No package was published under this version.
 - Deterministic linting for structure, links, evidence, decision IDs, lifecycle
   rules and common secret leaks.
 - JSON Schemas, a worked example vault, and an optional local Explorer.
+
+[Unreleased]: https://github.com/CometWeb-io/whykit/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/CometWeb-io/whykit/releases/tag/v0.3.0
