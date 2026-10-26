@@ -336,6 +336,13 @@ A tool call the server cannot answer comes back as a tool result with
 | `unauthorized` | Streamable HTTP only: the request lacks the bearer token (HTTP 401, before any MCP processing) |
 | `forbidden_host` | Streamable HTTP without a token only: the `Host` or `Origin` header does not name this machine (HTTP 421, before any MCP processing) |
 | `internal_error` | Anything unexpected; the message is fixed and never carries exception text |
+| `request_too_large` | A stdio input frame exceeds 1 MiB; the connection closes after the error |
+| `invalid_request_id` | A stdio request ID has an invalid type or does not fit 1024 bytes of UTF-8 JSON |
+| `response_too_large` | The complete result exceeds 1 MiB, or a JSON-RPC response frame exceeds 2 MiB |
+
+Stdio input errors use a JSON-RPC error with `id: null` and the same error
+object under `error.data`. Result-budget failures use a tool error for tool
+calls and a JSON-RPC error for other methods.
 
 The body is the same whether the SDK rejects arguments against the advertised
 input schema (for example a negative `limit` or a 600-character target) or
@@ -357,13 +364,34 @@ file the vault index skips (for example under `.obsidian/`) is reported as
 missing rather than confirmed. `status` drops the absolute root path that the
 CLI's `whykit status --json` includes.
 
+## Byte budgets
+
+A serialized MCP result must fit **1 MiB** of compact UTF-8 JSON. For tool calls
+this includes both the text and structured copies, metadata and the negotiated
+result envelope. A larger tool result becomes an `isError` result with code
+`response_too_large`; larger resources, lists and prompts return a bounded
+JSON-RPC internal error. These result checks apply to every transport.
+
+The stdio transport also caps incoming frames at **1 MiB**, including the line
+ending, outgoing frames at **2 MiB**, including the line ending, and IDs at
+**1024 bytes** of UTF-8 JSON, including quoting and escaping. Invalid JSON,
+invalid IDs and schema errors return fixed errors without echoing the input;
+subsequent valid requests can continue. An oversized input frame closes the
+connection after an error: reconnect rather than sending the rest of the line.
+
+Buffered stdout remains separate from the protocol stream. Descriptor isolation
+uses private SDK interfaces; startup checks that they exist, and CI exercises
+the transport on SDK 2.2.0 and 2.3.0. The checks do not limit total process memory,
+SDK task concurrency or vault-reading time: reports are still built before their
+serialized size is checked. HTTP request-body/rate/time limits are separate.
+
 ## Freshness
 
 The stdio protocol negotiator buffers up to 32 messages while its consumer is
 busy, then waits for the consumer. Discovery bookkeeping is bounded in batches
 and discarded once the protocol era is settled; ordinary reply IDs are not
-retained. This limits queued message count, not frame bytes, process memory or
-the time needed to read a vault. CI checks negotiation and backpressure on
+retained. This queue limit counts messages; the byte budgets above are separate and do
+not bound process memory or the time needed to read a vault. CI checks negotiation and backpressure on
 both supported MCP SDK versions, 2.2.0 and 2.3.0.
 
 Every call reads the vault as it is on disk at that moment. The server keeps

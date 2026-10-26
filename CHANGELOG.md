@@ -7,6 +7,12 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+- Cap complete MCP results at 1 MiB, stdio input/output frames at 1/2 MiB
+  and request IDs at 1024 bytes of UTF-8 JSON. Replace oversized results and
+  invalid input with bounded errors; preserve the session after malformed
+  frames. Isolate buffered stdout and check the required SDK transport
+  capabilities at startup, with byte-boundary regressions on SDK 2.2/2.3.
+
 - Bound the MCP protocol negotiator's queue to 32 messages and apply
   backpressure to a slow consumer. Track only pending discovery reply IDs,
   retire probe batches and clear bookkeeping when negotiation settles.

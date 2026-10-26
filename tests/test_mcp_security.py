@@ -180,6 +180,7 @@ class McpSensitivityTests(unittest.TestCase):
             def __init__(self, name: str, **kwargs: object) -> None:
                 self.name = name
                 self.instructions = kwargs.get("instructions")
+                self.middleware = []
 
             def tool(self, **kwargs: object):
                 def register(function):
@@ -243,7 +244,7 @@ class McpSensitivityTests(unittest.TestCase):
         pydantic.Field = lambda **kwargs: kwargs  # type: ignore[attr-defined]
         pydantic.ValidationError = type("ValidationError", (ValueError,), {})  # type: ignore[attr-defined]
 
-        with patch.dict(sys.modules, {
+        with patch("whykit.mcp_server._require_mcp", return_value=SDKServer), patch.dict(sys.modules, {
             "mcp": package,
             "mcp.server": server_package,
             "mcp.server.mcpserver": types.ModuleType("mcp.server.mcpserver"),

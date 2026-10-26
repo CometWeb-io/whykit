@@ -21,6 +21,7 @@ a loopback port (a non-loopback address requires a bearer token).
 
 import argparse
 import contextvars
+import contextlib
 import base64
 import copy
 import datetime as dt
@@ -42,6 +43,10 @@ from typing import Any
 from .sensitivity import SENSITIVITY_LEVEL, _sensitivity_level, note_sensitivity_level, classified_evidence, evidence_register_notes
 
 MAX_MCP_CONTEXT = 50_000
+MAX_MCP_RESULT_BYTES = 1_048_576
+MAX_STDIO_REQUEST_BYTES = 1_048_576
+MAX_RPC_FRAME_BYTES = 2_097_152
+MAX_RPC_ID_BYTES = 1_024
 MAX_MCP_RESULTS = 100
 MAX_MCP_PACK_DOCS = 20
 MAX_TARGET_CHARS = 512
@@ -101,6 +106,121 @@ class ToolFailure(Exception):
         return {"error": {"code": self.code, "message": self.message}}
 
 
+def _result_fits_budget(payload: Any, *, max_bytes: int | None = None) -> bool:
+    """Count the complete compact UTF-8 JSON result, including escaped text."""
+    # shortcut: reports are already materialized; use incremental builders if vault memory becomes limiting.
+    remaining = MAX_MCP_RESULT_BYTES if max_bytes is None else max_bytes
+    for chunk in json.JSONEncoder(ensure_ascii=False, separators=(",", ":")).iterencode(payload):
+        if len(chunk) > remaining:
+            return False
+        try:
+            remaining -= len(chunk.encode("utf-8"))
+        except UnicodeEncodeError:
+            return False
+        if remaining < 0:
+            return False
+    return True
+
+
+def _validate_rpc_id(message: object) -> None:
+    if not isinstance(message, dict):
+        raise ToolFailure("invalid_argument", "JSON-RPC messages must be objects")
+    if "id" not in message or message["id"] is None:
+        return
+    value = message["id"]
+    if type(value) not in (str, int) or not _result_fits_budget(value, max_bytes=MAX_RPC_ID_BYTES):
+        raise ToolFailure("invalid_request_id", "request ID must fit 1024 bytes of UTF-8 JSON")
+
+
+def _rpc_error(failure: ToolFailure, code: int, request_id: object = None) -> dict:
+    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": failure.message, "data": failure.payload()}}
+
+
+@contextlib.asynccontextmanager
+async def bounded_stdio_server():  # type: ignore[no-untyped-def]
+    """Binary line budgets with the SDK's native standard-descriptor isolation."""
+    import anyio
+    import mcp_types
+    from mcp.shared.message import SessionMessage
+    from mcp.server.stdio import _claim_fd, _open_stdin_diversion, _open_stdout_diversion
+
+    # shortcut: SDK 2.x descriptor claims are private; the SDK matrix must cover upgrades.
+    restore_stdin = restore_stdout = None
+    try:
+        stdin_buffer, restore_stdin = _claim_fd(0, sys.stdin, "rb", _open_stdin_diversion)
+        stdout_buffer, restore_stdout = _claim_fd(1, sys.stdout, "wb", _open_stdout_diversion)
+        incoming, read_stream = anyio.create_memory_object_stream(0)
+        write_stream, outgoing = anyio.create_memory_object_stream(0)
+        writer_done = anyio.Event()
+
+        async def reject(failure: ToolFailure, code: int) -> None:
+            error = mcp_types.JSONRPCError.model_validate(_rpc_error(failure, code))
+            await write_stream.send(SessionMessage(error))
+
+        async def read() -> None:
+            async with incoming:
+                while True:
+                    line = await anyio.to_thread.run_sync(stdin_buffer.readline, MAX_STDIO_REQUEST_BYTES + 1, abandon_on_cancel=True)
+                    if not line:
+                        return
+                    if len(line) > MAX_STDIO_REQUEST_BYTES:
+                        await reject(ToolFailure("request_too_large", "stdio frame exceeds 1 MiB; reconnect"), -32600)
+                        return  # Do not drain an unbounded line or wait for its newline.
+                    try:
+                        raw = json.loads(line)
+                    except (ValueError, UnicodeError, RecursionError):
+                        await reject(ToolFailure("invalid_argument", "invalid JSON frame"), -32700)
+                        continue
+                    try:
+                        _validate_rpc_id(raw)
+                    except ToolFailure as failure:
+                        await reject(failure, -32600)
+                        continue
+                    try:
+                        message = mcp_types.jsonrpc_message_adapter.validate_json(line, by_name=False)
+                    except Exception:  # noqa: BLE001 - schema errors can contain peer data
+                        await reject(ToolFailure("invalid_argument", "invalid JSON-RPC frame"), -32600)
+                        continue
+                    await incoming.send(SessionMessage(message))
+
+        async def write() -> None:
+            try:
+                async with outgoing:
+                    async for item in outgoing:
+                        message = item.message
+                        encoded = message.model_dump_json(by_alias=True, exclude_unset=True).encode("utf-8") + b"\n"
+                        if len(encoded) > MAX_RPC_FRAME_BYTES:
+                            request_id = getattr(message, "id", None)
+                            if not _result_fits_budget(request_id, max_bytes=MAX_RPC_ID_BYTES):
+                                request_id = None
+                            failure = ToolFailure("response_too_large", "JSON-RPC frame exceeds 2 MiB")
+                            encoded = (json.dumps(_rpc_error(failure, -32603, request_id), ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+                        await anyio.to_thread.run_sync(stdout_buffer.write, encoded, abandon_on_cancel=True)
+                        await anyio.to_thread.run_sync(stdout_buffer.flush, abandon_on_cancel=True)
+            finally:
+                writer_done.set()
+
+        async with anyio.create_task_group() as group:
+            group.start_soon(read)
+            group.start_soon(write)
+            try:
+                yield read_stream, write_stream
+            finally:
+                await write_stream.aclose()
+                await read_stream.aclose()
+                with anyio.move_on_after(5, shield=True):
+                    await writer_done.wait()
+                group.cancel_scope.cancel()
+    finally:
+        if restore_stdout is not None:
+            # Flush diverted text before restoring the protocol descriptor.
+            with contextlib.suppress(OSError, ValueError):
+                sys.stdout.flush()
+            restore_stdout()
+        if restore_stdin is not None:
+            restore_stdin()
+
+
 MISSING_EXTRA_MESSAGE = (
     "whykit-mcp needs the optional MCP extra, which is not installed.\n"
     "  From a WhyKit checkout:  uv sync --extra mcp && uv run whykit-mcp --root /path/to/vault\n"
@@ -117,6 +237,16 @@ def _require_mcp():
         # `pip install 'whykit[mcp]'` would not work.
         print(MISSING_EXTRA_MESSAGE, file=sys.stderr)
         raise SystemExit(2) from exc
+    try:
+        from mcp.server import runner, stdio
+        required = ((stdio, "_claim_fd"), (stdio, "_open_stdin_diversion"),
+                    (stdio, "_open_stdout_diversion"), (runner, "serve_dual_era_loop"))
+        supported = all(callable(getattr(module, name, None)) for module, name in required)
+    except ImportError:
+        supported = False
+    if not supported:
+        print("Unsupported MCP SDK transport contract; install the locked whykit[mcp] extra.", file=sys.stderr)
+        raise SystemExit(2)
     return MCPServer
 
 
@@ -1489,6 +1619,9 @@ def build_server(
     )
 
     def result(payload: dict, is_error: bool):
+        if not _result_fits_budget(payload):
+            payload = ToolFailure("response_too_large", "result exceeds the 1 MiB response budget").payload()
+            is_error = True
         return CallToolResult(
             content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))],
             structured_content=payload,
@@ -1537,10 +1670,8 @@ def build_server(
         async def run_stdio_async(self) -> None:
             # Same as the SDK's stdio runner, except that a `server/discover`
             # probe does not lock the connection out of the classic handshake.
-            from mcp.server.stdio import stdio_server
-
             lowlevel = self._lowlevel_server
-            async with stdio_server() as (read_stream, write_stream):
+            async with bounded_stdio_server() as (read_stream, write_stream):
                 async with lowlevel.lifespan(lowlevel) as lifespan_state:
                     await serve_negotiated_stream(
                         lowlevel, read_stream, write_stream,
@@ -1611,6 +1742,36 @@ def build_server(
     mcp = WhyKitServer(
         "whykit", version=__version__, instructions=SERVER_INSTRUCTIONS, subscriptions=bus, lifespan=lifespan,
     )
+
+    async def bound_result(ctx, call_next):  # type: ignore[no-untyped-def]
+        try:
+            payload = await call_next(ctx)
+        except MCPError as exc:
+            error = {"jsonrpc": "2.0", "id": ctx.request_id, "error": exc.error.model_dump(by_alias=True, exclude_none=True)}
+            if _result_fits_budget(error, max_bytes=MAX_RPC_FRAME_BYTES):
+                raise
+            failure = ToolFailure("response_too_large", "JSON-RPC frame exceeds 2 MiB")
+            raise MCPError(code=INTERNAL_ERROR, message=failure.message, data=failure.payload()) from None
+        except Exception as exc:  # noqa: BLE001 - never echo validation input/exception text
+            code = INVALID_PARAMS if isinstance(exc, ValidationError) else INTERNAL_ERROR
+            failure = ToolFailure("invalid_argument" if code == INVALID_PARAMS else "internal_error", "request could not be processed")
+            raise MCPError(code=code, message=failure.message, data=failure.payload()) from None
+        frame = {"jsonrpc": "2.0", "id": ctx.request_id, "result": payload}
+        if _result_fits_budget(payload) and _result_fits_budget(frame, max_bytes=MAX_RPC_FRAME_BYTES):
+            return payload
+        failure = ToolFailure("response_too_large", "result exceeds the 1 MiB response budget")
+        if ctx.method == "tools/call":
+            bounded = result(failure.payload(), True).model_dump(by_alias=True, mode="json", exclude_none=True)
+            # Keep the SDK's negotiated result envelope, never the rejected data.
+            for key in ("resultType", "_meta"):
+                if key in payload:
+                    bounded[key] = payload[key]
+            if not _result_fits_budget(bounded):
+                raise MCPError(code=INTERNAL_ERROR, message=failure.message, data=failure.payload())
+            return bounded
+        raise MCPError(code=INTERNAL_ERROR, message=failure.message, data=failure.payload())
+
+    mcp.middleware.append(bound_result)
 
     @mcp.tool(title="Search the vault", annotations=read_only)
     def query(
