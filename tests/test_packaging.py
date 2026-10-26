@@ -444,6 +444,22 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.build = (ROOT / ".github" / "workflows" / "release-build.yml").read_text(encoding="utf-8")
         self.ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
+    def test_release_allows_the_reusable_ci_requested_pr_permission(self) -> None:
+        quality = self.release.split("\n  quality:\n", 1)[1].split("\n  build:\n", 1)[0]
+        levels = {"none": 0, "read": 1, "write": 2}
+        pattern = r"^      pull-requests: (read|write)[ \t]*(?:#.*)?$"
+        requested = re.findall(pattern, self.ci, re.MULTILINE)
+        allowed = re.search(pattern, quality, re.MULTILINE)
+        # GitHub validates even nested jobs whose `if` excludes the tag event.
+        self.assertLessEqual(
+            max((levels[value] for value in requested), default=0),
+            levels[allowed.group(1) if allowed else "none"],
+            "the release caller must allow permissions requested by reusable CI",
+        )
+        for job in ("build", "publish"):
+            block = self.release.split(f"\n  {job}:\n", 1)[1].split("\n  publish:\n", 1)[0]
+            self.assertNotIn("pull-requests:", block)
+
     def test_publish_job_only_downloads_what_the_build_job_checked(self) -> None:
         publish = self.release.split("\n  publish:\n", 1)[1]
         build = self.build
