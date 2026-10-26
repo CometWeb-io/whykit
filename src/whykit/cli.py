@@ -603,7 +603,7 @@ def cmd_adopt(args: argparse.Namespace) -> int:
         argv += ["--owner", args.owner]
     if args.profile:
         argv += ["--profile", args.profile]
-    if args.compare:
+    if args.compare is not None:
         argv += ["--compare", args.compare]
     if args.write:
         argv.append("--write")

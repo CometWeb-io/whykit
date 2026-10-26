@@ -49,14 +49,18 @@ def evidence_register_notes(index: Any) -> list[Any]:
 
 def classified_evidence(index: Any) -> tuple[dict, dict, list, bool]:
     """Classify rows from the same captured bytes as their register's label."""
-    from .lint import _parse_evidence_register_text
-    from .tables import split_table_row
-
     registers = evidence_register_notes(index)
     if len(registers) != 1:
         # Ambiguous registers must not expose any rows or raw candidate bodies.
         return {}, {}, [], bool(registers)
-    note = registers[0]
+    return classify_evidence_register(registers[0])
+
+
+def classify_evidence_register(note: Any) -> tuple[dict, dict, list, bool]:
+    """Classify one captured register with duplicate and replacement-chain floors."""
+    from .lint import _parse_evidence_register_text
+    from .tables import split_table_row
+
     floor = note_sensitivity_level(note)
     names = {level: name for name, level in SENSITIVITY_LEVEL.items()}
     active, retired, occurrences = _parse_evidence_register_text(note.text)

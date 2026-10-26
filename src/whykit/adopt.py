@@ -38,7 +38,7 @@ from .lint import (
 )
 from .console import as_printed, emit_machine
 from .immutability import _review_log_parts
-from .sensitivity import SENSITIVITY_LEVEL, UNREADABLE_LEVEL, note_sensitivity_level
+from .sensitivity import SENSITIVITY_LEVEL, UNREADABLE_LEVEL, classify_evidence_register, note_sensitivity_level
 
 SKIP_DIRS = {
     ".git", ".obsidian", ".import-staging", "node_modules", "__pycache__",
@@ -331,11 +331,20 @@ def compare_migration(source: Path, target: Path, candidates: list[Candidate]) -
     """Compare same-path Markdown snapshots without rewriting either tree."""
     files = []
     scanned = {candidate.relative: candidate for candidate in candidates}
-    names = sorted(set(scanned) | {
-        path.relative_to(source).as_posix() for path in iter_markdown(source)
-        if not any(part in SKIP_DIRS for part in path.relative_to(source).parts)
-    })
-    for relative in names:
+    names = set(scanned)
+
+    def unreadable(exc: OSError) -> None:
+        names.add(Path(exc.filename or source).relative_to(source).as_posix())
+
+    for directory, folders, filenames in os.walk(source, followlinks=False, onerror=unreadable):
+        folder = Path(directory)
+        folders[:] = [name for name in folders if name not in SKIP_DIRS]
+        for name in folders[:]:
+            if (folder / name).is_symlink():
+                names.add((folder / name).relative_to(source).as_posix())
+                folders.remove(name)
+        names.update((folder / name).relative_to(source).as_posix() for name in filenames if is_markdown_name(name))
+    for relative in sorted(names):
         path = source / relative
         candidate = scanned.get(relative)
         entry: dict = {"path": relative, "source_sha256": candidate.sha256 if candidate else None,
@@ -372,9 +381,8 @@ def compare_migration(source: Path, target: Path, candidates: list[Candidate]) -
             old_floor, new_floor = note_sensitivity_level(old), note_sensitivity_level(new)
             lowered = new_floor < old_floor
             if path.name.casefold() == "evidence-register.md":
-                from .lint import _parse_evidence_register_text
-                old_active, old_retired, _ = _parse_evidence_register_text(old.text)
-                new_active, new_retired, _ = _parse_evidence_register_text(new.text)
+                old_active, old_retired, _, _ = classify_evidence_register(old)
+                new_active, new_retired, _, _ = classify_evidence_register(new)
                 new_rows = {**new_active, **new_retired}
                 for identifier, row in {**old_active, **old_retired}.items():
                     replacement = new_rows.get(identifier)
@@ -638,8 +646,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--compare", metavar="DIR", help="read-only preservation check against files at the same relative paths")
     parser.add_argument("--json", action="store_true", help="machine-readable inventory + score (implies dry-run shape)")
     args = parser.parse_args(argv)
-    if args.compare and args.write:
-        return emit_error("usage", "--compare cannot be combined with --write", json_mode=args.json)
+    if args.compare is not None and (args.write or not args.compare):
+        return emit_error("usage", "--compare requires a directory and cannot be combined with --write", json_mode=args.json)
 
     source = Path(args.source).expanduser().resolve()
     if not source.is_dir():

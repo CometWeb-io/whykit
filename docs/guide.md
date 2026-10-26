@@ -94,9 +94,10 @@ This is read-only and cannot be combined with `--write`. Exit 1 means a
 preservation check failed; exit 2 means the comparison could not run.
 The optional `preservation` report lists byte hashes and changes, lost wikilink
 occurrences and IDs, changed decision/source declarations, weakened note or
-evidence-row sensitivity, and rewritten review rows. Unreadable or escaping
-files fail the check. A staged baseline under `.import-staging/` can be used
-for comparison, while adoption writes still reject overlapping directories.
+effective evidence-row sensitivity (including duplicate IDs and retired-source
+replacements), and rewritten review rows. Unreadable subtrees, uninspected
+directory symlinks and unreadable or escaping files fail the check. A staged
+baseline under `.import-staging/` can be used for comparison, while adoption writes still reject overlapping directories.
 
 A passing comparison covers those checks. Review every `unchanged: false`
 file: prose meaning, code examples, attachments and Git commit history are

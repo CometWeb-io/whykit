@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -104,6 +105,69 @@ class PreservationTests(unittest.TestCase):
         (self.source / "gone.md").write_bytes(b"Changed after inventory.\n")
         self.assertIn("source_changed", adopt.compare_migration(self.source, self.target, candidates)["files"][0]["issues"])
 
+    @unittest.skipIf(os.name == "nt", "POSIX directory permissions")
+    def test_unreadable_source_subtree_cannot_hide_behind_a_matching_note(self) -> None:
+        self.put("ok.md", b"Matching note.\n")
+        hidden = self.source / "locked"
+        hidden.mkdir()
+        (hidden / "lost.md").write_bytes(b"Read [[important]] E-001.\n")
+        hidden.chmod(0)
+        try:
+            if os.access(hidden, os.R_OK | os.X_OK):
+                self.skipTest("runner bypasses directory permissions")
+            report = self.report()
+            self.assertFalse(report["passed"])
+            self.assertTrue(any(f["path"] == "locked" and "unreadable_source" in f["issues"] for f in report["files"]))
+        finally:
+            hidden.chmod(0o700)
+
+    def test_uninspected_source_directory_symlink_fails_comparison(self) -> None:
+        self.put("ok.md", b"Matching note.\n")
+        outside = self.base / "outside"
+        outside.mkdir()
+        (outside / "lost.md").write_bytes(b"Read [[important]] E-001.\n")
+        try:
+            (self.source / "alias").symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest("directory symlinks unavailable")
+        report = self.report()
+        self.assertFalse(report["passed"])
+        self.assertTrue(any(f["path"] == "alias" and "unreadable_source" in f["issues"] for f in report["files"]))
+
+    def test_intentionally_excluded_source_directories_do_not_fail(self) -> None:
+        self.put("ok.md", b"Matching note.\n")
+        self.put("node_modules/fixture.md", b"Excluded dependency note.\n")
+        (self.target / "node_modules/fixture.md").unlink()
+        self.assertTrue(self.report()["passed"])
+
+    def test_duplicate_evidence_normalization_cannot_lower_effective_sensitivity(self) -> None:
+        from whykit.scaffold import create_evidence
+        register = self.vault / "00-context/evidence-register.md"
+        register.write_text(register.read_text(encoding="utf-8").replace("sensitivity: internal", "sensitivity: public"), encoding="utf-8")
+        create_evidence(self.vault, source="Example fixture", kind="fixture", location="https://example.com/source",
+                        claims="Synthetic support", sensitivity="restricted")
+        before = register.read_bytes()
+        row = next(line for line in before.splitlines() if line.startswith(b"| E-001 |"))
+        public_row = row.replace(b"| restricted |", b"| public |")
+        self.put("00-context/evidence-register.md", before.replace(row, row + b"\n" + public_row), before.replace(row, public_row))
+        entry = self.report()["files"][0]
+        self.assertIn("sensitivity_lowered", entry["issues"])
+
+    def test_retirement_relationship_cannot_lower_effective_sensitivity(self) -> None:
+        from whykit.scaffold import create_evidence
+        from whykit.evidence import retire_evidence
+        register = self.vault / "00-context/evidence-register.md"
+        register.write_text(register.read_text(encoding="utf-8").replace("sensitivity: internal", "sensitivity: public"), encoding="utf-8")
+        for label in ("public", "restricted"):
+            create_evidence(self.vault, source="Example fixture", kind="fixture", location="https://example.com/source",
+                            claims="Synthetic support", sensitivity=label)
+        retire_evidence(self.vault, "E-001", reason="Replaced fixture", replaced_by="E-002")
+        before = register.read_bytes()
+        row = next(line for line in before.splitlines() if line.startswith(b"| E-001 |"))
+        self.put("00-context/evidence-register.md", before, before.replace(row, row.replace(b"| E-002 |", b"|  |")))
+        entry = self.report()["files"][0]
+        self.assertIn("sensitivity_lowered", entry["issues"])
+
     def test_sensitivity_cannot_be_lowered_or_removed(self) -> None:
         before = b"---\nsensitivity: restricted\n---\nSource words.\n"
         for after in (before.replace(b"restricted", b"public"), b"Source words.\n"):
@@ -177,6 +241,16 @@ class PreservationTests(unittest.TestCase):
         code, output, _ = call(*args)
         self.assertEqual(code, 1)
         self.assertIn("wikilinks_lost", output)
+
+    def test_empty_compare_argument_cannot_fall_back_to_adoption_or_write(self) -> None:
+        self.put("note.md", b"Original note words.\n")
+        before = {p.relative_to(self.base): p.read_bytes() for p in self.base.rglob("*") if p.is_file()}
+        for flags in ((), ("--write",)):
+            with self.subTest(flags=flags):
+                code, output, _ = call("adopt", str(self.source), "--into", str(self.vault), "--compare", "", "--json", *flags)
+                self.assertEqual(code, 2)
+                self.assertEqual(json.loads(output)["error"]["code"], "usage")
+        self.assertEqual({p.relative_to(self.base): p.read_bytes() for p in self.base.rglob("*") if p.is_file()}, before)
 
     def test_unreadable_target_has_an_explicit_failure(self) -> None:
         self.put("note.md", b"Original words.\n")
