@@ -7,6 +7,9 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+- Keep release rehearsal pending when the local main reference is missing and
+  stop MCP smoke when locked dependency constraints cannot be exported.
+
 - Stream graph JSON and Obsidian exports without a second complete JSON string;
   retain byte format, UTF-8 output, CRLF, permissions and atomic replacement.
 

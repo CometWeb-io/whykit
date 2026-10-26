@@ -250,17 +250,41 @@ class SkipBuildRehearsalTests(unittest.TestCase):
         self.assertIn("PENDING changelog section is dated", out)
         self.assertNotIn("READY TO TAG", out)
 
-    def test_final_version_is_ready_to_tag_the_exact_commit(self) -> None:
+    def final_candidate(self) -> str:
         (self.repo / "src" / "whykit" / "__init__.py").write_text('__version__ = "0.3.0"\n', encoding="utf-8")
         (self.repo / "CHANGELOG.md").write_text(
             changelog("", ("0.3.0", "2026-10-10", "### Breaking changes\n\n- New exit code.\n"), OLD), encoding="utf-8",
         )
         self.git("commit", "-q", "-am", "Release 0.3.0")
         head = self.git("rev-parse", "HEAD").strip()
+        return head
+
+    def test_final_version_is_ready_to_tag_the_exact_commit(self) -> None:
+        head = self.final_candidate()
+        self.git("update-ref", "refs/remotes/origin/main", head)
         code, out = self.rehearse()
         self.assertEqual(code, 0, out)
+        self.assertIn("PASS    commit is on origin/main", out)
         self.assertIn("READY TO TAG", out)
         self.assertIn(f'git tag -a v0.3.0 -m "WhyKit 0.3.0" {head}', out)
+        self.assert_never_released()
+
+    def test_final_candidate_without_origin_main_remains_pending(self) -> None:
+        self.final_candidate()
+        code, out = self.rehearse()
+        self.assertEqual(code, 0, out)
+        self.assertIn("PENDING commit is on origin/main", out)
+        self.assertNotIn("READY TO TAG", out)
+        self.assert_never_released()
+
+    def test_final_candidate_outside_known_main_remains_pending(self) -> None:
+        previous = self.git("rev-parse", "HEAD").strip()
+        self.final_candidate()
+        self.git("update-ref", "refs/remotes/origin/main", previous)
+        code, out = self.rehearse()
+        self.assertEqual(code, 0, out)
+        self.assertIn("PENDING commit is on origin/main", out)
+        self.assertNotIn("READY TO TAG", out)
         self.assert_never_released()
 
     def test_dirty_tree_or_other_checkout_fails(self) -> None:
@@ -294,6 +318,29 @@ class SkipBuildRehearsalTests(unittest.TestCase):
         with self.assertRaisesRegex(rehearsal.RehearsalError, "inside the repository"), contextlib.redirect_stdout(io.StringIO()):
             rehearsal.rehearse(args, root=self.repo)
         self.assertFalse((self.repo / "out").exists())
+
+
+class McpConstraintsTests(unittest.TestCase):
+    def test_failed_or_empty_export_cannot_fall_back_to_unpinned_install(self) -> None:
+        for code, output in ((1, ""), (0, " \n")):
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as tmp:
+                run = rehearsal.Rehearsal(ROOT, Path(tmp), online=False, echo=False)
+                result = subprocess.CompletedProcess(["uv", "export"], code, output, "fixture export failure" if code else "")
+                with mock.patch.object(run, "run", return_value=result), self.assertRaises(rehearsal.RehearsalError):
+                    rehearsal.mcp_constraints(run)
+                self.assertFalse((Path(tmp) / "mcp-constraints.txt").exists())
+
+    def test_successful_export_preserves_locked_constraints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run = rehearsal.Rehearsal(ROOT, Path(tmp), online=False, echo=False)
+            text = "mcp==2.2.0\nanyio==4.10.0\n"
+            result = subprocess.CompletedProcess(["uv", "export"], 0, text, "")
+            with mock.patch.object(run, "run", return_value=result) as execute:
+                path = rehearsal.mcp_constraints(run)
+            self.assertEqual(path.read_text(encoding="utf-8"), text)
+            command = execute.call_args.args[0]
+            self.assertIn("--locked", command)
+            self.assertEqual(command[command.index("--extra") + 1], "mcp")
 
 
 @unittest.skipUnless(os.environ.get("WHYKIT_REHEARSAL_E2E") == "1", "set WHYKIT_REHEARSAL_E2E=1 to build, install and smoke-test for real")

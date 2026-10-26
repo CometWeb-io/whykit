@@ -86,6 +86,10 @@ publishing. No API token exists anywhere.
    `--skip-build` to check only the version, notes and commands, and
    `--python 3.11` to limit the smoke to one interpreter.
 
+   A missing local `origin/main` reference leaves the main-containment gate
+   pending; the script does not fetch it. MCP smoke requires a nonempty export
+   of the locked dependencies and stops if that export fails.
+
    It prints one SHA-256 per archive. Keep them; step 7 compares against them.
    The archives stay in the work directory it names, outside the checkout.
    Before the version bump the rehearsal reports PENDING steps (a `.dev`
