@@ -14,9 +14,9 @@ test("the search dialog is fully keyboard driven", async ({ page }) => {
 
   await page.keyboard.type("hubspot");
   const options = dialog.getByRole("option");
-  await expect(options.first()).toBeVisible();
-  const count = await options.count();
-  expect(count).toBeGreaterThan(1);
+  // Wait for the full Northline query, not the deferred results of a typed prefix.
+  const count = 14;
+  await expect(options).toHaveCount(count);
   await expect(dialog.getByRole("status")).toHaveText(`${count} results`);
   await expect(box).toHaveAttribute("aria-activedescendant", "search-option-0");
   await expect(options.nth(0)).toHaveAttribute("aria-selected", "true");
