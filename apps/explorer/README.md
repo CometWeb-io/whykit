@@ -48,7 +48,7 @@ uv run whykit serve examples/northline
 ```
 
 `whykit serve` builds the index for the vault you name and starts the Vite dev
-server on `http://127.0.0.1:5173`. It binds to loopback by default and refuses to
+server on `http://127.0.0.1:5173` in private mode. It binds to loopback by default and refuses to
 serve non-public documents on any other interface unless you pass
 `--allow-sensitive-network`.
 
@@ -57,7 +57,8 @@ To work on Explorer itself without the CLI wrapper:
 ```bash
 cd apps/explorer
 npm run dev                                   # examples/northline
-WHYKIT_VAULT_DIR=../../../my-ledger npm run dev   # any other vault
+WHYKIT_VAULT_DIR=../../../my-ledger npm run dev   # public subset of another vault
+WHYKIT_EXPLORER_PRIVATE=1 npm run dev            # full private local viewer
 ```
 
 ## The index
@@ -69,11 +70,18 @@ implementation, so front matter and tables are parsed in only one place:
 uv run whykit explorer-index --root examples/northline --today 2026-09-17
 ```
 
-The command prints the index as JSON. It contains every document's metadata and
-body, the evidence IDs each note cites, the evidence, decision and review rows,
-the freshness policy from `whykit.toml`, and the lint report. If the vault
+The command prints a public index as JSON. Non-public records and their
+dependent references are omitted as whole notes, including known titles and
+aliases. Evidence rows, ledgers and findings follow the resulting visibility;
+an empty export is valid. See [classification](../../docs/data-classification.md).
+Use `--private` only for a private local index. If the vault
 has lint errors the command fails, and Explorer will not build from an invalid
 vault.
+
+`--publication-preview` writes separate private diagnostics with omitted paths
+and reasons. Never publish that report. `WHYKIT_EXPLORER_PRIVATE=1` explicitly
+opts a build into full private content; the build warns that Explorer has no
+access control. The `--from` build-script option only accepts private builds.
 
 `npm run index` then splits that index in three, because note bodies are most
 of it (about 6.5 MB of 10 MB at 5,000 notes) and only the document view and

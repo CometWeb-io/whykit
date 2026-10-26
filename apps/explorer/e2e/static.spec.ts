@@ -59,6 +59,7 @@ test("every view renders under the CSP without a violation", async ({ page }) =>
     await open(page, hash);
   }
   await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("combobox", { name: "Search vault" })).toBeFocused();
   await page.keyboard.type("pricing");
   await expect(page.getByRole("option").first()).toBeVisible();
   expect(await violations()).toEqual([]);

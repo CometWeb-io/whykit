@@ -29,7 +29,8 @@ import sys
 import threading
 import traceback
 import unicodedata
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import IO, Any
 from urllib.parse import quote, quote_from_bytes, unquote, unquote_to_bytes, urlsplit
@@ -46,10 +47,8 @@ from .lint import (
     _build_index,
     _decision_own_id,
     _mask_code,
-    _REQUEST,
     _parse_evidence_register_text,
     _real,
-    _RequestCache,
     _within,
     collect_markdown,
     evidence_register,
@@ -307,23 +306,6 @@ class _Vault:
         self.changed: set[str] = set()
         self.timer: threading.Timer | None = None
         self.lint_lock = threading.Lock()
-        # Resolved paths, shared by every lint and request until the next
-        # whole-vault lint rescans the disk and starts a new one.
-        self.paths = _RequestCache()
-
-
-@contextlib.contextmanager
-def _paths(vault: _Vault | None) -> Iterator[None]:
-    """Resolve paths through *vault*'s long-lived cache (a fresh one without a vault)."""
-    if vault is None:
-        with path_cache():
-            yield
-        return
-    token = _REQUEST.set(vault.paths)
-    try:
-        yield
-    finally:
-        _REQUEST.reset(token)
 
 
 class LanguageServer:
@@ -418,20 +400,8 @@ class LanguageServer:
             raise _RequestError(INVALID_PARAMS, "params must be an object")
         if not is_request:
             return handler(self, params)
-        with _paths(self._request_vault(params)):
+        with path_cache(fresh=True):
             return handler(self, params)
-
-    def _request_vault(self, params: JsonObject) -> _Vault | None:
-        ident = params.get("textDocument")
-        uri = ident.get("uri") if isinstance(ident, dict) else None
-        if not isinstance(uri, str):
-            return None
-        with self._lock:
-            doc = self._documents.get(uri)
-            if doc is not None:
-                return doc.vault
-            path = self._path(uri)
-            return self._vault_containing(path) if path is not None else None
 
     def _stop(self) -> None:
         with self._lock:
@@ -522,7 +492,8 @@ class LanguageServer:
         if key not in self._vault_dirs:
             found = find_vault_root(start) if start.exists() else None
             self._vault_dirs[key] = self._vault_at(found) if found is not None else None
-        return self._vault_dirs[key]
+        discovered = self._vault_dirs[key]
+        return discovered if discovered is not None and _within(discovered.root, path) else None
 
     def _document(self, params: JsonObject) -> _Document | None:
         """The open document named in *params*, or a read-only view of the file on disk."""
@@ -533,7 +504,7 @@ class LanguageServer:
         with self._lock:
             doc = self._documents.get(uri)
             if doc is not None:
-                return doc
+                return None if doc.vault is not None and doc.path is not None and not _within(doc.vault.root, doc.path) else doc
             path = self._path(uri)
             if path is None or not path.is_file():
                 return None
@@ -707,9 +678,7 @@ class LanguageServer:
             snapshot = self._snapshot(vault)
             overlays = [(path, text) for path, text, _, _ in snapshot]
             versions = {uri: version for _, _, uri, version in snapshot}
-            if full:
-                vault.paths = _RequestCache()
-            with _paths(vault):
+            with path_cache(fresh=True):
                 index = self._build_index(vault, overlays, rescan=full)
                 paths: list[str] = []
                 if not full:
@@ -823,12 +792,12 @@ class LanguageServer:
         with self._lock:
             index = vault.index
         if index is None:
-            with _paths(vault):
+            with path_cache():
                 index = self._build_index(vault, self._overlays(vault), rescan=False)
             with self._lock:
                 vault.index = index
                 vault.decisions = None
-        return index
+        return replace(index, _resolved={}, _relative={}, derived={})
 
     def _decisions(self, vault: _Vault, index: VaultIndex) -> dict[str, Note]:
         with self._lock:
@@ -836,6 +805,8 @@ class LanguageServer:
                 return vault.decisions
         found: dict[str, Note] = {}
         for note in index.notes:
+            if not _within(vault.root, note.path):
+                continue
             if str(note.front.get("status", "")).strip() == "template":
                 continue
             explicit = str(note.front.get("decision_id") or "").strip()
@@ -851,6 +822,8 @@ class LanguageServer:
 
     def _evidence(self, vault: _Vault) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
         register = vault.root / REGISTER
+        if not _within(vault.root, register):
+            return {}, {}
         with self._lock:
             open_text = next((doc.text for doc in self._documents.values()
                               if doc.path is not None and doc.vault is vault and _key(doc.path) == _key(register)), None)
@@ -895,7 +868,7 @@ class LanguageServer:
 
     def _resolve_link(self, index: VaultIndex, target: str) -> Path | None:
         path, ambiguous = index.resolve_link(target.strip())
-        return None if ambiguous else path
+        return None if ambiguous or path is not None and not _within(index.root, path) else path
 
     def _hover(self, params: JsonObject) -> JsonObject | None:
         found = self._at(params)
@@ -1073,6 +1046,8 @@ class LanguageServer:
             insert = did if unique(did, note) else shortest(note)
             add(did, insert, KIND_REFERENCE, f"{title} · {note.front.get('status') or 'no status'}", f"{did} {title}", f"0{did}")
         for note in index.notes:
+            if not _within(vault.root, note.path):
+                continue
             if str(note.front.get("status", "")).strip() == "template":
                 continue
             relative = index.relative(note.path).removesuffix(".md")

@@ -32,7 +32,7 @@ class ExplorerIndexPolicyTests(unittest.TestCase):
                 config.read_text(encoding="utf-8") + '\n[evidence_access_age_days]\nanalytics = 30\n"vendor doc" = 180\n',
                 encoding="utf-8",
             )
-            policy = build_explorer_index(vault)["policy"]
+            policy = build_explorer_index(vault, private=True)["policy"]
         self.assertEqual(policy["evidenceAccessAgeDays"], {"analytics": 30, "vendor doc": 180})
         self.assertEqual(policy["decisionReviewDays"], 90)
         self.assertEqual(policy["statusDueDays"], 30)
@@ -41,14 +41,14 @@ class ExplorerIndexPolicyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             vault = self._copy(tmp)
             (vault / "whykit.toml").unlink()
-            policy = build_explorer_index(vault)["policy"]
+            policy = build_explorer_index(vault, private=True)["policy"]
         self.assertEqual(policy, {"evidenceAccessAgeDays": {}, "decisionReviewDays": 90, "statusDueDays": 30})
 
     def test_malformed_config_yields_no_thresholds_instead_of_crashing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = self._copy(tmp)
             (vault / "whykit.toml").write_text("format_version = 1\n[evidence_access_age_days]\nanalytics = -3\n", encoding="utf-8")
-            policy = build_explorer_index(vault)["policy"]
+            policy = build_explorer_index(vault, private=True)["policy"]
         self.assertEqual(policy["evidenceAccessAgeDays"], {})
         self.assertIsNone(policy["decisionReviewDays"])
 
@@ -63,7 +63,7 @@ class ExplorerIndexPolicyTests(unittest.TestCase):
                 "and E-001 once more. [[Home]]\n",
                 encoding="utf-8",
             )
-            docs = {d["id"]: d for d in build_explorer_index(vault)["docs"]}
+            docs = {d["id"]: d for d in build_explorer_index(vault, private=True)["docs"]}
         self.assertEqual(docs["07-research/citation-probe"]["citations"], ["E-001", "E-003"])
         self.assertEqual(docs["07-research/citation-probe"]["sourceIds"], ["E-001"])
         # The register lists IDs; it does not cite them.
@@ -82,7 +82,7 @@ class ExplorerIndexPolicyTests(unittest.TestCase):
                 "```\nsource_ids: [E-002]\n```\n\n[[Home]]\n",
                 encoding="utf-8",
             )
-            docs = {d["id"]: d for d in build_explorer_index(vault)["docs"]}
+            docs = {d["id"]: d for d in build_explorer_index(vault, private=True)["docs"]}
             graph = build_graph(vault)
         self.assertEqual(docs["07-research/citation-probe"]["citations"], ["E-001"])
         for doc_id, doc in docs.items():

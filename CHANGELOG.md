@@ -7,6 +7,67 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+- Bound MCP HTTP input to 1 MiB and 30 seconds, eight active authorized
+  requests, and a shared burst of 60 requests refilling at two per second.
+  Authentication/Host checks precede the application budgets. Validate frame
+  schemas and IDs before SDK entry, return fixed errors, and release active
+  slots on rejection, disconnect, failure or cancellation. Cap Uvicorn
+  connections/tasks at 32 and exercise HTTP boundaries on both supported SDKs.
+
+- Cap complete MCP results at 1 MiB, stdio input/output frames at 1/2 MiB
+  and request IDs at 1024 bytes of UTF-8 JSON. Replace oversized results and
+  invalid input with bounded errors; preserve the session after malformed
+  frames. Isolate buffered stdout and check the required SDK transport
+  capabilities at startup, with byte-boundary regressions on SDK 2.2/2.3.
+
+- Bound the MCP protocol negotiator's queue to 32 messages and apply
+  backpressure to a slow consumer. Track only pending discovery reply IDs,
+  retire probe batches and clear bookkeeping when negotiation settles.
+  Preserve discovery-to-initialize fallback; CI checks both supported SDKs.
+
+- Add optional final evidence-row `Sensitivity` columns with register floors,
+  replacement inheritance and fail-closed filtered reads. Creation and retirement
+  preserve labels; malformed tables cannot become write targets. MCP captures
+  classifications and content together, filters rows/counts/completions and
+  withholds raw per-row registers. Invalid row labels emit `evidence.sensitivity`
+  (warning); disabling the warning does not disable filtering.
+  Captured register lookup and raw-table withholding recognize `.MD` and case
+  aliases consistently in exports, MCP and the serve network guard; ambiguous
+  register candidates withhold all rows and raw bodies.
+- Explorer exports and builds default to public records with a whole-record
+  dependency closure across notes and evidence, including known titles, aliases
+  and code examples. Migration: use `--private` / `WHYKIT_EXPLORER_PRIVATE=1`
+  only for private viewers. `serve` retains the private loopback view.
+  `--publication-preview` emits separate private omission diagnostics and a
+  source manifest; a lint-clean result is not permission to publish.
+
+- Add decision approval previews bound to captured bytes and parameters, atomic
+  apply/supersession and append-only approval/re-review receipts. New decisions
+  and imports start as draft or in_review; reviewer attribution is not identity
+  authentication. `check --base` applies both current and trusted-base policy
+  to current content and reports whether history ran. Approved provenance denying
+  human review emits `decision.unreviewed` (warning). Hidden review events and
+  comment-only decision sections are rejected; visible code remains valid content.
+
+
+- Retain transaction payloads through durable commit and collect terminal journals
+  without replaying later edits. Validate recovery paths and legacy payload hashes;
+  `whykit recover` explicitly repairs interrupted writes. Cooperating reports and
+  MCP reads share the mutation boundary, with scoped lock/cache ownership and
+  buffered CLI output. Transactions reject case and filesystem aliases of
+  `.whykit` during staging and recovery, preserving the active lock inode.
+  Graph and snapshot exports protect coordination state.
+
+- Link and evidence extraction share position-preserving Markdown code/comment
+  masking with the Explorer's code recognition. Fences inside comments no
+  longer hide later prose, and inline backticks cannot span blank lines,
+  fenced blocks, ATX headings or thematic breaks. Headings retain their own
+  inline code. Variable fence widths and CR/LF/CRLF endings are supported;
+  this remains a Markdown subset rather than a full CommonMark parser.
+- Golden command-output tests pin implicit lint dates to their recorded
+  2026-10-04 baseline, so evidence aging no longer changes the `pack` digest
+  with the host clock. Runtime freshness checks and recorded hashes are unchanged.
+
 The draft for **0.3.0**, the first public package release. It covers every
 change since the internal 0.2.0 milestone, including the `0.3.0.dev0` source
 preview that source checkouts report until the release. Upgrading from a

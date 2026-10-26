@@ -75,6 +75,7 @@ test("Escape closes the dialog and returns focus to the opener", async ({ page }
 test("a query with no hits says so and Enter does nothing", async ({ page }) => {
   await open(page, "#view=health");
   await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("combobox", { name: "Search vault" })).toBeFocused();
   await page.keyboard.type("zzzz-nothing-matches");
   await expect(page.getByRole("dialog").getByRole("status")).toHaveText("No matching notes.");
   await expect(page.getByRole("combobox")).not.toHaveAttribute("aria-activedescendant", /.+/);

@@ -65,6 +65,10 @@
           },
           "state": {
             "type": "string"
+          },
+          "sensitivity": {
+            "type": "string",
+            "description": "Optional explicit row label in evidence-list; effective register/replacement classification in Explorer. Unknown classification is withheld in filtered exports."
           }
         },
         "additionalProperties": true
@@ -148,6 +152,14 @@
         }
       },
       "additionalProperties": true
+    },
+    "exportMode": {
+      "type": "string",
+      "enum": [
+        "public",
+        "private"
+      ],
+      "description": "Public excludes non-public notes and dependent references; private is an explicit local opt-in."
     }
   },
   "additionalProperties": true

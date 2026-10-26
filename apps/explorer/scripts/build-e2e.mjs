@@ -21,11 +21,11 @@ const PYTHON = process.env.PYTHON || "python3";
 const OUT = resolve(APP, "e2e/.build");
 
 function run(cmd, args, env = {}) {
-  execFileSync(cmd, args, { cwd: APP, stdio: "inherit", env: { ...process.env, ...env } });
+  execFileSync(cmd, args, { cwd: APP, stdio: "inherit", env: { ...process.env, WHYKIT_EXPLORER_PRIVATE: "1", ...env } });
 }
 
-function build(name, vaultDir) {
-  run(process.execPath, ["scripts/build-vault-index.mjs"], { WHYKIT_VAULT_DIR: vaultDir });
+function build(name, vaultDir, env = {}) {
+  run(process.execPath, ["scripts/build-vault-index.mjs"], { WHYKIT_VAULT_DIR: vaultDir, ...env });
   run(process.execPath, [resolve(APP, "node_modules/vite/bin/vite.js"), "build", "--outDir", join(OUT, name), "--emptyOutDir"]);
 }
 
@@ -39,7 +39,7 @@ function buildSynthetic(name, vaultDir) {
     "from synthetic_vault import AS_OF, generate",
     "from whykit.explorer_index import build_explorer_index",
     `root = generate(Path(${JSON.stringify(vaultDir)}), ${SYNTHETIC_NOTES}).resolve()`,
-    "payload = build_explorer_index(root, today=dt.date.fromisoformat(AS_OF))",
+    "payload = build_explorer_index(root, today=dt.date.fromisoformat(AS_OF), private=True)",
     `Path(${JSON.stringify(join(vaultDir, "..", "synthetic-index.json"))}).write_text(json.dumps(payload), encoding='utf-8')`,
   ].join("\n");
   run(PYTHON, ["-c", code]);
@@ -49,6 +49,40 @@ function buildSynthetic(name, vaultDir) {
 
 const scratch = mkdtempSync(join(tmpdir(), "whykit-explorer-e2e-"));
 try {
+  const publicVault = join(scratch, "public");
+  const publicCode = `
+import sys
+from pathlib import Path
+sys.path.insert(0, ${JSON.stringify(resolve(REPO, "src"))})
+from whykit.cli import main
+from whykit.scaffold import create_evidence
+root = Path(${JSON.stringify(publicVault)})
+assert main(["init", "--minimal", str(root)]) == 0
+register = root / "00-context/evidence-register.md"
+register.write_text(register.read_text().replace("sensitivity: internal", "sensitivity: public"))
+for label, source in (("restricted", "PRIVATE-ROW-CANARY"), ("public", "PUBLIC-ROW-CANARY")):
+    create_evidence(root, source=source, location="https://example.com/fixture", kind="fixture", claims="Synthetic fixture", sensitivity=label)
+for name, label, title, body in (
+    ("public-safe", "public", "Public export fixture", "VISIBLE-PUBLIC-CANARY E-002"),
+    ("private-source", "restricted", "PRIVATE-TITLE-CANARY", "PRIVATE-BODY-CANARY"),
+    ("private-reference", "public", "DEPENDENT-TITLE-CANARY", "[[notes/private-source]]"),
+    ("row-reference", "public", "ROW-DEPENDENT-CANARY", "E-001"),
+):
+    text = f"---\\ntitle: {title}\\ntype: reference\\nstatus: draft\\nowner: Ada Example\\ncreated: 2026-09-17\\nlast_updated: 2026-09-17\\nsource_of_truth: false\\nsensitivity: {label}\\nsource_ids: []\\n---\\n\\n# {title}\\n\\n{body}\\n"
+    (root / "notes" / (name + ".md")).write_text(text, encoding="utf-8")
+from whykit.lint import lint
+errors = [item for item in lint(root)[1] if item.level == "error"]
+assert not errors, errors
+`;
+  run(PYTHON, ["-c", publicCode]);
+  let registerName = "evidence-register.md";
+  for (const [site, name] of [["public", registerName], ["public-md", "evidence-register.MD"], ["public-name", "EVIDENCE-REGISTER.Md"]]) {
+    run(PYTHON, ["-c", "from pathlib import Path; import sys; Path(sys.argv[1]).rename(sys.argv[2])",
+      join(publicVault, "00-context", registerName), join(publicVault, "00-context", name)]);
+    registerName = name;
+    build(site, publicVault, { WHYKIT_EXPLORER_PRIVATE: "" });
+    run(process.execPath, [resolve(APP, "node_modules/vite/bin/vite.js"), "build", "--mode", "single", "--outDir", join(OUT, site + "-single"), "--emptyOutDir"]);
+  }
   const fresh = join(scratch, "fresh");
   run(PYTHON, [resolve(REPO, "scripts/whykit.py"), "init", "--minimal", fresh]);
   build("empty", fresh);

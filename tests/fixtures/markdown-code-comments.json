@@ -1,0 +1,502 @@
+[
+  {
+    "id": "single-line",
+    "markdown": "Before <!-- [[E-001]] --> [[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "multiline",
+    "markdown": "<!--\n[[E-001]]\n-->\n[[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "unclosed",
+    "markdown": "[[E-002]]\n<!-- never ends\n[[E-001]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "code-marker-inline",
+    "markdown": "`<!--` [[E-002]] `-->` [[E-003]]",
+    "wikilinks": [
+      "E-002",
+      "E-003"
+    ],
+    "evidence": [
+      "E-002",
+      "E-003"
+    ]
+  },
+  {
+    "id": "fenced-marker",
+    "markdown": "```\n<!-- [[E-001]] -->\n```\n[[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "escaped-marker",
+    "markdown": "\\<!-- [[E-001]] --> [[E-002]]",
+    "wikilinks": [
+      "E-001",
+      "E-002"
+    ],
+    "evidence": [
+      "E-001",
+      "E-002"
+    ]
+  },
+  {
+    "id": "even-escaped-marker",
+    "markdown": "\\\\<!-- [[E-001]] --> [[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "two-comments",
+    "markdown": "<!-- [[E-001]] --> [[E-002]] <!-- [[E-003]] -->",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "crlf-mixed",
+    "markdown": "<!--\r\n[[E-001]]\r-->\n[[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "unicode",
+    "markdown": "\ud83d\udef0\ufe0f<!-- [[E-001]] -->\n[[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "comment-closes-inside-backticks",
+    "markdown": "<!-- `code -->` [[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "comment-closes-inside-wide-backticks",
+    "markdown": "<!-- ``code -->`` [[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "inline-code-first",
+    "markdown": "`<!-- included -->` [[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "comment-before-and-after-code",
+    "markdown": "<!-- `first --> [[E-002]] `second` [[E-003]]",
+    "evidence": [
+      "E-002",
+      "E-003"
+    ],
+    "wikilinks": [
+      "E-002",
+      "E-003"
+    ]
+  },
+  {
+    "id": "mixed-comment-backtick",
+    "markdown": "<!-- `x -->` [[E-002]] <!-- [[E-001]] --> [[E-003]]",
+    "evidence": [
+      "E-002",
+      "E-003"
+    ],
+    "wikilinks": [
+      "E-002",
+      "E-003"
+    ]
+  },
+  {
+    "id": "unclosed-backtick-inside-comment",
+    "markdown": "<!-- ` without matching backtick --> [[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "comment-ending-across-cr",
+    "markdown": "<!-- `x -->\r[[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "short-empty-comment",
+    "markdown": "<!--> [[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "short-dash-comment",
+    "markdown": "<!---> [[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "short-empty-comment-before-code",
+    "markdown": "<!--> `[[E-001]]` [[E-002]]",
+    "wikilinks": [
+      "E-002"
+    ],
+    "evidence": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "non-commonmark-nel",
+    "markdown": "prefix\u0085~~~\n[[E-001]]\n~~~\n[[E-002]]",
+    "evidence": [
+      "E-001"
+    ],
+    "wikilinks": [
+      "E-001"
+    ]
+  },
+  {
+    "id": "non-commonmark-line-separator",
+    "markdown": "prefix\u2028~~~\n[[E-001]]\n~~~\n[[E-002]]",
+    "evidence": [
+      "E-001"
+    ],
+    "wikilinks": [
+      "E-001"
+    ]
+  },
+  {
+    "id": "non-commonmark-paragraph-separator",
+    "markdown": "prefix\u2029~~~\n[[E-001]]\n~~~\n[[E-002]]",
+    "evidence": [
+      "E-001"
+    ],
+    "wikilinks": [
+      "E-001"
+    ]
+  },
+  {
+    "id": "non-commonmark-vertical-tab",
+    "markdown": "prefix\u000b~~~\n[[E-001]]\n~~~\n[[E-002]]",
+    "evidence": [
+      "E-001"
+    ],
+    "wikilinks": [
+      "E-001"
+    ]
+  },
+  {
+    "id": "non-commonmark-form-feed",
+    "markdown": "prefix\f~~~\n[[E-001]]\n~~~\n[[E-002]]",
+    "evidence": [
+      "E-001"
+    ],
+    "wikilinks": [
+      "E-001"
+    ]
+  },
+  {
+    "id": "unicode-line-separator-inside-tilde-info",
+    "markdown": "~~~info\u2028[[E-001]]\n~~~\n[[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "unicode-paragraph-separator-inside-tilde-info",
+    "markdown": "~~~info\u2029[[E-001]]\n~~~\n[[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "fence-inside-comment-lf",
+    "markdown": "<!--\n~~~\n[[E-001]]\n-->\n[[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "backtick-fence-inside-comment-crlf",
+    "markdown": "<!--\r\n```\r\n[[E-001]]\r\n-->\r\n[[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "fence-inside-comment-cr",
+    "markdown": "<!--\r~~~\r[[E-001]]\r-->\r[[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "comment-containing-fence-and-blank-line",
+    "markdown": "<!--\n~~~\n\n[[E-001]]\n-->\n[[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "literal-unclosed-comment-in-code",
+    "markdown": "~~~\n<!-- [[E-001]]\n~~~\n[[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "span-cannot-cross-blank-line",
+    "markdown": "First `open\n\n[[E-002]]\n\nlast`",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "wide-span-cannot-cross-whitespace-blank",
+    "markdown": "First ``open\r\n \t\r\n[[E-002]]\r\nlast``",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "span-may-cross-soft-line-break",
+    "markdown": "First ``open\r\n[[E-001]] last`` [[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "span-cannot-cross-fenced-block",
+    "markdown": "First `open\n~~~\n[[E-001]]\n~~~\n[[E-002]] last`",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "atx-interrupts-inline-span",
+    "markdown": "First `open\n## Heading [[E-001]]\nlast`",
+    "evidence": [
+      "E-001"
+    ],
+    "wikilinks": [
+      "E-001"
+    ]
+  },
+  {
+    "id": "atx-cannot-open-span-into-prose",
+    "markdown": "## Heading `open\nBody [[E-001]] last`",
+    "evidence": [
+      "E-001"
+    ],
+    "wikilinks": [
+      "E-001"
+    ]
+  },
+  {
+    "id": "atx-preserves-own-inline-span",
+    "markdown": "First `open\n## Heading `[[E-001]]` [[E-002]]\nlast`",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "adjacent-atx-headings-are-separate",
+    "markdown": "## First ` [[E-001]]\n### Second [[E-002]] `",
+    "evidence": [
+      "E-001",
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-001",
+      "E-002"
+    ]
+  },
+  {
+    "id": "empty-atx-interrupts-inline-span",
+    "markdown": "First `open\n#\n[[E-001]] last`",
+    "evidence": [
+      "E-001"
+    ],
+    "wikilinks": [
+      "E-001"
+    ]
+  },
+  {
+    "id": "hash-without-space-is-not-atx",
+    "markdown": "First `open\n##NotHeading [[E-001]]\nlast` [[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "seven-hashes-are-not-atx",
+    "markdown": "First `open\n####### Text [[E-001]]\nlast` [[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "dash-break-interrupts-inline-span",
+    "markdown": "First `open\n---\n[[E-001]] last`",
+    "evidence": [
+      "E-001"
+    ],
+    "wikilinks": [
+      "E-001"
+    ]
+  },
+  {
+    "id": "star-break-interrupts-inline-span-crlf",
+    "markdown": "First `open\r\n***\r\n[[E-001]] last`",
+    "evidence": [
+      "E-001"
+    ],
+    "wikilinks": [
+      "E-001"
+    ]
+  },
+  {
+    "id": "underscore-break-interrupts-inline-span-cr",
+    "markdown": "First `open\r___\r[[E-001]] last`",
+    "evidence": [
+      "E-001"
+    ],
+    "wikilinks": [
+      "E-001"
+    ]
+  },
+  {
+    "id": "spaced-break-interrupts-inline-span",
+    "markdown": "First `open\n   - \t- - \t\n[[E-001]] last`",
+    "evidence": [
+      "E-001"
+    ],
+    "wikilinks": [
+      "E-001"
+    ]
+  },
+  {
+    "id": "mixed-markers-are-not-a-break",
+    "markdown": "First `open\n*_-\n[[E-001]] last` [[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  },
+  {
+    "id": "two-markers-are-not-a-break",
+    "markdown": "First `open\n**\n[[E-001]] last` [[E-002]]",
+    "evidence": [
+      "E-002"
+    ],
+    "wikilinks": [
+      "E-002"
+    ]
+  }
+]

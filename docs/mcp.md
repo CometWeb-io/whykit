@@ -72,9 +72,12 @@ A note whose label WhyKit cannot read is treated as above every ceiling: front
 matter that does not parse (a tab, an unclosed bracket, a duplicate key) or a
 label spelt differently (`Sensitivity:`) hides the note rather than defaulting
 it to `internal`. A note with valid front matter and no `sensitivity` key is
-`internal`. Evidence-register entries do not carry their own sensitivity field;
-they inherit the label of `00-context/evidence-register.md` itself, so a
-register above the ceiling withholds every row, count and `E-NNN` completion.
+`internal`. Evidence rows inherit their register label as a minimum and may
+tighten it with an optional final `Sensitivity` column. Filtered views withhold
+the raw per-row table; counts and `E-NNN` completions describe visible rows only.
+Invalid row labels and duplicate IDs are withheld. See
+[data classification](data-classification.md) for replacement inheritance and
+public export behavior.
 
 ## Protocol versions
 
@@ -177,9 +180,9 @@ adds or withholds:
 | `query` | `query-result.schema.json` | adds `max_sensitivity` and `next_cursor`; `query.limit` is the page size |
 | `context` | `context-pack.schema.json` | adds `content_trust` |
 | `impact` | `impact-report.schema.json` | none |
-| `status` | `status-report.schema.json` | no `root`; adds `max_sensitivity` and `review_due_days`; `evidence_active` and `evidence_retired` are `null` under a `public` ceiling |
+| `status` | `status-report.schema.json` | no `root`; adds `max_sensitivity` and `review_due_days`; `evidence_active` and `evidence_retired` are `null` when the register floor exceeds the ceiling, otherwise they count visible rows |
 | `pack` | `context-bundle.schema.json` | adds `max_sensitivity` |
-| `trace` | `trace-report.schema.json` | adds `matched`, `truncated`, `next_cursor`, `max_sensitivity`, and under a `public` ceiling `evidence_details: "withheld"` with evidence items reduced to `{id, via, state: "withheld"}` |
+| `trace` | `trace-report.schema.json` | adds `matched`, `truncated`, `next_cursor`, `max_sensitivity`, and when the register floor exceeds the ceiling `evidence_details: "withheld"` with evidence items reduced to `{id, via, state: "withheld"}` |
 | `backlinks` | `backlinks-report.schema.json` | adds `truncated`, `max_sensitivity` and `next_cursor` |
 
 Error results (`isError: true`) carry the error body described under
@@ -313,6 +316,25 @@ machines. Sensitivity remains a response filter, not an access-control
 boundary, so the token decides who can ask and the ceiling decides what they
 see.
 
+HTTP requests have a **1 MiB body limit**, including chunked bodies, and
+**30 seconds** to receive the complete body. At most **eight authorized
+requests** are active at once, including open streams. One shared bucket per
+process permits a burst of **60 requests** and refills **two requests per
+second**. Authentication and Host/Origin checks run first; rejected callers do
+not consume this application budget. Uvicorn additionally limits concurrent
+connections/tasks to 32 before those checks.
+
+Rate and busy responses include `Retry-After: 1`. Rejected bodies return fixed
+errors before SDK parsing; malformed JSON, IDs or schemas return HTTP 400 with
+`id: null`, without echoing the input. The ID limit described below applies to
+HTTP as well as stdio. Body, rate and active-request limits are shared across
+clients in one process. They exclude headers and cumulative SSE traffic;
+multi-process hosting still needs gateway controls. The 30-second timeout is
+for receiving the body, not for completing a tool call or an open stream.
+An early rejection closes an oversized upload without draining its remainder.
+A client still transmitting the body may observe a connection reset instead of
+the error response; a header-only request can receive the rejection immediately.
+
 ## Errors
 
 A tool call the server cannot answer comes back as a tool result with
@@ -333,6 +355,16 @@ A tool call the server cannot answer comes back as a tool result with
 | `unauthorized` | Streamable HTTP only: the request lacks the bearer token (HTTP 401, before any MCP processing) |
 | `forbidden_host` | Streamable HTTP without a token only: the `Host` or `Origin` header does not name this machine (HTTP 421, before any MCP processing) |
 | `internal_error` | Anything unexpected; the message is fixed and never carries exception text |
+| `rate_limited` | HTTP 429: the shared request bucket is exhausted; retry later |
+| `server_busy` | HTTP 503: eight authorized requests are already active |
+| `request_timeout` | HTTP 408: the complete request body did not arrive within 30 seconds |
+| `request_too_large` | HTTP 413 for a body over 1 MiB; stdio rejects a line over 1 MiB and closes the connection |
+| `invalid_request_id` | A request ID has an invalid type or does not fit 1024 bytes of UTF-8 JSON; rejected IDs use `id: null` |
+| `response_too_large` | The complete result exceeds 1 MiB, or a JSON-RPC response frame exceeds 2 MiB |
+
+Stdio input errors use a JSON-RPC error with `id: null` and the same error
+object under `error.data`. Result-budget failures use a tool error for tool
+calls and a JSON-RPC error for other methods.
 
 The body is the same whether the SDK rejects arguments against the advertised
 input schema (for example a negative `limit` or a 600-character target) or
@@ -354,7 +386,36 @@ file the vault index skips (for example under `.obsidian/`) is reported as
 missing rather than confirmed. `status` drops the absolute root path that the
 CLI's `whykit status --json` includes.
 
+## Byte budgets
+
+A serialized MCP result must fit **1 MiB** of compact UTF-8 JSON. For tool calls
+this includes both the text and structured copies, metadata and the negotiated
+result envelope. A larger tool result becomes an `isError` result with code
+`response_too_large`; larger resources, lists and prompts return a bounded
+JSON-RPC internal error. These result checks apply to every transport.
+
+The stdio transport also caps incoming frames at **1 MiB**, including the line
+ending, outgoing frames at **2 MiB**, including the line ending, and IDs at
+**1024 bytes** of UTF-8 JSON, including quoting and escaping. Invalid JSON,
+invalid IDs and schema errors return fixed errors without echoing the input;
+subsequent valid requests can continue. An oversized input frame closes the
+connection after an error: reconnect rather than sending the rest of the line.
+
+Buffered stdout remains separate from the protocol stream. Descriptor isolation
+uses private SDK interfaces; startup checks that they exist, and CI exercises
+the transport on SDK 2.2.0 and 2.3.0. The checks do not limit total process memory,
+SDK task concurrency or vault-reading time: reports are still built before their
+serialized size is checked. HTTP request limits bound separate costs, as
+described above.
+
 ## Freshness
+
+The stdio protocol negotiator buffers up to 32 messages while its consumer is
+busy, then waits for the consumer. Discovery bookkeeping is bounded in batches
+and discarded once the protocol era is settled; ordinary reply IDs are not
+retained. This queue limit counts messages; the byte budgets above are separate and do
+not bound process memory or the time needed to read a vault. CI checks negotiation and backpressure on
+both supported MCP SDK versions, 2.2.0 and 2.3.0.
 
 Every call reads the vault as it is on disk at that moment. The server keeps
 the parsed notes between calls and reuses a note only while its file's

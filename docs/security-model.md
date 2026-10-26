@@ -174,3 +174,45 @@ permissions are trusted. WhyKit never asks for elevated rights.
 - `tests/test_adversarial_inputs.py` pins each crash, hang and injection the
   harness or review found, and `tests/test_mcp_security.py` the sensitivity
   and transport rules above.
+
+
+## Transaction reads and recovery
+
+CLI reports, Explorer indexes and MCP requests share an advisory lock against
+cooperating WhyKit writers. A reader of a pristine vault does not create local
+mutation state; if its first writer races the read, the result is refused.
+CLI output is buffered outside the vault and emitted only after that check.
+External editors that ignore advisory locks are outside this guarantee.
+
+READY journals left by a crash block reads until `whykit recover --root PATH`
+finishes under the writer lock. Recovery validates the manifest and staged
+content; a legacy missing payload is accepted only when its destination has
+the expected hash. Invalid state remains for inspection rather than being
+silently discarded. Lock and path-cache ownership expires with its scope and
+is tied to the process, thread and async task; copied contexts cannot retain it.
+LSP path resolutions are refreshed between requests.
+
+Staged payloads remain available until the COMMITTED marker is durable. Completed
+journals are renamed before garbage collection so interrupted cleanup cannot
+replay an old value over a later edit. Only pre-READY journals older than 24 hours
+are collected; younger ones are retained. Directory fsync failures are reported
+where supported; Windows does not expose directory fsync through this API.
+Process-death tests do not qualify recovery after physical power loss.
+
+Graph and snapshot exports use the writer lock and refuse Git state, the mutation
+lock, transaction journals and parse-cache paths. `.whykit/snapshot.json` remains
+a valid explicit output. Metadata readers never replay pending writes implicitly.
+
+## Decision approval and trusted policy
+
+`review approve` previews the reviewed decision, cited evidence rows and exact
+file diffs. `--write --expect-hash` applies only the same inputs and parameters
+under the mutation lock. Decision, ledger rows and supersession are one transaction.
+Reviewer names and receipts provide attribution and content binding, not identity
+authentication, factual verification or permission to publish.
+
+`check --base REF` evaluates both the current and base policies against current
+vault content. CI must choose REF from a trusted source and fetch its commit;
+unreadable or malformed base policy fails closed. A supplied ref is not trusted
+merely because the command accepts it. History compares the selected Git trees
+or index, not uncommitted files. Without a base, optional history is unchecked.

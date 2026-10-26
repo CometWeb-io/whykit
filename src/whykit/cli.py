@@ -315,6 +315,8 @@ def cmd_new(args: argparse.Namespace) -> int:
             argv += ["--date", args.date]
         if args.accessed:
             argv += ["--accessed", args.accessed]
+        if args.sensitivity:
+            argv += ["--sensitivity", args.sensitivity]
         if args.json:
             argv.append("--json")
     else:
@@ -480,10 +482,16 @@ def cmd_review(args: argparse.Namespace) -> int:
             argv.append("--json")
     else:
         argv.append(args.target)
-        argv += ["--reviewer", args.reviewer, "--outcome", args.outcome]
+        argv += ["--reviewer", args.reviewer]
+        if args.review_command == "record":
+            argv += ["--outcome", args.outcome]
+        if getattr(args, "write", False):
+            argv.append("--write")
+        if getattr(args, "expected_sha256", None):
+            argv += ["--expect-hash", args.expected_sha256]
         if args.next_review:
             argv += ["--next-review", args.next_review]
-        if args.note_text:
+        if getattr(args, "note_text", None):
             argv += ["--note", args.note_text]
         if args.today:
             argv += ["--today", args.today]
@@ -871,13 +879,35 @@ def _sensitive_docs(vault: Path) -> list[str]:
 
 def _non_public_docs(vault: Path) -> list[str]:
     index = VaultIndex.load(vault)
+    from .sensitivity import note_sensitivity_level, classified_evidence, evidence_register_notes
+
     result: list[str] = []
     for note in index.notes:
-        sensitivity = str(note.front.get("sensitivity", "internal")).lower()
-        if sensitivity != "public":
+        if note_sensitivity_level(note) != 0:
             result.append(index.relative(note.path))
+    active, retired, _, per_row = classified_evidence(index)
+    # The private viewer serves the raw table, including incomplete/placeholder rows.
+    if per_row:
+        result.extend(index.relative(note.path) for note in evidence_register_notes(index)
+                      if index.relative(note.path) not in result)
+    result.extend(f"evidence:{key}" for key, row in (*active.items(), *retired.items()) if row["sensitivity"] != "public")
     return result
 
+
+def cmd_recover(args: argparse.Namespace) -> int:
+    import json
+    from .io import vault_mutation_lock
+
+    root = _resolve_vault(args.root)
+    if root is None:
+        return vault_not_found(args.root, json_mode=args.json)
+    with vault_mutation_lock(root):
+        pass  # Recovery and terminal-journal collection finish before the lock yields.
+    if args.json:
+        emit_machine(json.dumps({"contract_version": 1, "recovery_completed": True}))
+    else:
+        print("Vault recovery completed.")
+    return 0
 
 def cmd_explorer_index(args: argparse.Namespace) -> int:
     argv: list[str] = []
@@ -885,6 +915,10 @@ def cmd_explorer_index(args: argparse.Namespace) -> int:
         argv += ["--root", args.root]
     if getattr(args, "today", None):
         argv += ["--today", args.today]
+    if getattr(args, "private", False):
+        argv += ["--private"]
+    if getattr(args, "publication_preview", False):
+        argv += ["--publication-preview"]
     from .explorer_index import main as explorer_index_main
     return explorer_index_main(argv)
 
@@ -1003,6 +1037,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         return 2
     env = os.environ.copy()
     env["WHYKIT_VAULT_DIR"] = str(vault)
+    env["WHYKIT_EXPLORER_PRIVATE"] = "1"
     return subprocess.run([npm, "run", "dev", "--", "--host", args.host, "--port", str(args.port)],
                           cwd=explorer, env=env).returncode
 
@@ -1031,7 +1066,7 @@ COMMAND_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("check", "gate a vault or a change", ("lint", "check", "status", "trace", "history", "diff", "snapshot", "verify-snapshot")),
     ("explore", "find and hand over context", ("query", "context", "pack", "graph", "backlinks", "impact")),
     ("integrate", "connect hooks, viewers and shells", ("install-hooks", "explorer-index", "serve", "lsp", "completion")),
-    ("maintain", "inspect policy, rules and setup", ("policy", "rules", "doctor")),
+    ("maintain", "inspect policy, rules and setup", ("policy", "rules", "doctor", "recover")),
 )
 
 COMMANDS_PREAMBLE = (
@@ -1072,9 +1107,9 @@ class _Parser(argparse.ArgumentParser):
 
 def _usage_hint(message: str, command_path: str = "") -> str | None:
     """A next step for argparse errors where the message alone misleads."""
-    if "invalid choice: 'accepted'" in message and "approved" in message:
+    if "invalid choice: 'accepted'" in message and "draft" in message:
         # Decision logs render the approved state as "Accepted", so people type it.
-        return "decision logs display approved decisions as \"Accepted\"; on the command line use --status approved"
+        return "decision logs display approved decisions as \"Accepted\"; create a draft, complete it, then use `whykit review approve`"
     if message.startswith("unrecognized arguments") and command_path:
         # argparse reports these from the top-level parser, whose usage line
         # lists no subcommand options at all.
@@ -1218,7 +1253,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_decision.add_argument("--from", dest="from_path", metavar="FILE", help="promote an existing ADR (MADR, Nygard, Y-statement or Polish headings), e.g. one staged by `adopt`; prints the mapping unless --write")
     new_decision.add_argument("--write", action="store_true", help="with --from: create the record and its decision-log row (default: dry run)")
     new_decision.add_argument("--owner", help="accountable person (default: policy defaults.owner)")
-    new_decision.add_argument("--status", choices=("draft", "in_review", "approved", "superseded", "archived"), default="draft", help="initial status (default: %(default)s)")
+    new_decision.add_argument("--status", choices=("draft", "in_review"), default="draft", help="initial status (default: %(default)s)")
     new_decision.add_argument("--sensitivity", choices=SENSITIVITIES, help="default: policy defaults.sensitivity")
     new_decision.add_argument("--source", action="append", default=[], dest="source_ids", metavar="E-NNN", help="supporting evidence ID (repeatable)")
     new_decision.add_argument("--review-by", metavar="YYYY-MM-DD", help="date by which the decision must be re-checked")
@@ -1234,6 +1269,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_evidence.add_argument("--claims", required=True, help="what the source supports, in one line")
     new_evidence.add_argument("--date", metavar="YYYY-MM-DD", help="when the source was produced (default: today)")
     new_evidence.add_argument("--accessed", metavar="YYYY-MM-DD", help="when it was last checked (default: today)")
+    new_evidence.add_argument("--sensitivity", choices=SENSITIVITIES, help="optional row label; cannot lower the register floor")
     new_evidence.add_argument("--json", action="store_true", help=JSON_HELP)
     _add_leaf_root(new_evidence)
     new_evidence.set_defaults(func=cmd_new)
@@ -1343,6 +1379,17 @@ def build_parser() -> argparse.ArgumentParser:
     _add_leaf_root(review_record)
     review_record.set_defaults(func=cmd_review)
 
+    review_approve = review_sub.add_parser("approve", help="preview approval, then apply the reviewed snapshot")
+    review_approve.add_argument("target", help="vault-relative decision path or D-NNN")
+    review_approve.add_argument("--reviewer", required=True, help="who reviewed the snapshot; an attribution, not authentication")
+    review_approve.add_argument("--next-review", metavar="YYYY-MM-DD", help="default: policy decision_review_days after approval")
+    review_approve.add_argument("--today", help="approval date as YYYY-MM-DD")
+    review_approve.add_argument("--write", action="store_true", help="apply only the snapshot identified by --expect-hash")
+    review_approve.add_argument("--expect-hash", dest="expected_sha256", help="expected_sha256 from a reviewed preview")
+    review_approve.add_argument("--json", action="store_true", help=JSON_HELP)
+    _add_leaf_root(review_approve)
+    review_approve.set_defaults(func=cmd_review)
+
     snapshot = sub.add_parser("snapshot", help="create a deterministic vault snapshot")
     snapshot.add_argument("--root", help=ROOT_HELP)
     snapshot.add_argument("--today", help=TODAY_HELP)
@@ -1446,6 +1493,11 @@ def build_parser() -> argparse.ArgumentParser:
     hooks.add_argument("--force", action="store_true", help="replace an existing pre-commit hook")
     hooks.set_defaults(func=cmd_install_hooks)
 
+    recover = sub.add_parser("recover", help="recover interrupted writes and collect completed transaction journals")
+    recover.add_argument("--root", help=ROOT_HELP)
+    recover.add_argument("--json", action="store_true", help=JSON_HELP)
+    recover.set_defaults(func=cmd_recover)
+
     explorer_index = sub.add_parser(
         "explorer-index",
         help="export the Explorer vault index from the canonical Python parser",
@@ -1453,6 +1505,8 @@ def build_parser() -> argparse.ArgumentParser:
     explorer_index.add_argument("--root", help=ROOT_HELP)
     explorer_index.add_argument("--today", help=TODAY_HELP)
     explorer_index.add_argument("--json", action="store_true", default=True, help="accepted for symmetry; output is always JSON")
+    explorer_index.add_argument("--private", action="store_true", help="full local index; never publish this output")
+    explorer_index.add_argument("--publication-preview", action="store_true", help="private withheld-path diagnostics; never publish this report")
     explorer_index.set_defaults(func=cmd_explorer_index)
 
     serve = sub.add_parser("serve", help="run the optional Explorer (source checkout only)")
@@ -1555,6 +1609,47 @@ def _silence_stdout() -> None:
         pass
 
 
+def _run_command(args: argparse.Namespace, func) -> int:
+    """Bind config, data and rendered output to one read; discard raced output."""
+    from contextlib import redirect_stdout
+    import tempfile
+    from .io import vault_read_lock, vault_mutation_lock
+
+    read_only = args.command in _CACHED_COMMANDS | {"policy", "rules", "history"}
+    read_only = read_only or (args.command == "evidence" and getattr(args, "evidence_command", None) == "list")
+    read_only = read_only or (args.command == "review" and args.review_command == "list")
+    root = _resolve_vault(getattr(args, "root", None)) if read_only else None
+    if args.command == "lint":
+        from .lint import resolve_root
+        resolved, _, _note = resolve_root(args.root, args.paths)
+        root = resolved if is_vault_root(resolved) else None
+    if root is None:
+        return func(args)
+    # Spill large reports to a private temporary file instead of doubling their RAM.
+    scope = vault_mutation_lock(root) if args.command in {"graph", "snapshot"} and args.output else vault_read_lock(root)
+    with tempfile.SpooledTemporaryFile(max_size=1024 * 1024, mode="w+", encoding="utf-8", errors="surrogateescape") as output:
+        with redirect_stdout(output), scope:
+            result = func(args)
+        output.seek(0)
+        stream = sys.stdout
+        machine = _wants_json(args) or args.command in {"graph", "pack"} or (args.command in {"lint", "check"} and args.format in {"sarif", "github"})
+        from .console import is_utf
+        reconfigure = getattr(stream, "reconfigure", None)
+        switch = machine and not is_utf(stream) and reconfigure is not None
+        if switch:
+            assert reconfigure is not None
+            encoding, errors = stream.encoding, stream.errors
+            stream.flush()
+            reconfigure(encoding="utf-8", errors="surrogateescape")
+        try:
+            shutil.copyfileobj(output, stream)
+        finally:
+            if switch:
+                assert reconfigure is not None
+                stream.flush()
+                reconfigure(encoding=encoding, errors=errors)
+        return result
+
 def main(argv: list[str] | None = None) -> int:
     # Before any output: an ASCII or legacy code-page console must degrade
     # glyphs, not abort the report with UnicodeEncodeError.
@@ -1577,7 +1672,7 @@ def main(argv: list[str] | None = None) -> int:
         from .parse_cache import persistent
 
         with persistent(_uses_parse_cache(args)):
-            code = func(args)
+            code = _run_command(args, func)
         # Flush here, not at interpreter exit: a short report sits in the buffer
         # until then, and a reader that already left (`| head -1`) would turn
         # into an "Exception ignored" message and exit status 120.

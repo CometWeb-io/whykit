@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/decision-approval-result.schema.json",
+  "title": "WhyKit decision approval preview/result",
+  "description": "A local approval preview and its application. Reviewer is attribution, not authenticated identity. expected_sha256 binds inputs, parameters and proposed updates; no write without the reviewed hash.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "applied",
+    "expected_sha256",
+    "snapshot_sha256",
+    "record_sha256",
+    "target",
+    "decision_id",
+    "reviewer",
+    "date",
+    "next_review",
+    "reviewed_record",
+    "evidence",
+    "changes"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "applied": {
+      "type": "boolean"
+    },
+    "expected_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "snapshot_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "record_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_id": {
+      "type": "string",
+      "pattern": "^D-[0-9]{3,}$"
+    },
+    "reviewer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "next_review": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "reviewed_record": {
+      "type": "string"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "location",
+          "claims"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^E-[0-9]{3,}$"
+          },
+          "source": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "claims": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "diff"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "diff": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

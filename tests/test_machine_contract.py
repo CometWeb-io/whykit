@@ -87,7 +87,7 @@ class SchemaCatalogTests(unittest.TestCase):
 
         json_commands = set(walk(cli.build_parser(), []))
         # `snapshot` has no --json flag but always writes JSON to stdout.
-        self.assertEqual(json_commands | {"snapshot", "rules <code>"}, set(OUTPUT_SCHEMAS))
+        self.assertEqual(json_commands | {"snapshot", "rules <code>", "explorer-index --publication-preview"}, set(OUTPUT_SCHEMAS))
 
     def test_automation_doc_lists_every_error_code_and_schema(self) -> None:
         doc = (ROOT / "docs" / "automation.md").read_text(encoding="utf-8")
@@ -160,6 +160,8 @@ class SuccessPayloadTests(unittest.TestCase):
             ("rules <code>", ["rules", "evidence.missing", "--json"], (0,)),
             ("doctor", ["doctor", *root, "--json"], (0, 1)),
             ("explorer-index", ["explorer-index", *root, "--today", TODAY], (0,)),
+            ("explorer-index", ["explorer-index", *root, "--private", "--today", TODAY], (0,)),
+            ("explorer-index --publication-preview", ["explorer-index", *root, "--publication-preview", "--today", TODAY], (0,)),
         ]
         for command, argv, exits in cases:
             with self.subTest(argv=argv):
@@ -311,8 +313,8 @@ class ErrorObjectTests(unittest.TestCase):
     def test_status_accepted_names_the_valid_value(self) -> None:
         argv = ["new", "--root", str(self.vault), "decision", "X", "--status", "accepted"]
         payload = self.assertJsonError([*argv, "--json"], "usage", human_argv=argv)
-        self.assertIn("approved", payload["error"]["message"])
-        self.assertIn("--status approved", payload["error"]["hint"])
+        self.assertIn("draft", payload["error"]["message"])
+        self.assertIn("whykit review approve", payload["error"]["hint"])
         _, _, err = call(*argv)
         self.assertIn("hint: decision logs display approved decisions", err)
 

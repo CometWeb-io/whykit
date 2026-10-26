@@ -1,6 +1,8 @@
 """Human and machine-readable vault status."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import datetime as dt
 import json
@@ -55,6 +57,7 @@ def build_review_queue(vault: VaultIndex, *, today: dt.date, due_days: int = 30)
     return review_queue
 
 
+@consistent_read
 @path_cache()
 def build_status(
     root: Path,

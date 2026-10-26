@@ -11,6 +11,8 @@
     "config_source": {"type": "string"},
     "as_of": {"type": "string"},
     "passed": {"type": "boolean"},
+    "history_checked": {"type": "boolean", "description": "At least one applied policy completed the history check, including a failing result."},
+    "baseline": {"type": "object", "description": "The head vault evaluated under the policy loaded from the pinned --base revision."},
     "checks": {
       "type": "array",
       "items": {
@@ -19,7 +21,21 @@
         "properties": {
           "name": {"type": "string"},
           "passed": {"type": "boolean"},
-          "detail": {"type": "string"}
+          "checked": {"type": "boolean"},
+          "detail": {"type": "string"},
+          "blocked": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["status", "path"],
+              "properties": {
+                "status": {"type": "string"},
+                "path": {"type": "string"},
+                "reason": {"enum": ["review_without_event", "approval_without_event"]}
+              },
+              "additionalProperties": true
+            }
+          }
         },
         "additionalProperties": true
       }

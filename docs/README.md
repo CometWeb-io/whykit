@@ -48,6 +48,7 @@ Exact behaviour, checked against the code by the test suite.
 |---|---|
 | [Command reference](cli.md) | Every command and option, and the exit codes |
 | [Configuration](configuration.md) | `whykit.toml` keys and profiles, document front matter, evidence access age |
+| [Data classification and exports](data-classification.md) | Evidence row labels, public exports and explicit private viewers |
 | [Lint rules](rules.md) | Every rule code, its severity and the default fix |
 | [Automation](automation.md) | The `--json` contract: error codes, exit codes, schemas and the stability policy |
 | [MCP tools, resources and prompts](mcp.md#tools) | Input schemas, return shapes and error codes of the MCP server |

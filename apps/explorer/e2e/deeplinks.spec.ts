@@ -14,6 +14,7 @@ test("the evidence filter is in the URL and survives a reload", async ({ page })
 test("the search dialog and its query reopen from a link", async ({ page }) => {
   await open(page, "#view=health");
   await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("combobox", { name: "Search vault" })).toBeFocused();
   await page.keyboard.type("hubspot");
   await expect(page).toHaveURL(/#view=health&search=hubspot$/);
   await page.reload();

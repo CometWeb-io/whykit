@@ -76,6 +76,7 @@ class TargetNotFound(ValueError):
 # test walks the argument parser to keep this table complete.
 OUTPUT_SCHEMAS: dict[str, str] = {
     "init": "init-result.schema.json",
+    "recover": "recovery-result.schema.json",
     "lint": "lint-report.schema.json",
     "new decision": "record-create.schema.json",
     "new evidence": "record-create.schema.json",
@@ -90,6 +91,7 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "pack": "context-bundle.schema.json",
     "review list": "review-queue.schema.json",
     "review record": "review-record-result.schema.json",
+    "review approve": "decision-approval-result.schema.json",
     "snapshot": "snapshot.schema.json",
     "verify-snapshot": "snapshot-verify.schema.json",
     "check": "check-report.schema.json",
@@ -103,6 +105,7 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "rules <code>": "rule-detail.schema.json",
     "doctor": "doctor-report.schema.json",
     "explorer-index": "explorer-index.schema.json",
+    "explorer-index --publication-preview": "publication-preview.schema.json",
 }
 ERROR_SCHEMA = "error.schema.json"
 

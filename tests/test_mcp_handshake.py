@@ -186,6 +186,17 @@ class ClassicHandshakeTests(unittest.TestCase):
         self.assertNotEqual(init.get("error", {}).get("code"), UNSUPPORTED_PROTOCOL_VERSION, init)
         self.assert_handshake_session(init, "2025-11-25", first_id=2)
 
+    def test_discovery_burst_preserves_every_reply_and_classic_fallback(self) -> None:
+        for request_id in range(96):
+            self.server.send(discover(request_id))
+        self.server.send(initialize(96, "2025-06-18"))
+        replies = [self.server.receive() for _ in range(97)]
+        self.assertEqual({reply.get("id") for reply in replies}, set(range(97)))
+        for reply in replies:
+            self.assertNotIn("error", reply, reply)
+        init = next(reply for reply in replies if reply["id"] == 96)
+        self.assert_handshake_session(init, "2025-06-18", first_id=97)
+
     def test_modern_clients_keep_the_2026_protocol_after_the_probe(self) -> None:
         self.server.send(discover(0))
         probe = self.server.response(0)

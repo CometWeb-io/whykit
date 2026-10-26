@@ -1,6 +1,8 @@
 """Build deterministic multi-record context bundles for agent handoffs."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import json
 from pathlib import Path
@@ -56,9 +58,7 @@ AGENT_PREAMBLES = {
 def _allowed(context: dict[str, Any], allowed: set[str] | None) -> bool:
     if allowed is None:
         return True
-    # Evidence-register rows carry no sensitivity of their own and inherit the
-    # register's `internal` classification; so do documents without the key.
-    record = context.get("record") if context.get("kind") != "evidence" else None
+    record = context.get("evidence", {}).get("record") if context.get("kind") == "evidence" else context.get("record")
     level = str((record or {}).get("sensitivity") or "internal").lower()
     return level in allowed
 
@@ -75,6 +75,7 @@ def _record_key(context: dict[str, Any]) -> str:
     return f"target:{context.get('target')}"
 
 
+@consistent_read
 @path_cache()
 def build_pack(
     root: Path,

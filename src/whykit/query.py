@@ -1,6 +1,8 @@
 """Metadata-aware vault queries for humans and agents."""
 from __future__ import annotations
 
+from .io import consistent_read
+
 import argparse
 import json
 from pathlib import Path
@@ -38,6 +40,7 @@ def _summary(index: VaultIndex, note) -> dict:
     }
 
 
+@consistent_read
 @path_cache()
 def query_vault(
     root: Path,

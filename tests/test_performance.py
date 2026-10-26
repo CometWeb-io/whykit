@@ -8,6 +8,7 @@ quadratic behaviour, which costs tens of seconds even at 1,000 notes. Set
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import hashlib
 import io
 import os
@@ -16,11 +17,13 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
+from _vaults import historical_decision  # noqa: E402
 from synthetic_vault import AS_OF, DIGEST_COMMANDS, generate, output_digests  # noqa: E402
 from whykit import lint as lint_mod  # noqa: E402
 from whykit.cli import main as whykit_main  # noqa: E402
@@ -59,8 +62,9 @@ INTENTIONAL_CHANGES: dict[str, tuple[str, str]] = {
         "evidence.retired is not reported on superseded or archived records",
     ),
     "check": (
-        "4546eeb029d91e55c1c6417b3e1d2f414f5ac0c65c6d6a38440845a43cec5a37",
-        "evidence.retired is not reported on superseded or archived records",
+        "e87802143d77a232e8de0517a4e1633e9f346a13261a80344bf2c2b97887366c",
+        "evidence.retired is not reported on superseded or archived records; "
+        "explicit history_checked and checks.history.checked (false without base)",
     ),
     "status": (
         "677e6cdb9a16bba31c24756a7b724b4fb96c854995b2c73b6307050ae31f02db",
@@ -79,8 +83,8 @@ INTENTIONAL_CHANGES: dict[str, tuple[str, str]] = {
     # to write nothing to stdout; it now writes the machine-contract error
     # object (code vault_invalid), with the same exit code 1.
     "explorer-index": (
-        "78a88c30d3e939bcc1421de15b217bf2d934f67ef3d098959bafb4c7a201d4d9",
-        "JSON error object (vault_invalid) on stdout under the machine contract",
+        "f9e14f64e9352ee51edb9eccd957c21cd8355ca9e1fe1c591ac7e6d94c16f4f8",
+        "JSON vault_invalid error; public export errors omit private finding counts, paths and messages",
     ),
 }
 
@@ -105,6 +109,24 @@ def _tree_digest(root: Path) -> str:
 
 
 class SyntheticVaultTest(unittest.TestCase):
+    def test_command_digests_do_not_depend_on_the_host_date(self) -> None:
+        class HostDate(dt.date):
+            day = 4
+
+            @classmethod
+            def today(cls):
+                return cls(2026, 10, cls.day)
+
+        command = tuple(item for item in DIGEST_COMMANDS if item[0] == "pack")
+        digests = []
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = generate(Path(tmp) / "vault", 400)
+            with mock.patch("datetime.date", HostDate):
+                for day in (4, 25):
+                    HostDate.day = day
+                    digests.append(output_digests(vault, command))
+        self.assertEqual(digests[0], digests[1])
+
     def test_generator_is_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
             generate(Path(a), 120)
@@ -284,8 +306,8 @@ class CacheScopeAcrossCommandsTest(unittest.TestCase):
 
         self.assertEqual(self.cli("new", "evidence", "--source", "Export", "--type", "dataset",
                                   "--location", "https://example.com/export.csv", "--claims", "c")[0], 0)
-        self.assertEqual(self.cli("new", "decision", "First", "--owner", "Ops", "--status", "approved",
-                                  "--source", "E-001")[0], 0)
+        historical_decision(self.vault, "First", owner="Ops", source_ids=["E-001"], today=dt.date.today(),
+                            review_by=(dt.date.today() + dt.timedelta(days=90)).isoformat())
         self.assertIn(self.cli("status", "--json")[0], (0, 1))
         log = self.vault / "00-context" / "review-log.md"
         os.chmod(log, stat.S_IREAD)

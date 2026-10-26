@@ -42,6 +42,10 @@
           },
           "path": {
             "type": "string"
+          },
+          "reason": {
+            "enum": ["review_without_event", "approval_without_event"],
+            "description": "Present when the blocked change lacks a fresh matching review or approval receipt."
           }
         },
         "additionalProperties": true

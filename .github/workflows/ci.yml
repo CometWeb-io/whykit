@@ -245,6 +245,10 @@ jobs:
           set -euo pipefail
           for version in 2.2.0 2.3.0; do
             uv run --no-sync --with "mcp==$version" python -m unittest discover -s tests -p 'test_mcp_handshake.py' -v
+            uv run --no-sync --with "mcp==$version" python -m unittest discover -s tests -p 'test_mcp_backpressure.py' -v
+            for suite in test_mcp_frames test_mcp_response_budget test_mcp_sdk_contract test_mcp_http_limits; do
+              uv run --no-sync --with "mcp==$version" python -m unittest discover -s tests -p "$suite.py" -v
+            done
           done
       - name: Build twice from the same commit
         # SOURCE_DATE_EPOCH pins archive timestamps to the commit, so two
