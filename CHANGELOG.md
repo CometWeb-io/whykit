@@ -7,7 +7,22 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-26
+
+Prepared as the first public package release, including the changes in the
+unpublished 0.3.0 source milestone. Publication is not yet verified.
+
+### Fixed
+
+- Move the PR decision-diff comment into a separate workflow so reusable CI
+  stays read-only and GitHub accepts the release workflow's permissions.
+  Preserve the same-repository guard and add a caller/callee permission
+  regression without weakening the publishing gates.
+
 ## [0.3.0] - 2026-10-26
+
+Source tag only. GitHub rejected the release workflow at startup, before any
+package upload. The tag is retained as the record of that failed release.
 
 - Require uv 0.13.4 or newer, pin CI to uv 0.13.5 and update certifi after the
   CA certificate incident. Bootstrap the Action's pip from a SHA-256-pinned
@@ -95,7 +110,7 @@ CLI and the lint rule codes.
   2026-10-04 baseline, so evidence aging no longer changes the `pack` digest
   with the host clock. Runtime freshness checks and recorded hashes are unchanged.
 
-Prepared for **0.3.0**, the first public package release. It covers every
+The **0.3.0** source milestone covers every
 change since the internal 0.2.0 milestone, including the `0.3.0.dev0` source
 preview. Upgrading from a checkout of 0.2.0 or the preview: read the
 [0.3 migration guide](docs/migration-0.3.md) first.
@@ -967,5 +982,6 @@ Initial implementation. No package was published under this version.
   rules and common secret leaks.
 - JSON Schemas, a worked example vault, and an optional local Explorer.
 
-[Unreleased]: https://github.com/CometWeb-io/whykit/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/CometWeb-io/whykit/releases/tag/v0.3.0
+[Unreleased]: https://github.com/CometWeb-io/whykit/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/CometWeb-io/whykit/releases/tag/v0.3.1
+[0.3.0]: https://github.com/CometWeb-io/whykit/tree/v0.3.0
