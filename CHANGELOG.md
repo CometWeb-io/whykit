@@ -7,6 +7,15 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+- Add an executable ADR-to-review-to-public-export walkthrough, including
+  retained source provenance, explicit approval and restricted-data checks.
+
+- Capture lock metadata after fixture reads in transaction-alias regressions,
+  so filesystem access-time updates do not cause intermittent failures.
+
+- Refresh the Explorer lockfile to patched Vite, source-map-js and Zod
+  versions within the existing dependency ranges.
+
 - Keep release rehearsal pending when the local main reference is missing and
   stop MCP smoke when locked dependency constraints cannot be exported.
 

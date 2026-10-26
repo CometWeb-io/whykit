@@ -70,9 +70,12 @@ decision ...` and `whykit new decision ... --root ../my-ledger` both work).
 Inside the vault directory you can drop `--root` altogether.
 
 Next: write the real context and rationale into `06-decisions/d-001-*.md`,
-preview and approve the completed record, `git init` the vault, and commit it. Then follow
-[Record, check and supersede a decision](docs/tutorials/record-and-supersede.md)
-(ten minutes) and [Gate pull requests in GitHub Actions](docs/tutorials/gate-pull-requests.md).
+preview and approve the completed record, `git init` the vault, and commit it.
+Choose a complete workflow:
+
+- [Import an ADR, review changed evidence and export public data](docs/tutorials/review-and-export.md): keep source provenance, find the affected decision and retain its review warning in a filtered export.
+- [Record, check and supersede a decision](docs/tutorials/record-and-supersede.md): replace an accepted choice without rewriting its reasoning.
+- [Gate pull requests in GitHub Actions](docs/tutorials/gate-pull-requests.md): check changes against a trusted Git baseline.
 
 ## Why WhyKit
 
@@ -83,6 +86,10 @@ reasoning still holds. WhyKit makes those links explicit and checks them:
 ```text
 source (E-001) → decision (D-001) → dated review events
 ```
+
+Use that record to answer three questions: which decision applies, which
+sources support it, and what needs review when an input changes. Public exports
+keep permitted records and their known warnings while filtering non-public data.
 
 - **Evidence stays traceable.** Each source gets a stable ID and a location a
   person can inspect.

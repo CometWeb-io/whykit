@@ -15,6 +15,7 @@ Learn by doing. Every command in these pages runs in the test suite.
 | Page | You will |
 |---|---|
 | [60-second quickstart](../README.md#60-second-quickstart) | Create a vault, cite a source, record a decision |
+| [Import, review and export](tutorials/review-and-export.md) | Import an ADR as a draft, trace changed evidence and export public data with the review warning intact |
 | [Record, check and supersede a decision](tutorials/record-and-supersede.md) | Change your mind with a new decision and watch the history check refuse a rewrite |
 | [Gate pull requests with `whykit check`](tutorials/gate-pull-requests.md) | Add the GitHub Action and see a good and a bad pull request |
 
