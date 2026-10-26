@@ -315,6 +315,8 @@ def cmd_new(args: argparse.Namespace) -> int:
             argv += ["--date", args.date]
         if args.accessed:
             argv += ["--accessed", args.accessed]
+        if args.sensitivity:
+            argv += ["--sensitivity", args.sensitivity]
         if args.json:
             argv.append("--json")
     else:
@@ -877,11 +879,18 @@ def _sensitive_docs(vault: Path) -> list[str]:
 
 def _non_public_docs(vault: Path) -> list[str]:
     index = VaultIndex.load(vault)
+    from .sensitivity import note_sensitivity_level, classified_evidence, evidence_register_notes
+
     result: list[str] = []
     for note in index.notes:
-        sensitivity = str(note.front.get("sensitivity", "internal")).lower()
-        if sensitivity != "public":
+        if note_sensitivity_level(note) != 0:
             result.append(index.relative(note.path))
+    active, retired, _, per_row = classified_evidence(index)
+    # The private viewer serves the raw table, including incomplete/placeholder rows.
+    if per_row:
+        result.extend(index.relative(note.path) for note in evidence_register_notes(index)
+                      if index.relative(note.path) not in result)
+    result.extend(f"evidence:{key}" for key, row in (*active.items(), *retired.items()) if row["sensitivity"] != "public")
     return result
 
 
@@ -906,6 +915,10 @@ def cmd_explorer_index(args: argparse.Namespace) -> int:
         argv += ["--root", args.root]
     if getattr(args, "today", None):
         argv += ["--today", args.today]
+    if getattr(args, "private", False):
+        argv += ["--private"]
+    if getattr(args, "publication_preview", False):
+        argv += ["--publication-preview"]
     from .explorer_index import main as explorer_index_main
     return explorer_index_main(argv)
 
@@ -1024,6 +1037,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         return 2
     env = os.environ.copy()
     env["WHYKIT_VAULT_DIR"] = str(vault)
+    env["WHYKIT_EXPLORER_PRIVATE"] = "1"
     return subprocess.run([npm, "run", "dev", "--", "--host", args.host, "--port", str(args.port)],
                           cwd=explorer, env=env).returncode
 
@@ -1255,6 +1269,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_evidence.add_argument("--claims", required=True, help="what the source supports, in one line")
     new_evidence.add_argument("--date", metavar="YYYY-MM-DD", help="when the source was produced (default: today)")
     new_evidence.add_argument("--accessed", metavar="YYYY-MM-DD", help="when it was last checked (default: today)")
+    new_evidence.add_argument("--sensitivity", choices=SENSITIVITIES, help="optional row label; cannot lower the register floor")
     new_evidence.add_argument("--json", action="store_true", help=JSON_HELP)
     _add_leaf_root(new_evidence)
     new_evidence.set_defaults(func=cmd_new)
@@ -1490,6 +1505,8 @@ def build_parser() -> argparse.ArgumentParser:
     explorer_index.add_argument("--root", help=ROOT_HELP)
     explorer_index.add_argument("--today", help=TODAY_HELP)
     explorer_index.add_argument("--json", action="store_true", default=True, help="accepted for symmetry; output is always JSON")
+    explorer_index.add_argument("--private", action="store_true", help="full local index; never publish this output")
+    explorer_index.add_argument("--publication-preview", action="store_true", help="private withheld-path diagnostics; never publish this report")
     explorer_index.set_defaults(func=cmd_explorer_index)
 
     serve = sub.add_parser("serve", help="run the optional Explorer (source checkout only)")

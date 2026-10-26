@@ -363,6 +363,36 @@ tags: []
         return decision_id, path
 
 
+def _with_evidence_sensitivity(text: str, mode: str, inherited: str) -> str:
+    """Extend one legacy table without declassifying any existing row."""
+    from .tables import evidence_table_bounds
+
+    lines = text.splitlines()
+    start, end, labeled = evidence_table_bounds(lines, mode)
+    if labeled:
+        return text
+    for index in range(start, end):
+        value = "Sensitivity" if index == start else "---" if index == start + 1 else inherited
+        if index > start + 1:
+            cells = _split_table_row(lines[index])
+            if len(cells) != (7 if mode == "active" else 5):
+                raise ValueError("cannot extend an evidence table with malformed rows")
+            if not cells[1]:
+                value = ""
+        line = lines[index].rstrip()
+        lines[index] = line + ("" if line.endswith("|") else " |") + f" {_table_cell(value)} |"
+    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+
+
+
+def _register_inherited_label(path: Path, text: str) -> str:
+    from .sensitivity import SENSITIVITY_LEVEL, note_sensitivity_level
+
+    level = note_sensitivity_level(load_note(path, text=text))
+    return next((name for name, value in SENSITIVITY_LEVEL.items() if value == level), "unclassified")
+
+
+
 def create_evidence(
     vault: Path,
     *,
@@ -372,6 +402,7 @@ def create_evidence(
     claims: str,
     date: str | None = None,
     accessed: str | None = None,
+    sensitivity: str | None = None,
     today: dt.date | None = None,
 ) -> str:
     today = today or dt.date.today()
@@ -381,16 +412,36 @@ def create_evidence(
     accessed_date = accessed or today.isoformat()
     parse_iso_date("--date", source_date)
     parse_iso_date("--accessed", accessed_date)
+    if sensitivity is not None and sensitivity not in VALID_SENSITIVITY:
+        raise ValueError("unsupported evidence sensitivity")
     with vault_mutation_lock(vault):
         evidence_id = _next_id(_existing_evidence_ids(vault), "E")
         register = safe_vault_target(vault, "00-context/evidence-register.md", create_parents=False)
         if not register.exists():
             raise FileNotFoundError(errno.ENOENT, "the evidence register is missing", str(register))
+        from .tables import evidence_table_bounds
+
+        original = register.read_text(encoding="utf-8")
+        inherited = _register_inherited_label(register, original)
+        updated = _with_evidence_sensitivity(original, "active", inherited) if sensitivity is not None else original
+        lines = updated.splitlines()
+        header, end, labeled = evidence_table_bounds(lines, "active")
+        placeholder = next((index for index in range(header + 2, end)
+                            if _split_table_row(lines[index])[0] == evidence_id), None)
+        values: tuple[str, ...] = (evidence_id, source, kind, source_date, accessed_date, location, claims)
+        if labeled:
+            prior = _split_table_row(lines[placeholder]) if placeholder is not None else []
+            values += (sensitivity or (prior[7] if len(prior) == 8 and prior[7] else inherited),)
         row = "| " + " | ".join(
             _table_cell(value)
-            for value in (evidence_id, source, kind, source_date, accessed_date, location, claims)
+            for value in values
         ) + " |"
-        _append_table_row(register, "| ID | Source | Type |", row, today, record_id=evidence_id)
+        if placeholder is not None:
+            lines[placeholder] = row
+        else:
+            lines.insert(end, row)
+        updated = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
+        atomic_write_text(register, _frontmatter_replace(updated, "last_updated", today.isoformat()))
         return evidence_id
 
 
@@ -648,6 +699,7 @@ def main(argv: list[str] | None = None) -> int:
     evidence.add_argument("--claims", required=True)
     evidence.add_argument("--date")
     evidence.add_argument("--accessed")
+    evidence.add_argument("--sensitivity", choices=VALID_SENSITIVITY)
     evidence.add_argument("--json", action="store_true")
 
     note = sub.add_parser("note", help="create a draft note in an existing workstream")
@@ -694,7 +746,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.kind == "evidence":
             evidence_id = create_evidence(
                 vault, source=args.source_name, location=args.location, kind=args.evidence_type,
-                claims=args.claims, date=args.date, accessed=args.accessed,
+                claims=args.claims, date=args.date, accessed=args.accessed, sensitivity=args.sensitivity,
             )
             payload = {"contract_version": 1, "kind": "evidence", "id": evidence_id, "path": "00-context/evidence-register.md"}
             if args.json:

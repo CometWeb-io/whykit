@@ -16,20 +16,20 @@ class ReviewTableTests(_TinyCopy):
     def test_formatted_header_and_alignment_keep_the_same_events(self) -> None:
         log = self.vault / "00-context/review-log.md"
         before = log.read_text(encoding="utf-8")
-        events = build_explorer_index(self.vault, today=DAY)["reviews"]
+        events = build_explorer_index(self.vault, today=DAY, private=True)["reviews"]
         after = before.replace(HEADER, "| DATE  | TARGET | REVIEWER | OUTCOME | PREVIOUS REVIEW | NEXT REVIEW | NOTE |")
         after = after.replace(SEPARATOR, "| :--- | ---: | :---: | --- | --- | --- | --- |")
         log.write_text(after, encoding="utf-8")
         self.assertTrue(allowed_review_log_append(before, after))
-        self.assertEqual(build_explorer_index(self.vault, today=DAY)["reviews"], events)
+        self.assertEqual(build_explorer_index(self.vault, today=DAY, private=True)["reviews"], events)
         record_review(self.vault, "D-002", reviewer="Ada Example", outcome="confirmed", today=DAY)
-        self.assertEqual(len(build_explorer_index(self.vault, today=DAY)["reviews"]), len(events) + 1)
+        self.assertEqual(len(build_explorer_index(self.vault, today=DAY, private=True)["reviews"]), len(events) + 1)
 
     def test_hidden_example_tables_do_not_become_history(self) -> None:
         log = self.vault / "00-context/review-log.md"
         before = log.read_text(encoding="utf-8")
         rows = _review_log_parts(before)[1]
-        events = build_explorer_index(self.vault, today=DAY)["reviews"]
+        events = build_explorer_index(self.vault, today=DAY, private=True)["reviews"]
         fake = HEADER + "\n" + SEPARATOR + "\n| 2026-09-17 | [[missing]] | Fake reviewer | approved | — | 2027-01-01 | fake receipt |\n"
         for block in ("<!--\n" + fake + "-->\n", "````markdown\n" + fake + "````\n"):
             with self.subTest(block=block[:10]):
@@ -37,10 +37,10 @@ class ReviewTableTests(_TinyCopy):
                 log.write_text(text, encoding="utf-8")
                 self.assertEqual(_review_log_parts(text)[1], rows)
                 self.assertFalse([f for f in lint(self.vault, today=DAY)[1] if f.code.startswith("review_log.")])
-                self.assertEqual(build_explorer_index(self.vault, today=DAY)["reviews"], events)
+                self.assertEqual(build_explorer_index(self.vault, today=DAY, private=True)["reviews"], events)
                 record_review(self.vault, "D-002", reviewer="Ada Example", outcome="confirmed", today=DAY)
                 self.assertIn(block, log.read_text(encoding="utf-8"))
-                self.assertEqual(len(build_explorer_index(self.vault, today=DAY)["reviews"]), len(events) + 1)
+                self.assertEqual(len(build_explorer_index(self.vault, today=DAY, private=True)["reviews"]), len(events) + 1)
 
     def test_bad_or_missing_separators_fail_before_a_review_write(self) -> None:
         log = self.vault / "00-context/review-log.md"
@@ -52,7 +52,7 @@ class ReviewTableTests(_TinyCopy):
                 self.assertIsNone(review_table_header(text.splitlines()))
                 self.assertIsNone(_review_log_parts(text))
                 self.assertIn("review_log.table", {f.code for f in lint(self.vault, today=DAY)[1]})
-                self.assertEqual(build_explorer_index(self.vault, today=DAY)["reviews"], [])
+                self.assertEqual(build_explorer_index(self.vault, today=DAY, private=True)["reviews"], [])
                 with self.assertRaisesRegex(ValueError, "table is missing or malformed"):
                     record_review(self.vault, "D-002", reviewer="Ada Example", outcome="confirmed", today=DAY)
                 self.assertEqual(log.read_text(encoding="utf-8"), text)
@@ -71,7 +71,7 @@ class ReviewTableTests(_TinyCopy):
                 self.assertIsNone(review_table_header(text.splitlines()))
                 self.assertIsNone(_review_log_parts(text))
                 self.assertIn("review_log.table", {f.code for f in lint(self.vault, today=DAY)[1]})
-                self.assertEqual(build_explorer_index(self.vault, today=DAY)["reviews"], [])
+                self.assertEqual(build_explorer_index(self.vault, today=DAY, private=True)["reviews"], [])
                 before = {p: p.read_bytes() for p in self.vault.rglob("*.md")}
                 with self.assertRaisesRegex(ValueError, "table is missing or malformed"):
                     record_review(self.vault, "D-002", reviewer="Ada Example", outcome="confirmed", today=DAY)
@@ -95,4 +95,4 @@ class ReviewTableTests(_TinyCopy):
         self.assertEqual(parts[1][-1][2], "Ada `Example`")
         self.assertEqual(parts[1][-1][6], note)
         self.assertFalse([f for f in lint(self.vault, today=DAY)[1] if f.code.startswith("review_log.")])
-        self.assertEqual(build_explorer_index(self.vault, today=DAY)["reviews"][-1]["note"], note)
+        self.assertEqual(build_explorer_index(self.vault, today=DAY, private=True)["reviews"][-1]["note"], note)

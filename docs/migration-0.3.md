@@ -27,6 +27,20 @@ command's output, an exit code, a stricter check or a default.
 7. Reinstall the pre-commit hook in each vault
    ([hooks](#pre-commit-hooks)).
 
+## Public Explorer exports and evidence labels
+
+`explorer-index` and normal Explorer builds now export public content only,
+omitting dependent notes as whole records. A valid export can be empty. Use
+`explorer-index --private` or `WHYKIT_EXPLORER_PRIVATE=1` only for private local
+viewers; imported indexes via `--from` require that explicit private mode.
+`whykit serve` retains the full local view on loopback.
+
+Legacy evidence tables retain register-level inheritance. An optional final
+`Sensitivity` column can tighten that floor, and retirement preserves it.
+Filtered readers withhold invalid classifications and raw per-row registers.
+Review the [classification and export rules](data-classification.md), including
+the private `--publication-preview` report, before publishing a static viewer.
+
 ## Approval workflow and baseline policy
 
 New decisions and imports must start as `draft` or `in_review`. Fill the sections,

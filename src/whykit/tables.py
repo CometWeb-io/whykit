@@ -81,3 +81,40 @@ def review_table_header(lines: Sequence[str]) -> int | None:
                 return None
         return index
     return None
+
+
+EVIDENCE_COLUMNS = {
+    "active": ("id", "source", "type", "date", "accessed", "location", "claims it supports"),
+    "retired": ("id", "source", "retired on", "why", "replaced by"),
+}
+
+
+def evidence_table_bounds(lines: Sequence[str], mode: str) -> tuple[int, int, bool]:
+    """Locate a legacy table or one with the optional final Sensitivity column."""
+    expected = EVIDENCE_COLUMNS[mode]
+    raw = [line.rstrip("\r\n") for line in lines]
+    text = "\n".join(raw)
+    masked = mask_code(text).splitlines()
+    uncommented = mask_code(text, keep_code=True).splitlines()
+    for index, line in enumerate(masked):
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = tuple(cell.casefold() for cell in split_table_row(line))
+        if cells not in (expected, (*expected, "sensitivity")):
+            continue
+        if tuple(cell.casefold() for cell in split_table_row(raw[index])) != cells or index + 1 >= len(raw):
+            break
+        separator = split_table_row(raw[index + 1])
+        if (len(separator) != len(cells) or not all(re.fullmatch(r":?-{3,}:?", cell) for cell in separator)
+                or separator != split_table_row(masked[index + 1])):
+            break
+        end = index + 2
+        while end < len(raw) and raw[end].lstrip().startswith("|"):
+            row = split_table_row(raw[end])
+            if (len(row) != len(cells) or not masked[end].lstrip().startswith("|")
+                    or len(split_table_row(masked[end])) != len(row)
+                    or split_table_row(uncommented[end]) != row):
+                raise ValueError(f"cannot write an ambiguous {mode} evidence table")
+            end += 1
+        return index, end, len(cells) > len(expected)
+    raise ValueError(f"expected a valid {mode} evidence table")

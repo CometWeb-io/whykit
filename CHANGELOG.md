@@ -7,6 +7,22 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+- Add optional final evidence-row `Sensitivity` columns with register floors,
+  replacement inheritance and fail-closed filtered reads. Creation and retirement
+  preserve labels; malformed tables cannot become write targets. MCP captures
+  classifications and content together, filters rows/counts/completions and
+  withholds raw per-row registers. Invalid row labels emit `evidence.sensitivity`
+  (warning); disabling the warning does not disable filtering.
+  Captured register lookup and raw-table withholding recognize `.MD` and case
+  aliases consistently in exports, MCP and the serve network guard; ambiguous
+  register candidates withhold all rows and raw bodies.
+- Explorer exports and builds default to public records with a whole-record
+  dependency closure across notes and evidence, including known titles, aliases
+  and code examples. Migration: use `--private` / `WHYKIT_EXPLORER_PRIVATE=1`
+  only for private viewers. `serve` retains the private loopback view.
+  `--publication-preview` emits separate private omission diagnostics and a
+  source manifest; a lint-clean result is not permission to publish.
+
 - Add decision approval previews bound to captured bytes and parameters, atomic
   apply/supersession and append-only approval/re-review receipts. New decisions
   and imports start as draft or in_review; reviewer attribution is not identity

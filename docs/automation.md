@@ -195,6 +195,7 @@ CLI actually prints.
 | `rules <code> --json` | `rule-detail.schema.json` |
 | `doctor --json` | `doctor-report.schema.json` |
 | `explorer-index` | `explorer-index.schema.json` |
+| `explorer-index --publication-preview` | `publication-preview.schema.json` (private diagnostics) |
 | any failure | `error.schema.json` |
 
 The same table is available to Python callers as

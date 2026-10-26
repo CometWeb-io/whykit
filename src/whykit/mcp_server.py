@@ -39,12 +39,8 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
-SENSITIVITY_LEVEL = {
-    "public": 0,
-    "internal": 1,
-    "confidential": 2,
-    "restricted": 3,
-}
+from .sensitivity import SENSITIVITY_LEVEL, _sensitivity_level, note_sensitivity_level, classified_evidence, evidence_register_notes
+
 MAX_MCP_CONTEXT = 50_000
 MAX_MCP_RESULTS = 100
 MAX_MCP_PACK_DOCS = 20
@@ -217,30 +213,6 @@ def _validate_policy(value: str) -> str:
 UNREADABLE_LEVEL = 99
 
 
-def _sensitivity_level(value: object) -> int:
-    key = str(value or "internal").lower() or "internal"
-    return SENSITIVITY_LEVEL.get(key, 99)
-
-
-def note_sensitivity_level(note: Any) -> int:
-    """The level a note is filtered at, failing closed when its label is unreadable.
-
-    A note without front matter, or with valid front matter that omits the
-    key, is `internal` (the documented default). Front matter that does not
-    parse, or a label spelt with different case or spacing (`Sensitivity:`),
-    may hide a stricter label WhyKit cannot read, so such a note is treated as
-    above every ceiling.
-    """
-    if note.front_error:
-        return UNREADABLE_LEVEL
-    front = note.front
-    level = _sensitivity_level(front.get("sensitivity"))
-    for key, value in front.items():
-        if key != "sensitivity" and str(key).strip().casefold() == "sensitivity":
-            level = max(level, _sensitivity_level(value), SENSITIVITY_LEVEL["restricted"])
-    return level
-
-
 def _visible(item: dict, policy: str) -> bool:
     return _sensitivity_level(item.get("sensitivity")) <= SENSITIVITY_LEVEL[policy]
 
@@ -277,6 +249,8 @@ def _filter_nested(value: object, policy: str, register_visible: bool | None = N
             return None
         out: dict = {}
         for key, child in value.items():
+            if key == "line" and {"source", "sensitivity"}.issubset(value):
+                continue  # Raw row offsets reveal hidden rows and are not filtered-view locations.
             filtered = _filter_nested(child, policy, register_visible)
             if filtered is None and isinstance(child, dict):
                 continue
@@ -590,7 +564,7 @@ def _validate_cursor(value: object) -> str | None:
 # Tool handlers (SDK-free)
 # ---------------------------------------------------------------------------
 
-_MCP_REQUEST: contextvars.ContextVar[tuple[object, object] | None] = contextvars.ContextVar("whykit_mcp_request", default=None)
+_MCP_REQUEST: contextvars.ContextVar[tuple[object, object, dict] | None] = contextvars.ContextVar("whykit_mcp_request", default=None)
 
 
 def _vault_request(handler):
@@ -624,33 +598,33 @@ class VaultTools:
         self.cursors = CursorCodec(self.policy)
 
     def visible_index(self):
-        """Load the vault as if records above the ceiling did not exist.
+        """Capture note labels and filtered evidence once per active request."""
+        from .vault_index import VaultIndex
+        from .lint import _request_cache
 
-        Every handler resolves targets, decision IDs, links and graph edges
-        against this confined index, so a hidden record cannot surface as an
-        ambiguity, a backlink, a link target or a duplicate ID.
-        """
-        from whykit.vault_index import VaultIndex
-
+        current = _MCP_REQUEST.get()
+        request = _request_cache()
+        owned = current is not None and current[0] is self and request is not None and current[1] is request
+        if owned and current is not None and "index" in current[2]:
+            return current[2]["index"]
         ceiling = SENSITIVITY_LEVEL[self.policy]
-        return VaultIndex.load(self.vault).subset(lambda note: note_sensitivity_level(note) <= ceiling)
+        index = VaultIndex.load(self.vault)
+        active, retired, occurrences, per_row = classified_evidence(index)
+        registers = evidence_register_notes(index)
+        register_paths = {note.path for note in registers}
+        visible = index.subset(lambda note: note_sensitivity_level(note) <= ceiling and not (per_row and note.path in register_paths))
+        active = {key: row for key, row in active.items() if _visible(row, self.policy)}
+        retired = {key: row for key, row in retired.items() if _visible(row, self.policy)}
+        visible.derived["evidence_register"] = (active, retired, [(key, line) for key, line in occurrences if key in active or key in retired])
+        visible.derived["register_visible"] = not registers or (len(registers) == 1 and note_sensitivity_level(registers[0]) <= ceiling)
+        visible.derived["full_index"] = index
+        if owned and current is not None:
+            current[2]["index"] = visible
+        return visible
 
     def register_visible(self) -> bool:
-        """Whether the evidence register's own label is within the ceiling.
-
-        Register rows have no label of their own; they are exactly as
-        sensitive as the register note that holds them.
-        """
-        from whykit.lint import load_note
-
-        path = self.vault / "00-context" / "evidence-register.md"
-        try:
-            note = load_note(path)
-        except FileNotFoundError:
-            return True
-        except (OSError, UnicodeDecodeError):
-            return False
-        return note_sensitivity_level(note) <= SENSITIVITY_LEVEL[self.policy]
+        """Whether the register floor is within this request's ceiling."""
+        return bool(self.visible_index().derived["register_visible"])
 
     def _check_vault(self) -> None:
         from whykit.lint import is_vault_root
@@ -745,7 +719,7 @@ class VaultTools:
         report = analyze_impact(self.vault, target, vault=self.visible_index())
         kind = report.get("kind", "document")
         if not report.get("exists"):
-            return report
+            return _missing_impact(target, kind) if kind == "evidence" else report
         # A path that resolves to a file the vault index skips (for example
         # under `.obsidian/`) has no metadata to classify; treat it as absent
         # rather than confirming that the file exists.
@@ -762,8 +736,6 @@ class VaultTools:
     def status(self, today: str | None = None, due_days: int | None = None) -> dict:
         from whykit.config import ConfigError, load_config
         from whykit.status import build_status, is_decision_record
-        from whykit.vault_index import VaultIndex
-
         as_of = _validate_today(today)
         if due_days is not None:
             due_days = _validate_int(due_days, "due_days", minimum=0, maximum=MAX_DUE_DAYS)
@@ -778,9 +750,9 @@ class VaultTools:
         # Lint the confined view: a link to a hidden note is then reported
         # exactly like a link to a note that does not exist, and a hidden
         # duplicate of a visible decision ID is never mentioned.
-        index = VaultIndex.load(self.vault)
+        visible = self.visible_index()
+        index = visible.derived["full_index"]
         ceiling = SENSITIVITY_LEVEL[self.policy]
-        visible = index.subset(lambda note: note_sensitivity_level(note) <= ceiling)
         report = build_status(self.vault, today=as_of, due_days=due_days, vault=visible)
         visible_notes = visible.notes
         hidden_paths = {index.relative(note.path) for note in index.notes} - {
@@ -940,8 +912,10 @@ class VaultTools:
         limit = _validate_int(limit, "limit", minimum=0, maximum=MAX_MCP_BACKLINKS)
         cursor = _validate_cursor(cursor)
         self._check_vault()
-        if _EVIDENCE_RE.fullmatch(target) and not self.register_visible():
-            # Evidence inherits the register's own label.
+        index = self.visible_index()
+        active, retired, _ = index.derived["evidence_register"]
+        if _EVIDENCE_RE.fullmatch(target) and target not in active and target not in retired:
+            # The graph can contain citation edges even when the target is hidden.
             report: dict[str, Any] = {
                 "contract_version": 1,
                 "target": target,
@@ -952,7 +926,7 @@ class VaultTools:
                 "count": 0,
             }
         else:
-            report = build_backlinks(self.vault, target, vault=self.visible_index())
+            report = build_backlinks(self.vault, target, vault=index)
         links = report["backlinks"]
         page, next_cursor, more = self.cursors.page(
             links, scope="backlinks", binding=[report["id"], limit],
@@ -1165,7 +1139,7 @@ class VaultTools:
     def scoped(self, handler: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Keep one live request under the read lock and fresh path cache."""
         from .io import vault_read_lock
-        from .lint import path_cache, _request_cache
+        from .lint import path_cache, _request_cache, evidence_view
         from .vault_index import reuse_notes
 
         current = _MCP_REQUEST.get()
@@ -1173,9 +1147,12 @@ class VaultTools:
         nested = current is not None and current[0] is self and request is not None and current[1] is request
         self._check_vault()
         with vault_read_lock(self.vault), path_cache(fresh=not nested), reuse_notes(self.notes):
-            token = _MCP_REQUEST.set((self, _request_cache()))
-            try:
+            if nested:
                 return handler(*args, **kwargs)
+            token = _MCP_REQUEST.set((self, _request_cache(), {}))
+            try:
+                with evidence_view(self.vault, lambda: self.visible_index().derived["evidence_register"]):
+                    return handler(*args, **kwargs)
             finally:
                 _MCP_REQUEST.reset(token)
 
@@ -1251,6 +1228,9 @@ class VaultWatcher:
             if not self.tools.vault.is_dir():
                 return {}, ""
             index = self.tools.visible_index()
+            active, retired, _ = evidence_register(self.tools.vault)
+            evidence = {key: {field: value for field, value in row.items() if field != "line"}
+                        for key, row in (*active.items(), *retired.items())}
             for note in index.notes:
                 relative = index.relative(note.path)
                 uris = {f"whykit://record/{relative}"}
@@ -1259,13 +1239,13 @@ class VaultWatcher:
                 decision_id = str(note.front.get("decision_id") or "").strip()
                 if _DECISION_RE.fullmatch(decision_id):
                     uris.add(f"whykit://record/{decision_id}")
-                text_digest = digest([relative, note.text])
+                text_digest = digest([relative, note.text, [(key, evidence.get(key)) for key in note.cited_evidence]])
                 for uri in uris:
                     state.setdefault(uri, []).append(text_digest)
             if self.tools.register_visible():
                 active, retired, _ = evidence_register(self.tools.vault)
                 for evidence_id, row in (*active.items(), *retired.items()):
-                    state.setdefault(f"whykit://record/{evidence_id}", []).append(digest(row))
+                    state.setdefault(f"whykit://record/{evidence_id}", []).append(digest({key: value for key, value in row.items() if key != "line"}))
             state[DECISIONS_URI] = [digest(self.tools.decision_index(index=index))]
             listing = digest(self.tools.resource_rows(index=index))
         flat = {uri: digest(sorted(parts)) for uri, parts in state.items()}

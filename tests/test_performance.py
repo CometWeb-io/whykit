@@ -83,8 +83,8 @@ INTENTIONAL_CHANGES: dict[str, tuple[str, str]] = {
     # to write nothing to stdout; it now writes the machine-contract error
     # object (code vault_invalid), with the same exit code 1.
     "explorer-index": (
-        "78a88c30d3e939bcc1421de15b217bf2d934f67ef3d098959bafb4c7a201d4d9",
-        "JSON error object (vault_invalid) on stdout under the machine contract",
+        "f9e14f64e9352ee51edb9eccd957c21cd8355ca9e1fe1c591ac7e6d94c16f4f8",
+        "JSON vault_invalid error; public export errors omit private finding counts, paths and messages",
     ),
 }
 

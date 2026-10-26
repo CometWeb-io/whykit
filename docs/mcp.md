@@ -72,9 +72,12 @@ A note whose label WhyKit cannot read is treated as above every ceiling: front
 matter that does not parse (a tab, an unclosed bracket, a duplicate key) or a
 label spelt differently (`Sensitivity:`) hides the note rather than defaulting
 it to `internal`. A note with valid front matter and no `sensitivity` key is
-`internal`. Evidence-register entries do not carry their own sensitivity field;
-they inherit the label of `00-context/evidence-register.md` itself, so a
-register above the ceiling withholds every row, count and `E-NNN` completion.
+`internal`. Evidence rows inherit their register label as a minimum and may
+tighten it with an optional final `Sensitivity` column. Filtered views withhold
+the raw per-row table; counts and `E-NNN` completions describe visible rows only.
+Invalid row labels and duplicate IDs are withheld. See
+[data classification](data-classification.md) for replacement inheritance and
+public export behavior.
 
 ## Protocol versions
 
@@ -177,9 +180,9 @@ adds or withholds:
 | `query` | `query-result.schema.json` | adds `max_sensitivity` and `next_cursor`; `query.limit` is the page size |
 | `context` | `context-pack.schema.json` | adds `content_trust` |
 | `impact` | `impact-report.schema.json` | none |
-| `status` | `status-report.schema.json` | no `root`; adds `max_sensitivity` and `review_due_days`; `evidence_active` and `evidence_retired` are `null` under a `public` ceiling |
+| `status` | `status-report.schema.json` | no `root`; adds `max_sensitivity` and `review_due_days`; `evidence_active` and `evidence_retired` are `null` when the register floor exceeds the ceiling, otherwise they count visible rows |
 | `pack` | `context-bundle.schema.json` | adds `max_sensitivity` |
-| `trace` | `trace-report.schema.json` | adds `matched`, `truncated`, `next_cursor`, `max_sensitivity`, and under a `public` ceiling `evidence_details: "withheld"` with evidence items reduced to `{id, via, state: "withheld"}` |
+| `trace` | `trace-report.schema.json` | adds `matched`, `truncated`, `next_cursor`, `max_sensitivity`, and when the register floor exceeds the ceiling `evidence_details: "withheld"` with evidence items reduced to `{id, via, state: "withheld"}` |
 | `backlinks` | `backlinks-report.schema.json` | adds `truncated`, `max_sensitivity` and `next_cursor` |
 
 Error results (`isError: true`) carry the error body described under

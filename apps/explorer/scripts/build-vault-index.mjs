@@ -19,7 +19,11 @@ const VAULT = resolve(process.env.WHYKIT_VAULT_DIR || resolve(REPO, "examples/no
 const OUT = resolve(APP, "src/generated/vault.json");
 const BODIES = resolve(APP, "src/generated/bodies.json");
 const FINDINGS = resolve(APP, "src/generated/findings.json");
-const SENSITIVE = new Set(["confidential", "restricted"]);
+const PRIVATE = process.env.WHYKIT_EXPLORER_PRIVATE === "1";
+if (process.env.WHYKIT_EXPLORER_PRIVATE && !PRIVATE) {
+  console.error("WHYKIT_EXPLORER_PRIVATE must be unset or 1");
+  process.exit(2);
+}
 
 const fromAt = process.argv.indexOf("--from");
 const FROM = fromAt > 0 ? process.argv[fromAt + 1] : undefined;
@@ -29,6 +33,10 @@ if (fromAt > 0 && !FROM) {
 }
 
 function write(payload, label) {
+  if (!PRIVATE && (payload.exportMode !== "public" || payload.docs.some(d => d.sensitivity !== "public"))) {
+    console.error("Refusing a non-public index; opt in with WHYKIT_EXPLORER_PRIVATE=1 for a private viewer");
+    process.exit(2);
+  }
   const { summary, bodies, findings } = splitIndex(payload);
   mkdirSync(dirname(OUT), { recursive: true });
   writeFileSync(OUT, JSON.stringify(summary) + "\n");
@@ -38,16 +46,14 @@ function write(payload, label) {
     `Indexed ${payload.docs.length} docs, ${payload.evidence.length} evidence rows, ` +
     `${payload.decisions.length} decisions, ${payload.reviews.length} review events from ${label}`,
   );
-  const sensitive = payload.docs.filter(d => SENSITIVE.has(String(d.sensitivity).toLowerCase()));
-  if (sensitive.length) {
-    console.warn(
-      `warning: this build includes ${sensitive.length} confidential or restricted note(s). ` +
-      "Explorer has no access control; serve the build only behind your own authentication.",
-    );
-  }
+  if (PRIVATE) console.warn("PRIVATE BUILD: do not publish; Explorer has no access control.");
 }
 
 if (FROM) {
+  if (!PRIVATE) {
+    console.error("--from imports an unverified index; requires WHYKIT_EXPLORER_PRIVATE=1");
+    process.exit(2);
+  }
   write(JSON.parse(readFileSync(resolve(FROM), "utf8")), FROM);
   process.exit(0);
 }
@@ -69,6 +75,7 @@ try {
       "--root",
       VAULT,
       "--json",
+      ...(PRIVATE ? ["--private"] : []),
     ],
     {
       encoding: "utf8",

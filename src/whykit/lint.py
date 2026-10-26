@@ -1183,11 +1183,40 @@ def check_markdown_links(
             add(findings, root, note.path, line, "warning", "markdown_link.missing", f"local Markdown {kind} does not exist: ({target})")
 
 
+@dataclass
+class _EvidenceView:
+    root: Path
+    rows: tuple | Callable[[], tuple]
+    request: _RequestCache | None
+    active: bool = True
+
+
+_EVIDENCE_VIEW: contextvars.ContextVar[_EvidenceView | None] = contextvars.ContextVar("whykit_evidence_view", default=None)
+
+
+@contextlib.contextmanager
+def evidence_view(root: Path, rows: tuple | Callable[[], tuple]):
+    """Use one captured, filtered register throughout a read-only request."""
+    with path_cache():
+        view = _EvidenceView(_real(root), rows, _request_cache())
+        token = _EVIDENCE_VIEW.set(view)
+        try:
+            yield
+        finally:
+            view.active = False
+            _EVIDENCE_VIEW.reset(token)
+
+
 def evidence_register(root: Path) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]], list[tuple[str, int]]]:
-    path = root / "00-context" / "evidence-register.md"
-    if not path.exists():
-        return {}, {}, []
+    view = _EVIDENCE_VIEW.get()
     cache = _request_cache()
+    if view is not None and view.active and cache is not None and view.request is cache and view.root == _real(root):
+        rows = view.rows() if callable(view.rows) else view.rows
+        active, retired, occurrences = rows
+        return ({key: dict(row) for key, row in active.items()}, {key: dict(row) for key, row in retired.items()}, list(occurrences))
+    path = root / "00-context" / "evidence-register.md"
+    if not path.exists() or not _within(root, path):
+        return {}, {}, []
     if cache is None:
         return _parse_evidence_register(path)
     try:
@@ -1213,15 +1242,33 @@ def _parse_evidence_register(path: Path) -> tuple[dict[str, dict[str, str]], dic
 
 def _parse_evidence_register_text(text: str) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]], list[tuple[str, int]]]:
     """Parse register Markdown; also used for an unsaved editor buffer."""
+    from .tables import EVIDENCE_COLUMNS
+    from .markdown_code import mask_code
+
     active: dict[str, dict[str, str]] = {}
     retired: dict[str, dict[str, str]] = {}
     occurrences: list[tuple[str, int]] = []
     mode = "active"
-    for lineno, line in enumerate(text.splitlines(), 1):
-        if line.strip().lower().startswith("## retired sources"):
+    sensitivity_column: int | None = -1
+    lines = text.splitlines()
+    masked = mask_code(text).splitlines()
+    uncommented = mask_code(text, keep_code=True).splitlines()
+    for lineno, (line, visible) in enumerate(zip(lines, masked, strict=True), 1):
+        if visible.strip().lower().startswith("## retired sources"):
             mode = "retired"
+            sensitivity_column = -1
             continue
-        cells = _split_table_row(line) if line.lstrip().startswith("|") else []
+        cells = _split_table_row(line) if visible.lstrip().startswith("|") else []
+        if cells and cells[0].casefold() == "id":
+            header = tuple(cell.casefold() for cell in cells)
+            expected = EVIDENCE_COLUMNS[mode]
+            sensitivity_column = len(expected) if header == (*expected, "sensitivity") else None if header == expected else -1
+            separator = _split_table_row(lines[lineno]) if lineno < len(lines) else []
+            if (cells != _split_table_row(visible) or len(separator) != len(cells)
+                    or not all(re.fullmatch(r":?-{3,}:?", cell) for cell in separator)
+                    or separator != _split_table_row(masked[lineno])):
+                sensitivity_column = -1
+            continue
         if not cells or not EVIDENCE_ID_RE.fullmatch(cells[0]):
             continue
         eid = cells[0]
@@ -1243,6 +1290,17 @@ def _parse_evidence_register_text(text: str) -> tuple[dict[str, dict[str, str]],
                 "source": cells[1], "retired_on": cells[2], "why": cells[3],
                 "replaced_by": cells[4], "line": str(lineno),
             }
+        else:
+            continue
+        row = active[eid] if mode == "active" else retired[eid]
+        expected_length = 7 if mode == "active" else 5
+        if (len(_split_table_row(visible)) != len(cells) or _split_table_row(uncommented[lineno - 1]) != cells):
+            row["sensitivity"] = ""
+            continue
+        if sensitivity_column is not None:
+            row["sensitivity"] = cells[sensitivity_column] if sensitivity_column >= 0 and len(cells) == expected_length + 1 else ""
+        elif len(cells) != expected_length:
+            row["sensitivity"] = ""
     return active, retired, occurrences
 
 
@@ -1251,6 +1309,8 @@ def evidence_rows(root: Path) -> dict[str, dict[str, str]]:
 
 
 def check_evidence_register(root: Path, findings: list[Finding], today: dt.date, config: dict | None = None) -> None:
+    from .sensitivity import SENSITIVITY_LEVEL
+
     path = root / "00-context" / "evidence-register.md"
     if not path.exists():
         return
@@ -1269,6 +1329,8 @@ def check_evidence_register(root: Path, findings: list[Finding], today: dt.date,
         else:
             seen[eid] = line
     for eid, row in active.items():
+        if "sensitivity" in row and row["sensitivity"] not in SENSITIVITY_LEVEL:
+            add(findings, root, path, int(row["line"]), "warning", "evidence.sensitivity", f"{eid} has an empty or invalid Sensitivity cell; filtered readers withhold it")
         for key in ("date", "accessed"):
             value = row.get(key, "")
             if value and _parse_date(value) is None:
@@ -1285,6 +1347,8 @@ def check_evidence_register(root: Path, findings: list[Finding], today: dt.date,
                     add(findings, root, path, int(row["line"]), "warning", "evidence.access_stale", f"{eid} was last accessed {accessed}, more than {max_age} days ago")
     known = set(active) | set(retired)
     for eid, row in retired.items():
+        if "sensitivity" in row and row["sensitivity"] not in SENSITIVITY_LEVEL:
+            add(findings, root, path, int(row["line"]), "warning", "evidence.sensitivity", f"{eid} has an empty or invalid Sensitivity cell; filtered readers withhold it")
         value = row.get("retired_on", "")
         if value and _parse_date(value) is None:
             add(findings, root, path, int(row["line"]), "error", "evidence.retired_date", f"{eid} has invalid retired-on date `{value}`")
@@ -1357,12 +1421,12 @@ def check_decision_ids(root: Path, notes: list[Note], findings: list[Finding]) -
             seen[did] = note.path
 
 
-def decision_log_rows(root: Path) -> list[dict[str, str | int]]:
+def decision_log_rows(root: Path, *, text: str | None = None) -> list[dict[str, str | int]]:
     path = root / "06-decisions" / "decision-log.md"
-    if not path.exists():
+    if text is None and not path.exists():
         return []
     rows: list[dict[str, str | int]] = []
-    for lineno, line in enumerate(read_vault_lines(path), 1):
+    for lineno, line in enumerate(text.splitlines() if text is not None else read_vault_lines(path), 1):
         if not line.lstrip().startswith("|"):
             continue
         cells = _split_table_row(line)

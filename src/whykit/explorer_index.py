@@ -1,31 +1,264 @@
 """Canonical Explorer index export — one Python parser for the UI contract."""
 from __future__ import annotations
 
-from .io import consistent_read
+from .io import consistent_read, vault_read_lock
+
+from .tables import review_table_header
 
 import argparse
 import datetime as dt
+import hashlib
 import json
+import os
 import re
+from collections import defaultdict, deque
 from pathlib import Path
 
-from .tables import review_table_header
 from .config import ConfigError, load_config
 from .contract import CONTRACT_VERSION, emit_error, vault_not_found
 from .lint import (
-    read_vault_lines,
+    evidence_view,
+    _parse_evidence_register_text,
     path_cache,
     strip_markdown_suffix,
     _split_table_row,
     decision_log_rows,
-    evidence_register,
     find_vault_root,
     is_vault_root,
     lint,
+    Note,
     rel,
 )
 from .vault_index import VaultIndex
 from .console import emit_machine
+from .sensitivity import note_sensitivity_level, classified_evidence, evidence_register_notes
+
+
+def _marker_pattern(markers: set[str]) -> re.Pattern | None:
+    """Share prefixes so matching a path does not scan every vault path."""
+    if not markers:
+        return None
+    nodes: list[tuple[str, list[int]]] = []
+    pending = [(0, sorted(markers), 0)]
+    next_id = 1
+    while pending:
+        at, words, depth = pending.pop()
+        while len(nodes) <= at:
+            nodes.append(("", []))
+        if depth >= 32:
+            nodes[at] = ("(?:" + "|".join(re.escape(word) for word in sorted(words, key=len, reverse=True)) + ")", [])
+            continue
+        prefix = os.path.commonprefix((words[0], words[-1]))
+        groups: dict[str, list[str]] = defaultdict(list)
+        for word in words:
+            suffix = word[len(prefix):]
+            if suffix:
+                groups[suffix[0]].append(suffix)
+        children = []
+        for group in groups.values():
+            child = next_id
+            next_id += 1
+            children.append(child)
+            pending.append((child, group, depth + 1))
+        if prefix in words and children:
+            children.append(-1)
+        nodes[at] = (re.escape(prefix), children)
+    parts = {-1: ""}
+    for at in range(len(nodes) - 1, -1, -1):
+        prefix, children = nodes[at]
+        parts[at] = prefix + ("(?:" + "|".join(parts[child] for child in children) + ")" if children else "")
+    return re.compile(r"(?<!\w)(?:" + parts[0] + r")(?!\w)")
+
+
+def _public_payload(payload: dict, index: VaultIndex, *, reasons: dict[str, set[str]] | None = None) -> dict:
+    """Withhold non-public notes and their dependent references as whole notes.
+
+    Redacting fragments would invent a different decision or review history.
+    This closure also inspects code examples: unlike graph citations, an export
+    must not reveal a hidden identifier just because it occurs in a code block.
+    """
+    docs = {doc["id"]: doc for doc in payload["docs"]}
+    paths = {note.path.resolve(): strip_markdown_suffix(index.relative(note.path)) for note in index.notes}
+    withheld = {paths[note.path.resolve()] for note in index.notes if note_sensitivity_level(note) != 0}
+    def withhold(key: str, reason: str) -> None:
+        withheld.add(key)
+        if reasons is not None:
+            reasons.setdefault(key, set()).add(reason)
+
+    for key in withheld:
+        if reasons is not None:
+            reasons.setdefault(key, set()).add("non_public_sensitivity")
+    markers: dict[str, set[str]] = defaultdict(set)
+    titles: dict[str, set[str]] = defaultdict(set)
+    for key, doc in docs.items():
+        for value in (key, key + ".md", doc["decisionId"]):
+            if value:
+                markers[str(value)].add(key)
+        for value in (doc["title"], *doc["aliases"]):
+            if value:
+                titles[str(value)].add(key)
+    dependents: dict[str, set[str]] = defaultdict(set)
+    registers = evidence_register_notes(index)
+    register_ids = {paths[note.path.resolve()] for note in registers}
+    register_id = paths[registers[0].path.resolve()] if len(registers) == 1 else "00-context/evidence-register"
+    evidence_ids = {row["id"] for row in payload["evidence"]}
+    for row in payload["evidence"]:
+        key = "evidence:" + row["id"]
+        markers[row["id"]].add(key)
+        if row["sensitivity"] != "public":
+            withheld.add(key)
+    pattern = _marker_pattern(set(markers))
+    title_pattern = _marker_pattern(set(titles))
+    _, _, _, per_row = classified_evidence(index)
+    if per_row:
+        for key in register_ids:
+            withhold(key, "per_row_evidence_classification")
+    evidence_pattern = re.compile(r"(?<!\w)E-[0-9]{3,}(?!\w)")
+    for note in index.notes:
+        key = paths[note.path.resolve()]
+        if key in withheld:
+            continue
+        raw = Note(note.path, note.text)
+        raw.masked = note.text
+        dependencies: set[str] = set()
+        for target, _, _ in raw.wikilink_hits:
+            if target.startswith(("https://", "http://")):
+                continue
+            try:
+                resolved, ambiguous = index.resolve_link(target)
+                target_id = paths.get(resolved.resolve()) if resolved is not None else None
+            except (OSError, ValueError, RuntimeError):
+                target_id, ambiguous = None, False
+            if ambiguous or target_id is None:
+                withhold(key, "unresolved_or_ambiguous_wikilink")
+            else:
+                dependencies.add(target_id)
+        for _, target, _ in raw.markdown_link_hits:
+            candidate = index.root / target.lstrip("/") if target.startswith("/") else note.path.parent / target
+            try:
+                target_id = paths.get(candidate.resolve())
+            except (OSError, ValueError, RuntimeError):
+                target_id = None
+            if target_id is None:
+                withhold(key, "unclassified_attachment_or_missing_markdown_link")
+            else:
+                dependencies.add(target_id)
+        text = "\n".join(value if isinstance(value, str) else "\n".join(map(str, value)) if isinstance(value, list) else str(value) for value in docs[key].values())
+        if pattern is not None:
+            for match in pattern.finditer(text):
+                dependencies.update(markers[match.group()])
+        if title_pattern is not None:
+            content = "\n".join((docs[key]["title"], *docs[key]["aliases"], docs[key]["body"]))
+            for match in title_pattern.finditer(content):
+                dependencies.update(titles[match.group()])
+        if key != register_id and evidence_ids.intersection(evidence_pattern.findall(note.text)):
+            if not per_row:
+                if register_id not in docs:
+                    withhold(key, "missing_evidence_register")
+                dependencies.add(register_id)
+        for target in dependencies - {key}:
+            dependents[target].add(key)
+        if key != register_id and set(evidence_pattern.findall(note.text)) - evidence_ids:
+            withhold(key, "unclassified_evidence_reference")
+    # Rows participate in the same closure as notes, including replacement IDs.
+    for row in payload["evidence"]:
+        key = "evidence:" + row["id"]
+        if set(evidence_pattern.findall("\n".join(str(value) for value in row.values()))) - evidence_ids:
+            withheld.add(key)
+        if not per_row:
+            if register_id not in docs:
+                withheld.add(key)
+            dependents[register_id].add(key)
+        if pattern is not None:
+            for match in pattern.finditer("\n".join(str(value) for value in row.values())):
+                for target in markers[match.group()] - {key}:
+                    dependents[target].add(key)
+        if title_pattern is not None:
+            for match in title_pattern.finditer("\n".join(str(value) for value in row.values())):
+                for target in titles[match.group()] - {key}:
+                    dependents[target].add(key)
+    pending = deque(withheld)
+    while pending:
+        while pending:
+            hidden = pending.popleft()
+            for dependent in dependents[hidden]:
+                if dependent not in withheld:
+                    if dependent in docs:
+                        withhold(dependent, "withheld_dependency:" + hidden)
+                    else:
+                        withheld.add(dependent)
+                    pending.append(dependent)
+        # A longer visible marker may have masked a hidden prefix/substring.
+        hidden_paths = _marker_pattern({marker for marker, targets in markers.items() if targets & withheld})
+        hidden_titles = _marker_pattern({marker for marker, targets in titles.items() if targets & withheld})
+        for key, item in [(key, doc) for key, doc in docs.items()] + [("evidence:" + row["id"], row) for row in payload["evidence"]]:
+            if key in withheld:
+                continue
+            text = "\n".join(str(value) for value in item.values())
+            content = "\n".join((item["title"], *item["aliases"], item["body"])) if key in docs else text
+            if ((hidden_paths is not None and hidden_paths.search(text))
+                    or (hidden_titles is not None and hidden_titles.search(content))):
+                if key in docs:
+                    withhold(key, "withheld_reference")
+                else:
+                    withheld.add(key)
+                pending.append(key)
+    visible = set(docs) - withheld
+    hidden_markers = {marker for group in (markers, titles) for marker, targets in group.items() if targets & withheld}
+    hidden_pattern = _marker_pattern(hidden_markers)
+    findings = [item for item in payload["lint"]["findings"]
+                if strip_markdown_suffix(item["path"]) in visible
+                and (hidden_pattern is None or not hidden_pattern.search(item["path"] + "\n" + item["message"]))]
+    public_index = index.subset(lambda note: paths[note.path.resolve()] in visible)
+    evidence = [row for row in payload["evidence"] if "evidence:" + row["id"] not in withheld]
+    return {
+        **payload,
+        "exportMode": "public",
+        "vaultName": _vault_name(index.root, public_index, fallback="WhyKit public vault") if "README" in visible else "WhyKit public vault",
+        "docs": [{**doc, "sensitivity": "public"} for doc in payload["docs"] if doc["id"] in visible],
+        "evidence": evidence,
+        "decisions": payload["decisions"] if "06-decisions/decision-log" in visible else [],
+        "reviews": payload["reviews"] if "00-context/review-log" in visible else [],
+        "lint": {"files": len(visible), "errors": sum(item["level"] == "error" for item in findings),
+                 "warnings": sum(item["level"] == "warning" for item in findings), "findings": findings},
+        "policy": {**payload["policy"], "evidenceAccessAgeDays": {
+            kind: age for kind, age in payload["policy"]["evidenceAccessAgeDays"].items()
+            if kind in {row["type"] for row in evidence}
+        }},
+    }
+
+
+@consistent_read
+@path_cache()
+def build_publication_preview(root: Path, *, today: dt.date | None = None) -> dict:
+    """Private diagnostics only; never included in an Explorer publication artifact."""
+    root = root.resolve()
+    config_path = root / "whykit.toml"
+    if config_path.is_symlink():
+        raise RuntimeError("unsafe publication input")
+    config_bytes = config_path.read_bytes() if config_path.exists() else None
+    payload, index = _build_explorer_index(root, today=today)
+    reasons: dict[str, set[str]] = {}
+    public = _public_payload(payload, index, reasons=reasons)
+    files = {note.path for note in index.notes}
+    if (root / "whykit.toml").exists():
+        files.add(root / "whykit.toml")
+    digest = hashlib.sha256()
+    for path in sorted(files):
+        if path.is_symlink() or not path.resolve().is_relative_to(index.root):
+            raise RuntimeError("unsafe publication input")
+        data = path.read_bytes()
+        note = index.note_for(path)
+        if note is not None and data.decode("utf-8", "replace").replace("\r\n", "\n").replace("\r", "\n") != note.text:
+            raise RuntimeError("publication inputs changed during capture; retry")
+        digest.update(index.relative(path).encode("utf-8") + b"\0")
+        digest.update(hashlib.sha256(data).digest())
+    if (config_path.read_bytes() if config_path.exists() else None) != config_bytes:
+        raise RuntimeError("publication inputs changed during capture; retry")
+    return {"contract_version": 1, "format": "whykit.publication-preview/v1", "private": True,
+            "source_manifest_sha256": digest.hexdigest(), "publication_ready": payload["lint"]["errors"] == 0,
+            "total_docs": len(payload["docs"]), "public_docs": len(public["docs"]),
+            "withheld": [{"path": key + ".md", "reasons": sorted(values)} for key, values in sorted(reasons.items())]}
 
 
 def _summary(body: str) -> str:
@@ -67,7 +300,7 @@ def _as_list(value: object) -> list[str]:
 _H1_RE = re.compile(r"^#[ \t]+(.+?)[ \t#]*$", re.MULTILINE)
 
 
-def _vault_name(root: Path, index: VaultIndex) -> str:
+def _vault_name(root: Path, index: VaultIndex, *, fallback: str | None = None) -> str:
     """Name the vault after its README, never after the file name itself.
 
     A README without a front-matter title (the one `whykit init` writes) or
@@ -82,7 +315,7 @@ def _vault_name(root: Path, index: VaultIndex) -> str:
         heading = _H1_RE.search(note.body)
         if heading and heading.group(1).strip().casefold() != "readme":
             return heading.group(1).strip()
-    return root.name or "WhyKit vault"
+    return fallback if fallback is not None else root.name or "WhyKit vault"
 
 
 def _policy(root: Path) -> dict:
@@ -105,18 +338,27 @@ def _policy(root: Path) -> dict:
 
 @consistent_read
 @path_cache()
-def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
+def build_explorer_index(root: Path, *, today: dt.date | None = None, private: bool = False) -> dict:
     """Build the Explorer vault.json payload from the canonical Python parser."""
+    payload, index = _build_explorer_index(root, today=today)
+    return payload if private else _public_payload(payload, index)
+
+
+@consistent_read
+@path_cache()
+def _build_explorer_index(root: Path, *, today: dt.date | None = None) -> tuple[dict, VaultIndex]:
     root = root.resolve()
     index = VaultIndex.load(root)
-    docs = []
+    registers = evidence_register_notes(index)
+    register_paths = {note.path for note in registers}
+    docs: list[dict] = []
     for note in index.notes:
         doc_id = strip_markdown_suffix(rel(root, note.path))
         # Every E-NNN the note cites, in front matter or body, outside code:
         # `Note.cited_evidence` is the one citation rule `whykit graph`,
         # `impact` and `trace` use. The register itself lists IDs rather than
         # citing them.
-        citations = [] if doc_id == "00-context/evidence-register" else list(note.cited_evidence)
+        citations = [] if note.path in register_paths else list(note.cited_evidence)
         top = doc_id.split("/", 1)[0] if "/" in doc_id else "root"
         body = note.body
         docs.append({
@@ -142,7 +384,7 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
         })
     docs.sort(key=lambda item: item["id"])
 
-    active, retired, _ = evidence_register(root)
+    active, retired, _, _ = classified_evidence(index)
     evidence = []
     for eid, row in sorted(active.items()):
         evidence.append({
@@ -154,6 +396,7 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
             "accessed": str(row.get("accessed") or ""),
             "location": str(row.get("location") or ""),
             "claims": str(row.get("claims") or ""),
+            "sensitivity": row["sensitivity"],
         })
     for eid, row in sorted(retired.items()):
         replaced = str(row.get("replaced_by") or "")
@@ -169,10 +412,12 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
             "retiredOn": str(row.get("retired_on") or ""),
             "why": str(row.get("why") or ""),
             "replacedBy": None if replaced in {"", "—"} else replaced,
+            "sensitivity": row["sensitivity"],
         })
 
     decisions = []
-    for row in decision_log_rows(root):
+    decision_log = index.note_for(root / "06-decisions/decision-log.md")
+    for row in decision_log_rows(root, text=decision_log.text if decision_log else ""):
         decisions.append({
             "id": str(row.get("id") or ""),
             "title": str(row.get("title") or ""),
@@ -202,8 +447,9 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
 
     review_path = root / "00-context" / "review-log.md"
     reviews = []
-    if review_path.is_file():
-        lines = read_vault_lines(review_path)
+    review_log = index.note_for(review_path)
+    if review_log is not None:
+        lines = review_log.text.splitlines()
         at = review_table_header(lines)
         if at is not None:
             for line in lines[at + 2 :]:
@@ -226,7 +472,9 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
                     "note": cells[6],
                 })
 
-    lint_files, findings = lint(root, orphans=True, secrets=True, today=today, vault=index)
+    register = registers[0] if len(registers) == 1 else None
+    with evidence_view(root, _parse_evidence_register_text(register.text if register else "")):
+        lint_files, findings = lint(root, orphans=True, secrets=True, today=today, vault=index)
     lint_payload = {
         "files": len(lint_files),
         "errors": sum(1 for item in findings if item.level == "error"),
@@ -244,7 +492,7 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
     }
 
     vault_name = _vault_name(root, index)
-    return {
+    payload = {
         "contract_version": CONTRACT_VERSION,
         "generatedAt": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "vaultName": vault_name,
@@ -254,7 +502,9 @@ def build_explorer_index(root: Path, *, today: dt.date | None = None) -> dict:
         "reviews": reviews,
         "lint": lint_payload,
         "policy": _policy(root),
+        "exportMode": "private",
     }
+    return payload, index
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -265,6 +515,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", help="vault root (default: nearest vault)")
     parser.add_argument("--json", action="store_true", default=True, help="emit JSON (default)")
     parser.add_argument("--today", help="evaluate lint review dates as of this ISO date")
+    parser.add_argument("--publication-preview", action="store_true", help="private withheld-path diagnostics; never publish this report")
+    parser.add_argument("--private", action="store_true", help="include non-public content; never publish this index")
     args = parser.parse_args(argv)
     root = Path(args.root).expanduser().resolve() if args.root else find_vault_root()
     if root is None or not is_vault_root(root):
@@ -275,20 +527,28 @@ def main(argv: list[str] | None = None) -> int:
             today = dt.date.fromisoformat(args.today)
         except ValueError:
             return emit_error("invalid_argument", f"--today is not a real ISO date: {args.today}", json_mode=True)
-    payload = build_explorer_index(root, today=today)
-    if payload["lint"]["errors"] > 0:
-        details = "\n".join(
-            f"- {item['path']}: {item['message']}"
-            for item in payload["lint"]["findings"]
-            if item["level"] == "error"
-        )
-        summary = f"Vault has {payload['lint']['errors']} lint error(s); Explorer index not generated."
-        return emit_error(
-            "vault_invalid",
-            summary + ("\n" + details if details else ""),
-            json_hint="run `whykit lint` to see every finding",
-            json_mode=True,
-        )
-    # JSON escapes preserve Unicode content without requiring a UTF-8 console.
+    if args.publication_preview:
+        if args.private:
+            return emit_error("invalid_argument", "--publication-preview and --private are mutually exclusive", json_mode=True)
+        emit_machine(json.dumps(build_publication_preview(root, today=today), ensure_ascii=True, indent=2))
+        return 0
+    with vault_read_lock(root):
+        payload, index = _build_explorer_index(root, today=today)
+        if payload["lint"]["errors"] > 0:
+            details = "\n".join(
+                f"- {item['path']}: {item['message']}"
+                for item in payload["lint"]["findings"]
+                if item["level"] == "error"
+            )
+            summary = f"Vault has {payload['lint']['errors']} lint error(s); Explorer index not generated." if args.private else "Vault has lint errors; public Explorer index not generated."
+            return emit_error(
+                "vault_invalid",
+                summary + ("\n" + details if args.private and details else ""),
+                json_hint="run `whykit lint` to see every finding",
+                json_mode=True,
+            )
+        # JSON escapes preserve Unicode content without requiring a UTF-8 console.
+        if not args.private:
+            payload = _public_payload(payload, index)
     emit_machine(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0

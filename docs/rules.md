@@ -46,6 +46,7 @@ the test suite fails if it drifts.
 | <a name="delivery_status.invalid"></a>`delivery_status.invalid` | error | delivery_status has an unsupported value. | Use draft, ready_to_send or sent. |
 | <a name="delivery_status.sent_at"></a>`delivery_status.sent_at` | error | A sent document has no sent_at timestamp/date field. | Record sent_at when setting delivery_status: sent. |
 | <a name="evidence.date"></a>`evidence.date` | error | An evidence date or accessed date is invalid. | Use real YYYY-MM-DD dates. |
+| <a name="evidence.sensitivity"></a>`evidence.sensitivity` | warning | An explicit evidence Sensitivity cell is empty or invalid. | Use public, internal, confidential or restricted; omit the column only for legacy inheritance. |
 | <a name="evidence.access_missing"></a>`evidence.access_missing` | warning | An active source covered by an access-age policy has no Accessed date. | Record when the source was last accessed, or remove the policy for historical source types. |
 | <a name="evidence.access_future"></a>`evidence.access_future` | warning | An active source has an Accessed date after the lint date. | Correct the Accessed date or run lint with the intended --today date. |
 | <a name="evidence.access_stale"></a>`evidence.access_stale` | warning | An active source has not been accessed within its configured age window. | Revisit the source and update Accessed after review; do not treat access alone as claim approval. |

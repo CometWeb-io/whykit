@@ -48,7 +48,7 @@ From a source checkout, prefix commands with `uv run` (see
 | `init <dir>` | Create a vault from the bundled template | `--force`, `--full`, `--minimal`, `--json` | [How-to](guide.md#create-a-vault) |
 | `adopt <source>` | Inventory existing Markdown; stage it with `--write` | `--into` (or `--root`), `--profile`, `--owner`, `--write`, `--json` | [How-to](guide.md#already-have-a-pile-of-markdown) |
 | `new decision <title>` | Create a decision record and its decision-log row; with `--from FILE`, promote an existing ADR into one (a dry run that prints the mapping until `--write`) | `--from`, `--write`, `--owner`, `--status`, `--source`, `--supersedes`, `--review-by`, `--sensitivity`, `--json`, `--root` | [How-to](guide.md#promote-an-adopted-adr) |
-| `new evidence` | Append a source to the evidence register | `--source`, `--type`, `--location`, `--claims`, `--date`, `--accessed`, `--json`, `--root` | [Concepts](concepts.md#evidence) |
+| `new evidence` | Append a source to the evidence register | `--source`, `--type`, `--location`, `--claims`, `--date`, `--accessed`, `--sensitivity`, `--json`, `--root` | [Classification](data-classification.md#evidence-rows) |
 | `new note <title>` | Create a draft note in a workstream | `--workstream`, `--type`, `--owner`, `--sensitivity`, `--link-from`, `--json`, `--root` | [How-to](guide.md#create-records) |
 | `review list` | Show upcoming and overdue reviews | `--due-days`, `--overdue-only`, `--owner`, `--today`, `--json`, `--root` | [How-to](guide.md#record-a-review) |
 | `review approve <target>` | Preview approval; apply the unchanged snapshot with its reviewed hash | `--reviewer`, `--next-review`, `--today`, `--write`, `--expect-hash`, `--json`, `--root` | [How-to](guide.md#approve-a-decision) |
@@ -70,7 +70,7 @@ From a source checkout, prefix commands with `uv run` (see
 | `backlinks <target>` | List what links to a note, decision or evidence ID | `--json`, `--root` | [Obsidian](obsidian.md#graph-view-and-whykits-graph) |
 | `impact <target>` | Show what depends on evidence, a decision or a document | `--json`, `--root` | [How-to](guide.md#retire-evidence) |
 | `install-hooks` | Install a pre-commit hook that runs the `local` profile | `--force`, `--root` | [CI](ci.md#local-hooks) |
-| `explorer-index` | Export the Explorer's vault index (always JSON) | `--today`, `--json`, `--root` | [Automation](automation.md#schemas) |
+| `explorer-index` | Export a public Explorer index, or explicit private diagnostics/index (always JSON) | `--today`, `--private`, `--publication-preview`, `--json`, `--root` | [Classification](data-classification.md#public-exports) |
 | `serve [vault]` | Run the optional Explorer from a source checkout; an installed copy names the checkout it came from, or the source to clone | `--root`, `--host`, `--port`, `--allow-sensitive-network` | [How-to](guide.md#browse-the-vault-in-the-explorer) |
 | `lsp` | Run the read-only language server over stdio, for editors: lint diagnostics, wikilink and ID completion, hover, go-to-definition and document links | `--root`, `--debounce`, `--today`, `--stdio` | [Editors](editors.md) |
 | `completion <shell>` | Print a `bash`, `zsh` or `fish` completion script | | `eval "$(whykit completion zsh)"` |

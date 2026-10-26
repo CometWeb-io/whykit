@@ -24,3 +24,5 @@ this example does not authenticate Ada Example or prove an actual human review.
 
 Create a draft, complete all sections, inspect `review approve` and apply its
 exact preview hash. The resulting decision and both ledger changes are atomic.
+
+The draft [[06-decisions/d-002-classify-individual-evidence-rows-without-lowering-their-register-floor]] demonstrates optional evidence row labels. All sources and classifications are synthetic; inspect the private index to see the retired fixture. No approval of that draft is recorded.

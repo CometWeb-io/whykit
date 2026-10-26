@@ -182,7 +182,7 @@ class ExplorerVaultNameTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp) / "ledger"
             fresh_vault(vault, *flags)
-            result = run("explorer-index", "--root", str(vault))
+            result = run("explorer-index", "--private", "--root", str(vault))
             self.assertEqual(result.returncode, 0, result.stderr)
             return json.loads(result.stdout)["vaultName"]
 

@@ -17,3 +17,4 @@ tags: []
 | ID | Decision | Date | Owner | Status | Record |
 |---|---|---|---|---|---|
 | D-001 | Bind approval to reviewed record bytes | 2026-09-17 | Ada Example | accepted | [[06-decisions/d-001-bind-approval-to-reviewed-record-bytes]] |
+| D-002 | Classify individual evidence rows without lowering their register floor | 2026-09-17 | Ada Example | proposed | [[06-decisions/d-002-classify-individual-evidence-rows-without-lowering-their-register-floor]] |

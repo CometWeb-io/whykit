@@ -105,6 +105,7 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "rules <code>": "rule-detail.schema.json",
     "doctor": "doctor-report.schema.json",
     "explorer-index": "explorer-index.schema.json",
+    "explorer-index --publication-preview": "publication-preview.schema.json",
 }
 ERROR_SCHEMA = "error.schema.json"
 
