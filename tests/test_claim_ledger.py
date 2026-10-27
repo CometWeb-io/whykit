@@ -187,7 +187,7 @@ class ClaimLedgerTests(unittest.TestCase):
 
     def test_new_capture_and_claim_leave_approved_legacy_reasoning_and_receipt_unchanged(self) -> None:
         legacy = self.root.parent / "legacy-vault"
-        fresh_vault(legacy)
+        fresh_vault(legacy, today=TODAY)
         register(legacy)
         _, decision = approved_decision(legacy, "Preserve existing reasoning", today=TODAY,
                                         owner="Ada Example", source_ids=["E-001"])

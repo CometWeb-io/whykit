@@ -35,8 +35,8 @@ def write_note(path: Path, title: str, body: str, *, kind: str = "reference", **
                 "created": APPROVED.isoformat(), "last_updated": APPROVED.isoformat(),
                 "source_of_truth": False, "sensitivity": "public", "source_ids": [], "tags": [], **extra}
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("---\n" + "\n".join(f"{key}: {json.dumps(value, ensure_ascii=False)}" for key, value in metadata.items())
-                    + "\n---\n\n" + body + "\n", encoding="utf-8")
+    path.write_bytes(("---\n" + "\n".join(f"{key}: {json.dumps(value, ensure_ascii=False)}" for key, value in metadata.items())
+                     + "\n---\n\n" + body + "\n").encode("utf-8"))
 
 
 def decision(root: Path, title: str, topic: dict, eid: str, *, old: bool, claim: dict,
@@ -61,7 +61,7 @@ def decision(root: Path, title: str, topic: dict, eid: str, *, old: bool, claim:
     text = _frontmatter_replace(text, "claim_ids", json.dumps([claim["claim_id"]]))
     pins = json.dumps({claim["claim_id"]: "sha256:" + digest((root / claim["path"]).read_bytes())}, separators=(",", ":"))
     text = _frontmatter_replace(text, "provenance", "\n  claim_versions: " + json.dumps(pins))
-    path.write_text(text, encoding="utf-8")
+    path.write_bytes(text.encode("utf-8"))
     plan = approve_decision(root, did, reviewer=OWNER, today=APPROVED, next_review="2026-12-31")
     approve_decision(root, did, reviewer=OWNER, today=APPROVED, next_review="2026-12-31",
                      write=True, expected_sha256=plan["expected_sha256"])
@@ -80,8 +80,8 @@ def generate(root: Path) -> dict:
         text = source.read_text(encoding="utf-8")
         for key, value in (("owner", OWNER), ("sensitivity", "public")):
             text = _frontmatter_replace(text, key, value)
-        target.write_text(text, encoding="utf-8")
-    (root / "whykit.toml").write_text('[evidence_access_age_days]\nfixture = 365\n', encoding="utf-8")
+        target.write_bytes(text.encode("utf-8"))
+    (root / "whykit.toml").write_bytes(b'[evidence_access_age_days]\nfixture = 365\n')
     topics = json.loads((HERE / "topics.json").read_text(encoding="utf-8"))["topics"]
     identities = {}
     for number, topic in enumerate(topics, 1):
@@ -147,4 +147,4 @@ if __name__ == "__main__":
     parser.add_argument("destination", type=Path)
     parser.add_argument("--manifest", type=Path, required=True)
     args = parser.parse_args()
-    args.manifest.write_text(json_text(generate(args.destination)), encoding="utf-8")
+    args.manifest.write_bytes(json_text(generate(args.destination)).encode("utf-8"))

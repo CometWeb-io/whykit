@@ -6,7 +6,7 @@ import datetime as dt
 import hashlib
 import importlib.util
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -14,7 +14,9 @@ from unittest.mock import patch
 from whykit.impact_contract import parse_impact_note
 from whykit.lint import Note
 
-ROOT = Path('/synthetic/vault')
+# Captured wire paths retain their lexical spelling; real fixture I/O below
+# still uses native Path objects.
+ROOT = PurePosixPath('/synthetic/vault')
 CARD = '00-context/implementation/specs/retry-primary.md'
 DIGEST = 'a' * 64
 NAMESPACES = {'evidence': 'evidence_raw_sha256', 'claim': 'claim_markdown_sha256',
@@ -262,7 +264,8 @@ class ImpactContractTests(unittest.TestCase):
         for path in ('00-context/Implementation/specs/a.md', '00-context/implementation/specs/A.md',
                      '00-context/implementation/specs/a.MD', '00-context/implementation/.hidden.md',
                      '00-context/implementation/a_b.md', '00-context\\implementation\\a.md', '../00-context/implementation/a.md'):
-            self.invalid(note(path))
+            with self.subTest(path=path):
+                self.invalid(note(path))
         for marker in ({'WhyKit_Impact': 'invalid'}, {'provenance': {'WhyKit_Impact': 'invalid'}},
                        {'Provenance': {'whykit_impact': 'invalid'}}, {'provenance': {'whykit-impact': 'invalid'}}):
             value = note('ordinary.md')

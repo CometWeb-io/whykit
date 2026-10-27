@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 from _jsonschema import validate
 from _vaults import approved_decision, fresh_vault
+from test_artifact_store import tree_bytes
 from whykit.artifact_store import capture_artifact
 from whykit.claim_ledger import create_claim
 from whykit.lint import load_note
@@ -32,7 +33,7 @@ class OutcomeLedgerTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name).resolve() / "vault"
-        fresh_vault(self.root)
+        fresh_vault(self.root, today=DAY)
         self.did, self.decision = create_decision(self.root, "Synthetic bounded decision", owner="Ada Example", today=DAY)
         self.data = {"decision_id": self.did,
                      "metric": {"name": "Latency", "unit": "ms", "definition": "Declared p95 for the explicitly described sample."},
@@ -68,11 +69,11 @@ class OutcomeLedgerTests(unittest.TestCase):
         return sample, capture, claim_path
 
     def test_preview_no_writes_and_roundtrip_preserve_exact_decimals_and_legacy_records(self) -> None:
-        before = {str(p.relative_to(self.root)): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        before = tree_bytes(self.root)
         original = copy.deepcopy(self.data)
         plan = self.create()
         self.assertFalse((self.root / "00-context/outcomes").exists())
-        self.assertEqual(before, {str(p.relative_to(self.root)): p.read_bytes() for p in self.root.rglob("*") if p.is_file()})
+        self.assertEqual(before, tree_bytes(self.root))
         result = self.create(write=True, expected_sha256=plan["expected_sha256"])
         self.assertEqual(result["outcome_id"], "O-001")
         self.assertEqual(result["path"], "00-context/outcomes/o-001.md")

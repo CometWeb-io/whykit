@@ -183,7 +183,7 @@ class SourceObservationTests(unittest.TestCase):
         path = self.root / latest["path"]
         value = json.loads(path.read_text(encoding="utf-8"))
         value["sensitivity"] = "restricted"
-        path.write_text(store._json_text(value), encoding="utf-8")
+        path.write_bytes(store._json_text(value).encode("utf-8"))
         with patch.object(store, "_hash", side_effect=AssertionError("hash before complete floor gate")), patch.object(
             store.base64, "b64decode", side_effect=AssertionError("decode before complete floor gate")
         ):

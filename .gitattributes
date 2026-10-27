@@ -1,2 +1,9 @@
 # Frozen native fixture bytes include trailing spaces bound by approval hashes.
 tests/fixtures/hybrid-retrieval/vault/** whitespace=-blank-at-eol
+
+# Canonical ledgers, raw-byte pins and frozen inventories must survive checkout.
+examples/approval/** -text
+examples/provenance/** -text
+examples/outcomes/** -text
+tests/fixtures/hybrid-retrieval/** -text
+tests/fixtures/impact/** -text

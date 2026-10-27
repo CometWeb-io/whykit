@@ -33,7 +33,7 @@ def register(root: Path, label: str = "internal", *, duplicate: bool = False) ->
 
 
 def tree_bytes(root: Path) -> dict:
-    return {str(path.relative_to(root)): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    return {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
 
 
 class ArtifactStoreTests(unittest.TestCase):

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import sys
 import tempfile
 import unittest
@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from _jsonschema import validate  # noqa: E402
-from whykit.dependency_graph import _view_graph, deep_impact  # noqa: E402
+from whykit.dependency_graph import _build_visible_graph, _view_graph, deep_impact  # noqa: E402
 from whykit.lint import load_note  # noqa: E402
 from whykit.vault_index import VaultIndex  # noqa: E402
 
@@ -222,6 +222,22 @@ class DependencyGraphTests(unittest.TestCase):
             self.assertNotIn("outside-body-canary", json.dumps(self.report("D-001")))
 
     def test_full_filename_node_ids_preserve_case_extension_collisions(self) -> None:
+        # Captured lexical identities must stay distinct on every host, even
+        # where native Path keys cannot represent a case-only pair.
+        root = PurePosixPath('/captured/vault')
+        notes = [load_note(root / name, text='E-001') for name in ('same.md', 'same.MD')]
+        captured = VaultIndex(root, notes, {note.path: note for note in notes}, {},
+                              _relative={note.path: note.path.relative_to(root).as_posix() for note in notes})
+        _, nodes, edges, _ = _build_visible_graph(root, captured, {'E-001': {'sensitivity': 'public'}}, {})
+        self.assertEqual(set(nodes), {'document:same.md', 'document:same.MD', 'evidence:E-001'})
+        self.assertEqual({(edge['from'], edge['to'], edge['type']) for edge in edges}, {
+            ('document:same.md', 'evidence:E-001', 'evidence'),
+            ('document:same.MD', 'evidence:E-001', 'evidence'),
+        })
+        # Retain the complete native pipeline where its Path flavor can hold
+        # both keys; the lexical node/edge assertions above always execute.
+        if (self.root / 'same.md') == (self.root / 'same.MD'):
+            return
         index = VaultIndex.load(self.root)
         notes = [*index.notes, *(load_note(self.root / name, text="E-001") for name in ("same.md", "same.MD"))]
         captured = VaultIndex(self.root, notes, {note.path: note for note in notes}, {})
