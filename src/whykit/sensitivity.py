@@ -3,6 +3,10 @@ from __future__ import annotations
 
 from typing import Any
 from collections import Counter, defaultdict, deque
+from contextlib import contextmanager
+from collections.abc import Iterator
+from pathlib import Path
+import functools
 
 SENSITIVITY_LEVEL = {
     "public": 0,
@@ -54,6 +58,79 @@ def classified_evidence(index: Any) -> tuple[dict, dict, list, bool]:
         # Ambiguous registers must not expose any rows or raw candidate bodies.
         return {}, {}, [], bool(registers)
     return classify_evidence_register(registers[0])
+
+
+def scoped_report(handler: Any = None, *, project_notes: bool = True) -> Any:
+    """Opt compatible report readers into captured evidence scope propagation."""
+    if handler is None:
+        return lambda report: scoped_report(report, project_notes=project_notes)
+
+    @functools.wraps(handler)
+    def guarded(root: Path, *args: Any, **kwargs: Any) -> Any:
+        with scoped_read(root, kwargs.get("vault"), kwargs.get("allowed_sensitivities"), project_notes=project_notes) as vault:
+            if vault is not None:
+                kwargs["vault"] = vault
+            return handler(root, *args, **kwargs)
+
+    return guarded
+
+
+@contextmanager
+def scoped_read(root: Path, vault: Any, allowed: set[str] | None, *, project_notes: bool = True) -> Iterator[Any]:
+    """Bind existing scoped report APIs to captured notes and evidence together."""
+    from .lint import _captured_evidence, _intersect_evidence, _real, evidence_view, path_cache
+    from .vault_index import NoteCache, VaultIndex, reuse_notes
+
+    if vault is not None and not isinstance(vault, VaultIndex):
+        raise ValueError("unsupported vault index")
+    with path_cache():
+        parent = _captured_evidence(root)
+        supplied = vault if isinstance(vault, VaultIndex) else None
+        if allowed is None and parent is None and (supplied is None or not supplied.confined and "evidence_register" not in supplied.derived):
+            yield vault
+            return
+        # A caller's persistent parse-cache setting must not turn a scoped read
+        # or its nested report calls into writes to the vault.
+        with reuse_notes(NoteCache()):
+            index = supplied if supplied is not None else VaultIndex.load(root)
+            if _real(index.root) != _real(root):
+                raise ValueError("vault index belongs to a different root")
+            active, retired, occurrences, per_row = classified_evidence(index)
+            captured = (active, retired, occurrences)
+            rows = index.derived.get("evidence_register", captured if evidence_register_notes(index) or parent is None else parent)
+            if parent is not None:
+                rows = _intersect_evidence(parent, rows)
+            permitted = set(SENSITIVITY_LEVEL) if allowed is None else set(SENSITIVITY_LEVEL).intersection(allowed)
+            levels = {SENSITIVITY_LEVEL[name] for name in permitted}
+            active = {key: dict(row) for key, row in rows[0].items() if str(row.get("sensitivity") or "internal").lower() in permitted}
+            retired = {key: dict(row) for key, row in rows[1].items() if str(row.get("sensitivity") or "internal").lower() in permitted}
+            ids = set(active) | set(retired)
+            rows = (active, retired, [(key, line) for key, line in rows[2] if key in ids])
+            registers = {note.path for note in evidence_register_notes(index)}
+            # Even a homogeneous register body is outside a sparse row grant.
+            # Row payload equality also prevents captured A from refreshing to B.
+            withhold_register = per_row or any(
+                {key: {field: value for field, value in row.items() if field != "line"}
+                 for key, row in original.items()}
+                != {key: {field: value for field, value in row.items() if field != "line"}
+                    for key, row in granted.items()}
+                for original, granted in ((captured[0], active), (captured[1], retired))
+            )
+
+            def keep(note: Any) -> bool:
+                path = index.relative(note.path).replace("\\", "/").casefold()
+                if path in {"06-decisions/decision-log.md", "00-context/review-log.md"}:
+                    return False
+                if note.path in registers and withhold_register:
+                    return False
+                return allowed is None or note_sensitivity_level(note) in levels
+
+            # Lint also accepts deliberate projected/synthetic log notes. It
+            # needs the row snapshot, without changing that supplied note view.
+            scoped = index.subset(keep if project_notes else lambda note: True)
+            scoped.derived["evidence_register"] = rows
+            with evidence_view(root, rows):
+                yield scoped
 
 
 def classify_evidence_register(note: Any) -> tuple[dict, dict, list, bool]:

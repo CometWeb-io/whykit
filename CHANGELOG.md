@@ -7,6 +7,26 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-27
+
+### Fixed
+
+- Honor captured evidence-row grants in scoped library reports. Public packs
+  filter note and evidence labels before building contexts; nested readers
+  cannot refill omitted rows or expose a partially granted register body.
+- Render command and nested-action help with their own options instead of
+  inheriting the root-only grouped formatter and raising an exception.
+
+- Withhold raw global decision/review logs from MCP at every ceiling: native
+  restricted records can copy their metadata into lower-labeled table rows.
+  Individual permitted records remain readable; omitted logs are not reopened
+  by confined lint through an ambient filesystem fallback.
+- Preserve exact Git vault paths, including leading and trailing whitespace, in
+  history checks, snapshot comparisons, installed hooks and CI locations. Refuse ambiguous Git
+  locations instead of silently selecting a sibling vault or repository root.
+  Previously generated hooks are not rewritten: inspect an affected hook, then
+  regenerate it with `whykit install-hooks --force --root <vault>`.
+
 ## [0.3.2] - 2026-10-27
 
 ### Fixed

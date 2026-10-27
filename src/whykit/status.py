@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .io import consistent_read
+from .sensitivity import scoped_report
 
 import argparse
 import datetime as dt
@@ -58,6 +59,7 @@ def build_review_queue(vault: VaultIndex, *, today: dt.date, due_days: int = 30)
 
 
 @consistent_read
+@scoped_report
 @path_cache()
 def build_status(
     root: Path,

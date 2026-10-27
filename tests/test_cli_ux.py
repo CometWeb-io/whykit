@@ -47,6 +47,27 @@ class TopLevelTests(unittest.TestCase):
         self.assertIn("exit codes:", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_every_nested_command_help_runs_without_a_vault(self) -> None:
+        import argparse
+
+        from whykit.cli import build_parser
+
+        def paths(parser, prefix=()):
+            for action in parser._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    for name, child in action.choices.items():
+                        path = (*prefix, name)
+                        yield path
+                        yield from paths(child, path)
+
+        for path in paths(build_parser()):
+            with self.subTest(command=path):
+                result = run(*path, "--help")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("usage: whykit " + " ".join(path), result.stdout)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertNotIn("  author -", result.stdout)
+
     def test_every_option_has_help_text(self) -> None:
         import argparse
 

@@ -31,6 +31,7 @@ from collections.abc import Callable, Iterator
 from typing import Iterable
 
 from .io import _lock_owner, consistent_read
+from .sensitivity import scoped_report
 from .tables import split_table_row as _split_table_row, review_table_header
 from .config import CONFIG_FILE, ConfigError, load_config
 from .markdown_code import mask_code as _mask_code
@@ -1194,10 +1195,34 @@ class _EvidenceView:
 _EVIDENCE_VIEW: contextvars.ContextVar[_EvidenceView | None] = contextvars.ContextVar("whykit_evidence_view", default=None)
 
 
+def _captured_evidence(root: Path) -> tuple | None:
+    """Return the active request's frozen rows, without an ambient fallback."""
+    view = _EVIDENCE_VIEW.get()
+    cache = _request_cache()
+    if view is None or not view.active or cache is None or view.request is not cache or view.root != _real(root):
+        return None
+    if callable(view.rows):
+        view.rows = view.rows()
+    active, retired, occurrences = view.rows
+    return ({key: dict(row) for key, row in active.items()}, {key: dict(row) for key, row in retired.items()}, list(occurrences))
+
+
+def _intersect_evidence(parent: tuple, child: tuple) -> tuple:
+    """A child may narrow IDs, but cannot refresh or expand its parent's rows."""
+    active, retired, occurrences = parent
+    ids = set(child[0]) | set(child[1])
+    return ({key: dict(row) for key, row in active.items() if key in ids},
+            {key: dict(row) for key, row in retired.items() if key in ids},
+            [(key, line) for key, line in occurrences if key in ids])
+
+
 @contextlib.contextmanager
 def evidence_view(root: Path, rows: tuple | Callable[[], tuple]):
     """Use one captured, filtered register throughout a read-only request."""
     with path_cache():
+        parent = _captured_evidence(root)
+        if parent is not None:
+            rows = _intersect_evidence(parent, rows() if callable(rows) else rows)
         view = _EvidenceView(_real(root), rows, _request_cache())
         token = _EVIDENCE_VIEW.set(view)
         try:
@@ -1208,12 +1233,10 @@ def evidence_view(root: Path, rows: tuple | Callable[[], tuple]):
 
 
 def evidence_register(root: Path) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]], list[tuple[str, int]]]:
-    view = _EVIDENCE_VIEW.get()
+    captured = _captured_evidence(root)
+    if captured is not None:
+        return captured
     cache = _request_cache()
-    if view is not None and view.active and cache is not None and view.request is cache and view.root == _real(root):
-        rows = view.rows() if callable(view.rows) else view.rows
-        active, retired, occurrences = rows
-        return ({key: dict(row) for key, row in active.items()}, {key: dict(row) for key, row in retired.items()}, list(occurrences))
     path = root / "00-context" / "evidence-register.md"
     if not path.exists() or not _within(root, path):
         return {}, {}, []
@@ -1444,9 +1467,10 @@ def decision_log_rows(root: Path, *, text: str | None = None) -> list[dict[str, 
     return rows
 
 
-def check_decision_log(root: Path, notes: list[Note], findings: list[Finding], resolve: Resolver | None = None) -> None:
+def check_decision_log(root: Path, notes: list[Note], findings: list[Finding], resolve: Resolver | None = None,
+                       *, text: str | None = None) -> None:
     path = root / "06-decisions" / "decision-log.md"
-    if not path.exists():
+    if text is None and not path.exists():
         return
     record_notes: dict[str, Note] = {}
     for note in notes:
@@ -1457,7 +1481,7 @@ def check_decision_log(root: Path, notes: list[Note], findings: list[Finding], r
         if did:
             record_notes[did] = note
 
-    rows = decision_log_rows(root)
+    rows = decision_log_rows(root, text=text)
     log_seen: dict[str, int] = {}
     row_ids: set[str] = set()
     status_map = {"draft": "proposed", "in_review": "proposed", "approved": "accepted", "superseded": "superseded", "archived": "archived"}
@@ -1734,12 +1758,14 @@ def check_config(root: Path, findings: list[Finding]) -> None:
         add(findings, root, path, 1, "error", "config.invalid", str(exc))
 
 
-def check_review_log(root: Path, notes: list[Note], findings: list[Finding], resolve: Resolver | None = None) -> None:
+def check_review_log(root: Path, notes: list[Note], findings: list[Finding], resolve: Resolver | None = None,
+                     *, text: str | None = None) -> None:
     path = root / "00-context" / "review-log.md"
-    if not path.exists():
+    if text is None and not path.exists():
         return
     real = _real(path)
-    note = next((item for item in notes if _real(item.path) == real), None) or load_note(path)
+    note = (load_note(path, text=text) if text is not None
+            else next((item for item in notes if _real(item.path) == real), None) or load_note(path))
     lines = note.text.splitlines()
     header_idx = review_table_header(lines)
     if header_idx is None or header_idx + 1 >= len(lines):
@@ -1968,6 +1994,7 @@ def _path_order(path: Path) -> list[str]:
 
 
 @consistent_read
+@scoped_report(project_notes=False)
 @path_cache()
 def lint(
     root: Path,
@@ -2028,7 +2055,10 @@ def lint(
     check_evidence_register(root, findings, today, config)
     check_evidence_ids(root, notes, findings)
     check_decision_ids(root, notes, findings)
-    check_decision_log(root, all_notes, findings, index_model.resolve_link)
+    captured_log = index_model.note_for(root / "06-decisions/decision-log.md") if index_model.confined else None
+    if not index_model.confined or captured_log is not None:
+        decision_log_text = captured_log.text if captured_log is not None else None
+        check_decision_log(root, all_notes, findings, index_model.resolve_link, text=decision_log_text)
     check_decision_review(root, notes, findings)
     check_decision_placeholders(root, notes, findings)
     if config is None:
@@ -2042,7 +2072,10 @@ def lint(
     if not paths:
         check_config(root, findings)
         check_path_collisions(root, all_notes, findings)
-        check_review_log(root, all_notes, findings, index_model.resolve_link)
+        captured_reviews = index_model.note_for(root / "00-context/review-log.md") if index_model.confined else None
+        if not index_model.confined or captured_reviews is not None:
+            review_log_text = captured_reviews.text if captured_reviews is not None else None
+            check_review_log(root, all_notes, findings, index_model.resolve_link, text=review_log_text)
         check_agents_configured(root, findings)
     if orphans and not paths:
         check_orphans(root, notes, findings, index_model.resolve_link)

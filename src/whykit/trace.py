@@ -14,6 +14,7 @@ than the vault's ``[evidence_access_age_days]`` policy for its source type.
 from __future__ import annotations
 
 from .io import consistent_read
+from .sensitivity import scoped_report
 
 import argparse
 import datetime as dt
@@ -83,6 +84,7 @@ def _evidence_state(
 
 
 @consistent_read
+@scoped_report
 @path_cache()
 def build_trace(
     root: Path,

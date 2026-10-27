@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .io import consistent_read
+from .sensitivity import scoped_report
 
 import argparse
 import json
@@ -76,6 +77,7 @@ def _record_key(context: dict[str, Any]) -> str:
 
 
 @consistent_read
+@scoped_report
 @path_cache()
 def build_pack(
     root: Path,

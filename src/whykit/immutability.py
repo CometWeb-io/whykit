@@ -19,6 +19,7 @@ import argparse
 import datetime as dt
 import hashlib
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -57,8 +58,12 @@ def git(*args: str, root: str | None = None) -> str:
     ).stdout
 
 
-def _git_prefix(root: str | None) -> str:
-    """Return the path from the Git work tree to *root*, with a trailing slash.
+class GitScopeError(subprocess.CalledProcessError):
+    """Git answered, but its namespace cannot safely identify the requested vault."""
+
+
+def _git_vault_location(root: str | None) -> tuple[Path, str]:
+    """Return the verified Git work tree and exact relative vault prefix.
 
     When the vault lives in a subdirectory (``examples/northline``), ``git diff
     --relative`` speaks in vault-relative paths but ``git show REV:path`` needs
@@ -66,11 +71,34 @@ def _git_prefix(root: str | None) -> str:
     they silently skip every decision record. Without *root* the vault is the
     working directory, which may itself be a subdirectory.
     """
+    prefix_output = git("rev-parse", "--show-prefix", root=root)
     try:
-        prefix = git("rev-parse", "--show-prefix", root=root).strip().replace("\\", "/")
-    except subprocess.CalledProcessError:
-        return ""
-    return prefix if not prefix or prefix.endswith("/") else f"{prefix}/"
+        top_output = git("rev-parse", "--show-toplevel", root=root)
+        def line(output: str) -> str:
+            if not output.endswith("\n") or any(char in output[:-1] for char in "\r\n\0"):
+                raise ValueError("ambiguous Git location output")
+            return output[:-1]
+        prefix, top = line(prefix_output), line(top_output)
+        if os.name == "nt":
+            prefix = prefix.replace("\\", "/")
+        relative, repository = Path(prefix), Path(top)
+        if relative.is_absolute() or ".." in relative.parts or not repository.is_absolute():
+            raise ValueError("unsafe Git location output")
+        requested = Path(root or os.getcwd()).resolve(strict=True)
+        located = (repository / relative).resolve(strict=True)
+        if not located.samefile(requested):
+            raise ValueError("Git location does not match requested vault")
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        raise GitScopeError(
+            128, ["git", "rev-parse", "--show-prefix", "--show-toplevel"], output="",
+            stderr="Git vault scope could not be verified; ambiguous paths are refused",
+        ) from None
+    return repository.resolve(strict=True), prefix if not prefix or prefix.endswith("/") else f"{prefix}/"
+
+
+def _git_prefix(root: str | None) -> str:
+    """Return the verified work-tree-relative vault path, with a trailing slash."""
+    return _git_vault_location(root)[1]
 
 
 def _git_object_path(vault_rel: str, prefix: str) -> str:

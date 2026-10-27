@@ -701,6 +701,13 @@ def _validate_cursor(value: object) -> str | None:
 _MCP_REQUEST: contextvars.ContextVar[tuple[object, object, dict] | None] = contextvars.ContextVar("whykit_mcp_request", default=None)
 
 
+def _native_global_ledger(path: str) -> bool:
+    """Native writers may copy stricter record metadata into these raw tables."""
+    return path.replace("\\", "/").casefold() in {
+        "06-decisions/decision-log.md", "00-context/review-log.md",
+    }
+
+
 def _vault_request(handler):
     @functools.wraps(handler)
     def guarded(self, *args, **kwargs):
@@ -743,6 +750,8 @@ class VaultTools:
             return current[2]["index"]
         ceiling = SENSITIVITY_LEVEL[self.policy]
         index = VaultIndex.load(self.vault)
+        # Exclude raw mixed-target tables before every tool/resource view, including full_index.
+        index = index.subset(lambda note: not _native_global_ledger(index.relative(note.path)))
         active, retired, occurrences, per_row = classified_evidence(index)
         registers = evidence_register_notes(index)
         register_paths = {note.path for note in registers}
@@ -898,6 +907,8 @@ class VaultTools:
 
         def finding_visible(item: dict) -> bool:
             path = str(item.get("path") or "")
+            if _native_global_ledger(path):
+                return False
             if path in hidden_paths:
                 # File-level checks (secret scanning) still read every file.
                 return False

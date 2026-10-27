@@ -16,6 +16,7 @@ not ``Home.md``. Outside Git the paths stay vault-relative.
 from __future__ import annotations
 
 import hashlib
+import errno
 import shutil
 import subprocess
 from collections.abc import Iterable, Mapping
@@ -24,6 +25,7 @@ from typing import Any
 from urllib.parse import quote
 
 from . import __version__
+from .immutability import GitScopeError, _git_vault_location
 from .rules import RULES, Rule
 
 SARIF_VERSION = "2.1.0"
@@ -51,19 +53,11 @@ def _git_location(root: Path) -> tuple[Path, str] | None:
     if shutil.which("git") is None:
         return None
     try:
-        result = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "--show-toplevel", "--show-prefix"],
-            capture_output=True, text=True, encoding="utf-8", errors="surrogateescape", check=False,
-        )
-    except OSError:
+        return _git_vault_location(str(root))
+    except GitScopeError:
+        raise OSError(errno.EINVAL, "Git vault scope could not be verified; ambiguous paths are refused") from None
+    except (OSError, subprocess.CalledProcessError):
         return None
-    lines = result.stdout.splitlines()
-    if result.returncode != 0 or not lines:
-        return None
-    prefix = lines[1].strip().replace("\\", "/") if len(lines) > 1 else ""
-    if prefix and not prefix.endswith("/"):
-        prefix += "/"
-    return Path(lines[0].strip()), prefix
 
 
 def source_root(root: Path) -> tuple[Path, str]:
