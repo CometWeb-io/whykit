@@ -129,10 +129,14 @@ class GitVaultScopeTests(unittest.TestCase):
         head = self.commit("synthetic rewrite under leading-space scope")
         self.assertEqual(changed_records(base, head, str(selected)), [("M", relative)])
 
-    def test_prefix_preserves_spaces_tabs_nested_and_unicode_directories(self) -> None:
-        names = [" leading", "nested/ space /żółw-資料", "quote\"name"]
-        if os.name != "nt":
-            names += ["trailing ", "\tleading", "trailing\t", "back\\slash"]
+    def test_prefix_preserves_portable_spaces_nested_and_unicode_directories(self) -> None:
+        self.assert_prefixes([" leading", "nested/ space/żółw-資料", "nested space/żółw-資料"])
+
+    @unittest.skipIf(os.name == "nt", "Windows forbids quotes, tabs and trailing whitespace in path components")
+    def test_prefix_preserves_posix_trailing_spaces_tabs_and_quotes(self) -> None:
+        self.assert_prefixes(["nested/ space /żółw-資料", "quote\"name", "trailing ", "\tleading", "trailing\t", "back\\slash"])
+
+    def assert_prefixes(self, names: list[str]) -> None:
         for name in names:
             with self.subTest(name=name):
                 root = self.repo / name
