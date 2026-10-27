@@ -7,8 +7,11 @@ are written as `whykit …`; from a source checkout, use `uv run whykit …`.
 
 ### `whykit: command not found`
 
-WhyKit is not on PyPI yet, so there is no global `whykit` until you install one.
-Pick one:
+Install the published package with `uv tool install whykit`. If it is already
+installed, run `uv tool update-shell` and open a new terminal so the tool's bin
+directory is on `PATH`.
+
+For development from a checkout, you can instead:
 
 - From the WhyKit checkout: `uv run whykit …`, with `--root` pointing at your
   vault.
@@ -197,17 +200,20 @@ through. Install a binary (see the first entry on this page). The hook runs the
 
 ### `whykit-mcp needs the optional MCP extra`
 
-The MCP server ships as an optional extra. From a checkout run
-`uv sync --extra mcp`, then `uv run whykit-mcp --root /path/to/vault`. See the
+The MCP server ships as an optional extra. Install or update it with
+`uv tool install --upgrade 'whykit[mcp]'`, then run
+`whykit-mcp --root /path/to/vault`. From a checkout use `uv sync --extra mcp`
+and `uv run whykit-mcp --root /path/to/vault`. See the
 [MCP server guide](mcp.md).
 
 ## Questions
 
 ### Is WhyKit on PyPI?
 
-Not yet. It is a source preview. Install from a checkout as shown in the
-[README](../README.md#60-second-quickstart). Do not install a package called
-`whykit` from an index until a release is announced in this repository.
+Yes: [whykit on PyPI](https://pypi.org/project/whykit/). Install the latest
+published release with `uv tool install whykit`; see the
+[README](../README.md#60-second-quickstart). A source checkout can contain
+changes that have not been published yet.
 
 ### Does WhyKit send anything over the network?
 

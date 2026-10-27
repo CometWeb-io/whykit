@@ -21,15 +21,15 @@ uv sync --locked
 uv run whykit lint examples/northline --strict --today 2026-09-17
 ```
 
-WhyKit is not published to PyPI yet. Do not run `uv tool install whykit` or
-`pipx install whykit` until a release is announced; those commands would resolve
-the public package index, not install this source checkout. For now, clone this
-repository and use the checkout-based commands above or the [README quick
-start](../README.md#60-second-quickstart). After publication, the package install will be:
+For normal use, install the published package from PyPI:
 
 ```bash
 uv tool install whykit
 ```
+
+This installs the published release, not the code in this checkout. For local
+development use the checkout commands above; for a first vault follow the
+[README quickstart](../README.md#60-second-quickstart).
 
 ## `bench.py`
 

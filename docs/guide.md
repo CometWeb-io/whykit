@@ -6,12 +6,27 @@ decisions and the review cycle. For a guided first run, start with the
 [tutorials](README.md#start) instead. Every flag is listed in the
 [command reference](cli.md).
 
-## Run WhyKit from a checkout
+## Install WhyKit from PyPI
 
 WhyKit requires Python 3.11 or newer and has no runtime dependencies. It is
-not on PyPI yet; do not run `uv tool install whykit` or `pipx install whykit`
-until a release is announced in this repository. Install
-[uv](https://docs.astral.sh/uv/getting-started/installation/), then:
+available on [PyPI](https://pypi.org/project/whykit/). With
+[uv 0.13.4+](https://docs.astral.sh/uv/getting-started/installation/):
+
+```bash
+uv tool install whykit
+whykit init my-ledger
+whykit lint --root my-ledger
+```
+
+The rest of this page uses the installed `whykit` command, run from inside the
+vault directory. If the command is not found, run `uv tool update-shell` and
+open a new terminal. Update with `uv tool upgrade whykit`; to select a specific
+published version, use `uv tool install 'whykit==X.Y.Z'`.
+
+## Run WhyKit from a checkout
+
+A source checkout is useful for development and the optional Explorer. Keep
+your vault outside the tool's source tree:
 
 ```bash
 git clone https://github.com/CometWeb-io/whykit.git
@@ -21,8 +36,7 @@ uv run whykit init ../my-ledger
 uv run whykit lint --root ../my-ledger
 ```
 
-The rest of this page writes commands as bare `whykit …`, run from inside the
-vault directory. From a source checkout you can get there three ways:
+From a source checkout you can run commands in three ways:
 
 - run `uv run whykit …` from the WhyKit repository and pass `--root` to point at
   the vault;

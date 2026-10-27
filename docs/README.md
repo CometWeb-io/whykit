@@ -5,7 +5,8 @@ review events in plain Markdown, with a CLI that checks how they link. The
 pages below are grouped by what you are trying to do. Each page has one job,
 and the others link to it instead of repeating it.
 
-Commands are written as `whykit …`. From a source checkout, run them as
+Install the published CLI with `uv tool install whykit` (Python 3.11+ and
+uv 0.13.4+). Commands are written as `whykit …`. From a source checkout, run them as
 `uv run whykit …` (see [Run WhyKit from a checkout](guide.md#run-whykit-from-a-checkout)).
 
 ## Start

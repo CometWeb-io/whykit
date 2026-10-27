@@ -12,16 +12,24 @@ list-style results are paged with opaque cursors, prompt and resource-template
 arguments can be completed, and subscribed clients are told when a visible
 record changes.
 
-The core package stays dependency-free. WhyKit is not on PyPI yet, so install
-the optional MCP extra from a checkout and start the server with the vault you
-want to expose:
+The core package stays dependency-free. Install the optional MCP extra from
+PyPI with uv 0.13.4+ (Python 3.11+), then select the vault to expose:
+
+```bash
+uv tool install --upgrade 'whykit[mcp]'
+whykit-mcp --root /absolute/path/to/private-vault
+```
+
+This also updates an existing core-only tool installation to include
+the extra. If the command is not found, run `uv tool update-shell` and open a
+new terminal. For development from a checkout:
 
 ```bash
 uv sync --locked --extra mcp
 uv run whykit-mcp --root /absolute/path/to/private-vault
 ```
 
-or install both commands as a tool straight from the repository:
+You can also install both commands as a tool from source:
 
 ```bash
 uv tool install 'whykit[mcp] @ git+https://github.com/CometWeb-io/whykit'
@@ -33,7 +41,7 @@ The extra has to be part of the requirement itself, as above.
 MCP SDK, and uv rejects `uv tool install --from <path> 'whykit[mcp]'` because
 the two requirements conflict.
 
-Started without the extra, `whykit-mcp` prints these two options and exits
+Started without the extra, `whykit-mcp` prints installation options and exits
 with status 2. The server identifies itself as `whykit` with the package
 version in its MCP server info.
 
@@ -44,14 +52,8 @@ server configuration (the exact config file is host-specific):
 {
   "mcpServers": {
     "whykit": {
-      "command": "uv",
+      "command": "/absolute/path/to/whykit-mcp",
       "args": [
-        "run",
-        "--project",
-        "/absolute/path/to/whykit",
-        "--extra",
-        "mcp",
-        "whykit-mcp",
         "--root",
         "/absolute/path/to/private-vault",
         "--max-sensitivity",
@@ -62,7 +64,8 @@ server configuration (the exact config file is host-specific):
 }
 ```
 
-Replace both paths with absolute paths on your machine. The default ceiling is
+Use the absolute path of the installed `whykit-mcp` executable and your vault.
+On Unix, `command -v whykit-mcp` locates the executable. The default ceiling is
 `internal`; `--max-sensitivity` also accepts `public`, `confidential`, and
 `restricted`. Expose higher-sensitivity records only to a host and agent that
 are already authorized to read them. Sensitivity is a response filter, **not an
@@ -82,13 +85,13 @@ public export behavior.
 ### Codex configuration
 
 Codex uses a `[mcp_servers.<name>]` table in `~/.codex/config.toml`, rather than the
-`mcpServers` JSON shape above. After installing the extra in your checkout,
+`mcpServers` JSON shape above. After installing the extra,
 configure the equivalent stdio command with absolute paths:
 
 ```toml
 [mcp_servers.whykit]
-command = "uv"
-args = ["run", "--locked", "--project", "/absolute/path/to/whykit", "--extra", "mcp", "whykit-mcp", "--root", "/absolute/path/to/vault", "--max-sensitivity", "public"]
+command = "/absolute/path/to/whykit-mcp"
+args = ["--root", "/absolute/path/to/vault", "--max-sensitivity", "public"]
 required = true
 ```
 

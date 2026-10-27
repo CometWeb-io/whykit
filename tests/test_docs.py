@@ -497,19 +497,14 @@ class QuickstartTests(unittest.TestCase):
 
     def test_readme_quickstart_runs_and_produces_a_linted_vault(self) -> None:
         lines = self._quickstart_lines()
-        self.assertEqual(lines[:3], [
-            "git clone https://github.com/CometWeb-io/whykit.git",
-            "cd whykit",
-            "uv sync --locked",
-        ])
+        self.assertEqual(lines[0], "uv tool install whykit")
         with tempfile.TemporaryDirectory() as td:
-            vault = Path(td) / "my-ledger"
             outputs = []
-            for line in lines[3:]:
-                self.assertTrue(line.startswith("uv run whykit "), line)
-                argv = [str(vault) if arg == "../my-ledger" else arg
-                        for arg in shlex.split(line.removeprefix("uv run whykit "))]
-                result = subprocess.run([sys.executable, str(CLI), *argv], cwd=ROOT,
+            # The index install is exercised separately; unit tests stay offline.
+            for line in lines[1:]:
+                self.assertTrue(line.startswith("whykit "), line)
+                argv = shlex.split(line.removeprefix("whykit "))
+                result = subprocess.run([sys.executable, str(CLI), *argv], cwd=td,
                                         text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=60)
                 self.assertEqual(result.returncode, 0, f"{line}\n{result.stdout}{result.stderr}")
                 outputs.append(result.stdout)

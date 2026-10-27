@@ -1,6 +1,6 @@
 """Optional read-only MCP server for WhyKit vaults.
 
-Install with ``uv sync --extra mcp`` from a checkout (see ``docs/mcp.md``). The core
+Install with ``uv tool install --upgrade 'whykit[mcp]'`` (see ``docs/mcp.md``). The core
 WhyKit package stays dependency-free; this module imports ``mcp`` only when the
 server is started.
 
@@ -229,8 +229,8 @@ async def bounded_stdio_server():  # type: ignore[no-untyped-def]
 
 MISSING_EXTRA_MESSAGE = (
     "whykit-mcp needs the optional MCP extra, which is not installed.\n"
-    "  From a WhyKit checkout:  uv sync --extra mcp && uv run whykit-mcp --root /path/to/vault\n"
-    "  As a tool:               uv tool install 'whykit[mcp] @ git+https://github.com/CometWeb-io/whykit'"
+    "  From PyPI:               uv tool install --upgrade 'whykit[mcp]'\n"
+    "  From a WhyKit checkout:  uv sync --extra mcp && uv run whykit-mcp --root /path/to/vault"
 )
 
 
@@ -238,9 +238,7 @@ def _require_mcp():
     try:
         from mcp.server import MCPServer
     except ImportError as exc:
-        # An environment problem, not a crash: say how to fix it and exit 2
-        # like any other usage error. WhyKit is not on PyPI yet, so a bare
-        # `pip install 'whykit[mcp]'` would not work.
+        # An environment problem, not a crash: say how to fix it and exit 2.
         print(MISSING_EXTRA_MESSAGE, file=sys.stderr)
         raise SystemExit(2) from exc
     try:

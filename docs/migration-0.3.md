@@ -1,6 +1,7 @@
 # Migrating to WhyKit 0.3
 
-WhyKit 0.3.0 will be the first public package release. If you ran WhyKit from a
+WhyKit 0.3.1 was the first public package release; the 0.3.0 tag was not
+published to PyPI. If you ran WhyKit from a
 source checkout of the internal 0.2.0 milestone, or from the `0.3.0.dev0`
 source preview, this page lists what changes for your vault, your scripts and
 your CI, and what to do about each. The full list of changes is in the

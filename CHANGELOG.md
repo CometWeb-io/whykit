@@ -7,10 +7,21 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-27
+
+### Fixed
+
+- Make PyPI the default installation path in the README, guides, tutorials,
+  FAQ and MCP configuration. Keep checkout instructions for development and
+  the Explorer, and avoid recommending an unpublished version.
+- Point the missing-MCP-extra diagnostic to the published extra while retaining
+  source-install options and exit code 2. No transport or vault-format changes.
+
 ## [0.3.1] - 2026-10-26
 
-Prepared as the first public package release, including the changes in the
-unpublished 0.3.0 source milestone. Publication is not yet verified.
+First public package release, published on
+[PyPI](https://pypi.org/project/whykit/0.3.1/), including the changes in the
+unpublished 0.3.0 source milestone.
 
 ### Fixed
 
@@ -982,6 +993,7 @@ Initial implementation. No package was published under this version.
   rules and common secret leaks.
 - JSON Schemas, a worked example vault, and an optional local Explorer.
 
-[Unreleased]: https://github.com/CometWeb-io/whykit/compare/v0.3.1...HEAD
-[0.3.1]: https://github.com/CometWeb-io/whykit/releases/tag/v0.3.1
+[Unreleased]: https://github.com/CometWeb-io/whykit/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/CometWeb-io/whykit/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/CometWeb-io/whykit/tree/v0.3.1
 [0.3.0]: https://github.com/CometWeb-io/whykit/tree/v0.3.0
