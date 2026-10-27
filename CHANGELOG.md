@@ -74,6 +74,9 @@ CLI and the lint rule codes.
 
 ### Fixed
 
+- Accept stable capture and claim files on Windows while retaining file identity
+  checks and detecting changes within both path and descriptor metadata.
+
 - Reuse the captured graph constructor after hybrid permission and eligibility
   admission, retaining full dependency closure and existing graph output.
 

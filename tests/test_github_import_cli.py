@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import secrets
 from pathlib import Path
 import tempfile
 import unittest
@@ -81,7 +82,7 @@ class GitHubImportCliTests(unittest.TestCase):
         code, preview = call(*args)
         self.assertEqual(code, 0, preview)
         data = json.loads(source.read_bytes())
-        secret = "PRIVATE_BODY_CANARY_92"
+        secret = secrets.token_hex(16)
         data["body"] = secret
         source.write_text(json.dumps(data), encoding="utf-8")
         code, stale = call(*args, "--write", "--expect-hash", preview["expected_sha256"])

@@ -1,6 +1,7 @@
 """Metric oracles and untimed native preparation-scope regressions."""
 from __future__ import annotations
 
+from contextlib import nullcontext
 import math
 from pathlib import Path
 import tempfile
@@ -96,7 +97,8 @@ class PreparedScopeTests(unittest.TestCase):
         with persistent(True):
             for options in ({}, {"scope": ["public"]},
                             {"scope": ["public", "restricted"], "omit_evidence": first["evidence_id"]}):
-                with self.subTest(options=options):
+                # The baseline capture is required by the post-edit checks below.
+                with self.subTest(options=options) if options else nullcontext():
                     with vault_read_lock(self.root), reuse_notes(NoteCache()):
                         legacy = harness._prepared(self.root, self.case, **options)
                     current = harness.prepared(self.root, self.case, **options)

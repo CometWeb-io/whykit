@@ -86,7 +86,15 @@ def _read_regular(path: Path, *, max_bytes: int, missing_ok: bool = False) -> by
             return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
         if len(raw) > max_bytes:
             raise ValueError("input exceeds byte limit")
-        if signature(before) != signature(opened) or signature(opened) != signature(after) or signature(after) != signature(current):
+        if os.name == "nt":
+            # Windows path ctime can mean creation time while fd ctime means
+            # metadata change time. Keep both same-API snapshots, and bridge
+            # path/descriptor identity, size and mtime without cross-API ctime.
+            changed = (signature(before) != signature(current) or signature(opened) != signature(after)
+                       or signature(before)[:4] != signature(opened)[:4] or signature(after)[:4] != signature(current)[:4])
+        else:
+            changed = signature(before) != signature(opened) or signature(opened) != signature(after) or signature(after) != signature(current)
+        if changed:
             raise ValueError("input changed during read; retry")
         return raw
 

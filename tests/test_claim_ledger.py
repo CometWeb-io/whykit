@@ -103,7 +103,8 @@ class ClaimLedgerTests(unittest.TestCase):
         directory = self.root / "00-context/claims"
         directory.mkdir(parents=True)
         path = directory / "c-001.md"
-        for form in ("missing", "corrupt", "symlink", "fifo"):
+        forms = ("missing", "corrupt", "symlink") + (("fifo",) if hasattr(os, "mkfifo") else ())
+        for form in forms:
             with self.subTest(form=form):
                 path.unlink(missing_ok=True)
                 if form == "corrupt":
