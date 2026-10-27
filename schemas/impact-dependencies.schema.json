@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/impact-dependencies.schema.json",
+  "title": "WhyKit decoded namespaced impact dependencies",
+  "$comment": "JSON Schema validates decoded structure. The pure parser/API additionally enforces UTF-8 byte budgets, all Unicode control exclusions and captured canonical holder identity. Change/API checks enforce cross-field target equality and actual pin/source bindings; this schema does not authenticate bytes.",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "whykit.impact-dependencies/v1"
+    },
+    "artifact_kind": {
+      "enum": [
+        "spec",
+        "pull-request",
+        "task",
+        null
+      ]
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/dependency"
+      },
+      "maxItems": 32
+    }
+  },
+  "required": [
+    "format",
+    "artifact_kind",
+    "dependencies"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$(?![\\s\\S])"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*[\\\\\\x00-\\x1f\\x7f-\\x9f])(?!(?:\\.{1,2})(?:/|$))(?!.*?/\\.{1,2}(?:/|$))(?!.*//).+\\.(?:md|MD)$(?![\\s\\S])",
+      "allOf": [
+        {
+          "if": {
+            "pattern": "(?:^|/)00-[cC][oO][nN][tT][eE][xX][tT]/[iI][mM][pP][lL][eE][mM][eE][nN][tT][aA][tT][iI][oO][nN]/"
+          },
+          "then": {
+            "pattern": "^00-context/implementation/(?:[a-z0-9][a-z0-9-]{0,63}/)*[a-z0-9][a-z0-9-]{0,63}\\.md$(?![\\s\\S])"
+          }
+        }
+      ]
+    },
+    "target": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^evidence:E-(?:00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,14})$(?![\\s\\S])"
+        },
+        {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^claim:C-(?:00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,14})$(?![\\s\\S])"
+        },
+        {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^decision:D-(?:00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,14})$(?![\\s\\S])"
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^document:(?!/)(?![A-Za-z]:)(?!.*[\\\\\\x00-\\x1f\\x7f-\\x9f])(?!(?:\\.{1,2})(?:/|$))(?!.*?/\\.{1,2}(?:/|$))(?!.*//).+\\.(?:md|MD)$(?![\\s\\S])",
+          "allOf": [
+            {
+              "if": {
+                "pattern": "(?:^document:|/)00-[cC][oO][nN][tT][eE][xX][tT]/[iI][mM][pP][lL][eE][mM][eE][nN][tT][aA][tT][iI][oO][nN]/"
+              },
+              "then": {
+                "pattern": "^document:00-context/implementation/(?:[a-z0-9][a-z0-9-]{0,63}/)*[a-z0-9][a-z0-9-]{0,63}\\.md$(?![\\s\\S])"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "pin": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "enum": [
+            "evidence_raw_sha256",
+            "claim_markdown_sha256",
+            "decision_record_sha256",
+            "document_raw_sha256"
+          ]
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "namespace",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "dependency": {
+      "type": "object",
+      "properties": {
+        "relation": {
+          "enum": [
+            "requires",
+            "implements",
+            "measures"
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/target"
+        },
+        "pin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/pin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "relation",
+        "target",
+        "pin"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "pattern": "^evidence:"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "pin": {
+                "properties": {
+                  "namespace": {
+                    "const": "evidence_raw_sha256"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "pattern": "^claim:"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "pin": {
+                "properties": {
+                  "namespace": {
+                    "const": "claim_markdown_sha256"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "pattern": "^decision:"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "pin": {
+                "properties": {
+                  "namespace": {
+                    "const": "decision_record_sha256"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "pattern": "^document:"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "pin": {
+                "properties": {
+                  "namespace": {
+                    "const": "document_raw_sha256"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "bound_input": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/target"
+        },
+        "pin": {
+          "$ref": "#/$defs/pin"
+        }
+      },
+      "required": [
+        "target",
+        "pin"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "pattern": "^evidence:"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "pin": {
+                "properties": {
+                  "namespace": {
+                    "const": "evidence_raw_sha256"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "pattern": "^claim:"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "pin": {
+                "properties": {
+                  "namespace": {
+                    "const": "claim_markdown_sha256"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "pattern": "^decision:"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "pin": {
+                "properties": {
+                  "namespace": {
+                    "const": "decision_record_sha256"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "pattern": "^document:"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "pin": {
+                "properties": {
+                  "namespace": {
+                    "const": "document_raw_sha256"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

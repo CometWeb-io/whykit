@@ -31,7 +31,7 @@ from .lint import (
 )
 from .vault_index import VaultIndex
 from .console import emit_machine
-from .sensitivity import note_sensitivity_level, classified_evidence, evidence_register_notes
+from .sensitivity import note_sensitivity_label, note_sensitivity_level, classified_evidence, evidence_register_notes
 
 
 def _marker_pattern(markers: set[str]) -> re.Pattern | None:
@@ -372,7 +372,7 @@ def _build_explorer_index(root: Path, *, today: dt.date | None = None) -> tuple[
             "lastUpdated": str(note.front.get("last_updated") or ""),
             "reviewBy": str(note.front.get("review_by") or ""),
             "sourceOfTruth": note.front.get("source_of_truth") is True,
-            "sensitivity": str(note.front.get("sensitivity") or "internal"),
+            "sensitivity": note_sensitivity_label(note, "internal"),
             "sourceIds": _as_list(note.front.get("source_ids")),
             "citations": citations,
             "tags": _as_list(note.front.get("tags")),

@@ -12,7 +12,7 @@ what is known, what was decided, and what still needs checking.
 
 **Python 3.11+ · No runtime dependencies · Apache-2.0**
 
-**Status:** public alpha, available on [PyPI](https://pypi.org/project/whykit/). Source version: `0.3.3`.
+**Status:** public alpha, available on [PyPI](https://pypi.org/project/whykit/). Source version: `0.4.0.dev0` (unreleased; PyPI: `0.3.2`).
 
 [![CI](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml/badge.svg)](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml)
 

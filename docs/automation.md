@@ -25,7 +25,9 @@ included. Human text on stderr degrades to ASCII spellings instead of crashing.
 A command is in JSON mode when you pass `--json`. `graph` and `pack` are also in
 JSON mode when `--format` is `json` (their default), `lint`, `check` and `diff` when
 `--format` is `json`, `snapshot` when it writes to stdout (no `--output`), and
-`explorer-index` always. The CI formats (`--format sarif` and
+`explorer-index` always. The `agent`, `workspace`, `claim`, `artifact`, `outcome`, `knowledge`, `import`,
+`compile-context`, `verify-context`, `deep-impact` and `knowledge-at` commands
+also always write JSON. The CI formats (`--format sarif` and
 `--format github`) are not JSON mode; see [CI formats](#ci-formats).
 
 `history --json` and history inside `check --json` can report `approval_without_event`
@@ -177,6 +179,26 @@ CLI actually prints.
 | `impact --json` | `impact-report.schema.json` |
 | `trace --json` | `trace-report.schema.json` |
 | `query --json` | `query-result.schema.json` |
+| `retrieve --json` | `hybrid-retrieval.schema.json` |
+| `agent eval --json` | `agent-eval-result.schema.json` |
+| `agent preflight --json` | `agent-preflight-result.schema.json` |
+| `workspace status --json` | `workspace-status.schema.json` |
+| `compile-context --json` | `compiled-context.schema.json` |
+| `verify-context --json` | `context-verification.schema.json` |
+| `deep-impact --json` | `deep-impact.schema.json` |
+| `knowledge-at --json` | `temporal-graph.schema.json` |
+| `import github --json` | `github-import-result.schema.json` |
+| `artifact capture --json`, `claim create --json` | `provenance-write.schema.json` |
+| `claim list --json` | `claim-list.schema.json` |
+| `claim show --json` | `claim-show.schema.json` |
+| `claim verify --json` | `claim-verification.schema.json` |
+| `outcome create --json` | `outcome-create.schema.json` |
+| `outcome list --json` | `outcome-list.schema.json` |
+| `outcome show --json` | `outcome-show.schema.json` |
+| `outcome verify --json` | `outcome-verification.schema.json` |
+| `knowledge view --json` | `knowledge-v2.schema.json` |
+| `knowledge bundle --json` | `knowledge-export-result.schema.json` |
+| `knowledge restore --json` | `knowledge-restore-result.schema.json` |
 | `context --json` | `context-pack.schema.json` |
 | `pack --json` | `context-bundle.schema.json` |
 | `review list --json` | `review-queue.schema.json` |
@@ -201,6 +223,13 @@ CLI actually prints.
 The same table is available to Python callers as
 `whykit.contract.OUTPUT_SCHEMAS`, and the error codes as
 `whykit.contract.ERROR_CODES`.
+
+Capture preview/apply output also identifies its source-observation path and
+timestamp; its expected hash binds both the immutable capture and observation
+ledger. `claim verify` reports anchor `status` and `source_state` separately,
+and exits 0 only when both are current/matched for every linked source. Use
+`--today YYYY-MM-DD` for a reproducible UTC calendar-day comparison. A matched
+old quote with a changed or unknown observation still requires review.
 
 ## CI formats
 

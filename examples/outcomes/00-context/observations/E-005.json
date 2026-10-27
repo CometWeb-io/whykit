@@ -1,0 +1,11 @@
+{
+  "evidence_id": "E-005",
+  "format": "whykit.source-observations/v1",
+  "observations": [
+    {
+      "recorded_at": "2026-09-17T12:00:00Z",
+      "sensitivity": "restricted",
+      "source_version": "sha256:fab761d309bb12500028ff74d7b094c3e62028c2148ade332442d7b17194e6ca"
+    }
+  ]
+}

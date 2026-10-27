@@ -18,6 +18,20 @@ SENSITIVITY_LEVEL = {
 UNREADABLE_LEVEL = 99
 
 
+def is_claim_note(note: Any) -> bool:
+    """Pure conservative marker for native claim metadata or its reserved directory."""
+    parts = tuple(part.casefold() for part in getattr(getattr(note, "path", None), "parts", ()))
+    return (note.front.get("type") == "claim" or "claim_id" in note.front
+            or any(parts[index:index + 2] == ("00-context", "claims") for index in range(len(parts) - 1)))
+
+
+def is_outcome_note(note: Any) -> bool:
+    """Native operational measurements remain restricted despite metadata downgrades."""
+    parts = tuple(part.casefold() for part in getattr(getattr(note, "path", None), "parts", ()))
+    return (note.front.get("type") == "outcome" or "outcome_id" in note.front
+            or any(parts[index:index + 2] == ("00-context", "outcomes") for index in range(len(parts) - 1)))
+
+
 def _sensitivity_level(value: object) -> int:
     key = str(value or "internal").lower() or "internal"
     return SENSITIVITY_LEVEL.get(key, 99)
@@ -42,8 +56,21 @@ def note_sensitivity_level(note: Any) -> int:
     for key in front:
         if key != "sensitivity" and str(key).strip().casefold() == "sensitivity":
             level = UNREADABLE_LEVEL
+    # Persisted claim JSON contains source quotes; a metadata downgrade must not export them.
+    from .impact_contract import is_impact_note
+    if is_claim_note(note) or is_outcome_note(note) or is_impact_note(note):
+        level = max(level, SENSITIVITY_LEVEL["restricted"])
     return level
 
+
+
+def note_sensitivity_label(note: Any, default: str = "") -> str:
+    """Expose a native impact floor without changing its stored approved bytes."""
+    from .impact_contract import is_impact_note
+    if is_impact_note(note):
+        level = note_sensitivity_level(note)
+        return next((name for name, value in SENSITIVITY_LEVEL.items() if value == level), "unclassified")
+    return str(note.front.get("sensitivity") or default)
 
 def evidence_register_notes(index: Any) -> list[Any]:
     """Match captured register paths, including .MD and case aliases."""
@@ -87,8 +114,15 @@ def scoped_read(root: Path, vault: Any, allowed: set[str] | None, *, project_not
         parent = _captured_evidence(root)
         supplied = vault if isinstance(vault, VaultIndex) else None
         if allowed is None and parent is None and (supplied is None or not supplied.confined and "evidence_register" not in supplied.derived):
-            yield vault
-            return
+            if not project_notes:
+                yield vault
+                return
+            from .impact_contract import is_impact_note
+            with reuse_notes(NoteCache()):
+                supplied = supplied if supplied is not None else VaultIndex.load(root)
+            if not any(is_impact_note(note) for note in supplied.notes):
+                yield supplied
+                return
         # A caller's persistent parse-cache setting must not turn a scoped read
         # or its nested report calls into writes to the vault.
         with reuse_notes(NoteCache()):
@@ -129,6 +163,9 @@ def scoped_read(root: Path, vault: Any, allowed: set[str] | None, *, project_not
             # needs the row snapshot, without changing that supplied note view.
             scoped = index.subset(keep if project_notes else lambda note: True)
             scoped.derived["evidence_register"] = rows
+            if project_notes:
+                from .knowledge_visibility import visible_knowledge_index
+                scoped = visible_knowledge_index(scoped, ids)
             with evidence_view(root, rows):
                 yield scoped
 

@@ -1,0 +1,298 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/github-import-receipt.schema.json",
+  "type": "object",
+  "required": [
+    "format",
+    "adapter_version",
+    "evidence_id",
+    "source_version",
+    "kind",
+    "repository",
+    "metadata",
+    "sensitivity",
+    "source_identity_authenticated",
+    "remote_state_checked",
+    "semantics_checked",
+    "execution_authorized"
+  ],
+  "properties": {
+    "format": {
+      "const": "whykit.github-import-receipt/v1"
+    },
+    "adapter_version": {
+      "const": 1
+    },
+    "evidence_id": {
+      "type": "string",
+      "pattern": "^E-[0-9]{3,15}$"
+    },
+    "source_version": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "kind": {
+      "enum": [
+        "issue",
+        "pull-request",
+        "workflow-run"
+      ]
+    },
+    "repository": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "sensitivity": {
+      "const": "restricted"
+    },
+    "source_identity_authenticated": {
+      "const": false
+    },
+    "remote_state_checked": {
+      "const": false
+    },
+    "semantics_checked": {
+      "const": false
+    },
+    "execution_authorized": {
+      "const": false
+    }
+  },
+  "additionalProperties": false,
+  "anyOf": [
+    {
+      "properties": {
+        "kind": {
+          "const": "issue"
+        },
+        "metadata": {
+          "type": "object",
+          "required": [
+            "id",
+            "number",
+            "url",
+            "state",
+            "created_at",
+            "updated_at",
+            "closed_at"
+          ],
+          "properties": {
+            "id": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "number": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "url": {
+              "type": "string"
+            },
+            "state": {
+              "enum": [
+                "open",
+                "closed"
+              ]
+            },
+            "created_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{6})?Z$"
+            },
+            "updated_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{6})?Z$"
+            },
+            "closed_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "pull-request"
+        },
+        "metadata": {
+          "type": "object",
+          "required": [
+            "id",
+            "number",
+            "url",
+            "state",
+            "created_at",
+            "updated_at",
+            "closed_at",
+            "base_sha",
+            "head_sha",
+            "merge_commit_sha",
+            "merged_at"
+          ],
+          "properties": {
+            "id": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "number": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "url": {
+              "type": "string"
+            },
+            "state": {
+              "enum": [
+                "open",
+                "closed"
+              ]
+            },
+            "created_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{6})?Z$"
+            },
+            "updated_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{6})?Z$"
+            },
+            "closed_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "base_sha": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "head_sha": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "merge_commit_sha": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "merged_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "workflow-run"
+        },
+        "metadata": {
+          "type": "object",
+          "required": [
+            "id",
+            "url",
+            "status",
+            "conclusion",
+            "head_sha",
+            "run_attempt",
+            "created_at",
+            "updated_at"
+          ],
+          "properties": {
+            "id": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "url": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "queued",
+                "in_progress",
+                "completed",
+                "waiting",
+                "requested",
+                "pending"
+              ]
+            },
+            "conclusion": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "success",
+                    "failure",
+                    "neutral",
+                    "cancelled",
+                    "skipped",
+                    "timed_out",
+                    "action_required",
+                    "stale",
+                    "startup_failure"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "head_sha": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "run_attempt": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "created_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{6})?Z$"
+            },
+            "updated_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{6})?Z$"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

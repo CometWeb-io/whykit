@@ -104,6 +104,34 @@ controls responses from this server.
 See the [official Codex MCP configuration guide](https://learn.chatgpt.com/docs/extend/mcp)
 for configuration locations, CLI setup and tool controls.
 
+### What the configuration smoke verifies
+
+The regression suite reads the JSON and Codex TOML examples above, replaces
+only the executable and vault paths, and launches the installed `whykit-mcp`
+entrypoint from outside the source checkout. It checks server discovery,
+read-only tool annotations, a query against the v1 JSON schema, text/structured
+result parity, the two configured sensitivity ceilings and unchanged vault
+bytes. The vault path includes spaces and non-ASCII characters; arguments are
+passed as an array, without shell quoting. Run it after the development install:
+
+```bash
+uv run python -m unittest discover -s tests -p test_mcp_runtime.py -k McpHostConfiguration -v
+```
+
+This verifies the launch and report boundary, not a host's configuration loader,
+tool approval UI or model behavior. It does not run Codex, Claude Code, Cursor
+or Spec Kit, and does not establish independent third-party integrations.
+Host settings such as Codex's `required` remain the host's responsibility.
+
+Keep three versions separate: the package version identifies the installed
+server, the MCP protocol version selects the wire handshake, and
+`contract_version: 1` identifies WhyKit's report shape. Consumers must tolerate
+additive report fields under the [JSON stability policy](automation.md#stability-policy).
+The [integration boundary](integrations.md#reading-a-vault-from-another-system)
+also applies to planning workflows such as Spec Kit: consume bounded reports
+and keep execution plans in the producer. A report or an approved decision
+does not grant permission to execute an action.
+
 ## Protocol versions
 
 The server speaks both MCP protocol eras, and the client's opening picks one

@@ -27,6 +27,8 @@
     },
     "type": {
       "enum": [
+        "outcome",
+        "claim",
         "strategy",
         "research",
         "framework",

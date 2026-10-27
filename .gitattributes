@@ -1,0 +1,2 @@
+# Frozen native fixture bytes include trailing spaces bound by approval hashes.
+tests/fixtures/hybrid-retrieval/vault/** whitespace=-blank-at-eol

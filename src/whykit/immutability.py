@@ -237,6 +237,11 @@ def _approval_event_matches(text: str, path: str, base_log: str | None, head_log
     if head is None or (base_log is not None and (base is None or not allowed_review_log_append(base_log, head_log))):
         return False
     old_rows = base[1] if base else []
+    return approval_event_matches_rows(text, path, old_rows, head[1][len(old_rows):])
+
+
+def approval_event_matches_rows(text: str, path: str, old_rows: list[list[str]], new_rows: list[list[str]]) -> bool:
+    """Match captured table cells with exactly the legacy local receipt semantics."""
     try:
         digest = approval_record_hash(text)
         created = dt.date.fromisoformat(_front_scalar(text, "created") or "")
@@ -245,7 +250,6 @@ def _approval_event_matches(text: str, path: str, base_log: str | None, head_log
     except ValueError:
         return False
     target = re.sub(r"(?i)\.md$", "", path)
-    new_rows = head[1][len(old_rows):]
 
     def matches(row: list[str]) -> bool:
         link = re.fullmatch(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]", row[1])

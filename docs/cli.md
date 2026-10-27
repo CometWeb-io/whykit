@@ -13,7 +13,7 @@ From a source checkout, prefix commands with `uv run` (see
 - `whykit --version` (or `-V`) prints the version; `whykit --help` lists the
   commands grouped by job: **author** (`init`, `adopt`, `new`, `review`,
   `evidence`), **check** (`lint`, `check`, `status`, `trace`, `history`,
-  `diff`, `snapshot`, `verify-snapshot`), **explore** (`query`, `context`,
+  `diff`, `snapshot`, `verify-snapshot`), **explore** (`query`, `retrieve`, `context`,
   `pack`, `graph`, `backlinks`, `impact`), **integrate** (`install-hooks`,
   `explorer-index`, `serve`, `completion`) and **maintain** (`policy`, `rules`,
   `doctor`, `recover`). The table below follows the same order.
@@ -63,7 +63,28 @@ From a source checkout, prefix commands with `uv run` (see
 | `diff` | Show what a change does to the decisions: new, superseded and archived decisions with their supersession chain, status and review-date moves, evidence added, retired or re-sourced, decisions citing changed evidence, and lint findings introduced or fixed. Reads both commits from Git without a checkout; `--format` picks `text`, `json`, `markdown` (a pull request comment) or `github` (workflow annotations) | `--base`, `--head`, `--today`, `--json`, `--format`, `--root` | [CI](ci.md#decision-diff-comment) |
 | `snapshot` | Write a deterministic fingerprint of governed content; `--format v2` (default) normalizes line endings and a byte-order mark, `v1` hashes raw bytes | `--output`, `--compact`, `--format`, `--today`, `--json`, `--root` | [How-to](guide.md#snapshot-and-detect-drift) |
 | `verify-snapshot <snapshot>` | Compare the vault with a snapshot | `--today`, `--json`, `--root` | [How-to](guide.md#snapshot-and-detect-drift) |
-| `query [text]` | Search and filter records | `--type`, `--status`, `--owner`, `--sensitivity`, `--source`, `--tag`, `--canonical-only`, `--limit`, `--json`, `--root` | [How-to](guide.md#hand-bounded-context-to-an-agent) |
+| `query [text]` | Search and filter records; optionally use BM25 text ranking | `--type`, `--status`, `--owner`, `--sensitivity`, `--source`, `--tag`, `--canonical-only`, `--limit`, `--ranking`, `--json`, `--root` | [Retrieval](retrieval.md) |
+| `retrieve <text>` | Rank current scoped documents using BM25 and typed dependency proximity; always JSON | `--root`, `--valid-on`, `--validity`, `--decision-role`, `--type`, `--status`, `--owner`, `--sensitivity`, `--max-sensitivity`, `--source`, `--tag`, `--canonical-only`, `--limit`, `--json` | [Retrieval](retrieval.md#hybrid-retrieval) |
+| `agent eval` | Score supplied JSONL responses offline; always JSON, without model calls | `--cases`, `--responses`, `--min-pass-rate`, `--json` | [Evaluation](agent-evaluation.md) |
+| `agent preflight` | Inspect explicit decision dependencies; optionally require current compiled context; always JSON, never execution authority | `--root`, `--proposal`, `--context`, `--max-sensitivity`, `--today`, `--json` | [Preflight](agent-preflight.md) |
+| `workspace status <manifest>` | Report private local counts across explicitly listed vaults; always JSON | `--today`, `--json` | [Workspace](workspace.md) |
+| `compile-context [targets…]` | Compile scoped decision premises, references and history within a total UTF-8 JSON byte budget | `--root`, `--query`, `--ranking`, `--max-docs`, `--max-bytes`, `--max-sensitivity`, `--today`, `--for`, `--json` | [Compiled context](compiled-context.md) |
+| `verify-context <report>` | Recompute a compiled context and refuse stale or altered inputs | `--root`, `--max-sensitivity`, `--today`, `--json` | [Compiled context](compiled-context.md) |
+| `deep-impact <target>` | Explain possible typed dependency paths with bounded traversal | `--root`, `--max-depth`, `--max-nodes`, `--max-sensitivity`, `--json` | [Dependency graph](dependency-graph.md) |
+| `knowledge-at` | Separate a pinned Git revision from explicit validity intervals | `--root`, `--recorded-revision`, `--valid-on`, `--target`, `--max-nodes`, `--max-sensitivity`, `--json` | [Temporal graph](temporal-graph.md) |
+| `import github` | Preview or capture a saved REST issue, PR or workflow-run object without fetching or granting authority | `--root`, `--input`, `--evidence`, `--kind`, `--repository`, `--recorded-at`, `--write`, `--expect-hash`, `--json` | [GitHub imports](github-import.md) |
+| `artifact capture` | Preview a local evidence capture; apply only its reviewed input hash | `--root`, `--evidence`, `--source-file`, `--recorded-at`, `--write`, `--expect-hash`, `--json` | [Claims and captures](claims.md) |
+| `claim create <statement>` | Preview a source-linked draft claim and persist the reviewed content | `--root`, `--title`, `--owner`, `--links`, `--sensitivity`, `--valid-from`, `--valid-until`, `--today`, `--write`, `--expect-hash`, `--json` | [Claims and captures](claims.md) |
+| `claim list` | List claims within an explicit local sensitivity ceiling | `--root`, `--max-sensitivity`, `--json` | [Claims and captures](claims.md) |
+| `claim show <C-NNN>` | Inspect one claim within an explicit local sensitivity ceiling | `--root`, `--max-sensitivity`, `--json` | [Claims and captures](claims.md) |
+| `claim verify <C-NNN>` | Check captured anchors and declared source freshness; no truth or identity assertion | `--root`, `--max-sensitivity`, `--today`, `--json` | [Claims and captures](claims.md) |
+| `outcome create` | Preview a declared metric and persist its unchanged reviewed input | `--root`, `--input`, `--owner`, `--title`, `--today`, `--write`, `--expect-hash`, `--json` | [Outcomes](outcomes.md) |
+| `outcome list` | List visible restricted outcome declarations | `--root`, `--max-sensitivity`, `--json` | [Outcomes](outcomes.md) |
+| `outcome show <O-NNN>` | Read one outcome declaration within the granted view | `--root`, `--max-sensitivity`, `--json` | [Outcomes](outcomes.md) |
+| `outcome verify <O-NNN>` | Check historical sample pins and anchors; no numeric or causal validation | `--root`, `--max-sensitivity`, `--today`, `--json` | [Outcomes](outcomes.md) |
+| `knowledge view` | Project five typed object kinds within an explicit sensitivity ceiling | `--root`, `--max-sensitivity`, `--json` | [Knowledge v2](knowledge-v2.md) |
+| `knowledge bundle` | Preview or create a private raw-byte migration bundle outside the vault | `--root`, `--private`, `--output`, `--write`, `--expect-hash`, `--json` | [Knowledge v2](knowledge-v2.md) |
+| `knowledge restore <bundle>` | Preview or restore validated source bytes into a new directory without Git history | `--into`, `--write`, `--expect-hash`, `--json` | [Knowledge v2](knowledge-v2.md) |
 | `context <target>` | Build a bounded context pack for one record; a note over the `--max-chars` budget starts with its body, not its front matter | `--max-chars`, `--no-body`, `--json`, `--root` | [How-to](guide.md#hand-bounded-context-to-an-agent) |
 | `pack [targets…]` | Build a budgeted multi-record bundle for an agent | `--query`, `--max-docs`, `--max-chars`, `--canonical-only`, `--format`, `--for`, `--json`, `--root` | [How-to](guide.md#hand-bounded-context-to-an-agent) |
 | `graph` | Export typed relations as JSON, DOT, Mermaid or Obsidian-style JSON | `--format`, `--canonical-only`, `--output`, `--json`, `--root` | [How-to](guide.md#hand-bounded-context-to-an-agent) |

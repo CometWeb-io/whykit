@@ -41,7 +41,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
-from .sensitivity import SENSITIVITY_LEVEL, _sensitivity_level, note_sensitivity_level, classified_evidence, evidence_register_notes
+from .sensitivity import note_sensitivity_label, SENSITIVITY_LEVEL, _sensitivity_level, note_sensitivity_level, classified_evidence, evidence_register_notes
 
 MAX_MCP_CONTEXT = 50_000
 MAX_MCP_RESULT_BYTES = 1_048_576
@@ -755,9 +755,14 @@ class VaultTools:
         active, retired, occurrences, per_row = classified_evidence(index)
         registers = evidence_register_notes(index)
         register_paths = {note.path for note in registers}
-        visible = index.subset(lambda note: note_sensitivity_level(note) <= ceiling and not (per_row and note.path in register_paths))
         active = {key: row for key, row in active.items() if _visible(row, self.policy)}
         retired = {key: row for key, row in retired.items() if _visible(row, self.policy)}
+        from .knowledge_visibility import visible_knowledge_index
+        evidence_ids = set(active) | set(retired)
+        visible = index.subset(lambda note: note_sensitivity_level(note) <= ceiling
+                               and not (per_row and note.path in register_paths))
+        visible.derived["evidence_register"] = (active, retired, [(key, line) for key, line in occurrences if key in evidence_ids])
+        visible = visible_knowledge_index(visible, evidence_ids)
         visible.derived["evidence_register"] = (active, retired, [(key, line) for key, line in occurrences if key in active or key in retired])
         visible.derived["register_visible"] = not registers or (len(registers) == 1 and note_sensitivity_level(registers[0]) <= ceiling)
         visible.derived["full_index"] = index
@@ -931,7 +936,7 @@ class VaultTools:
             state = str(front.get("status") or "")
             if state:
                 document_states[state] = document_states.get(state, 0) + 1
-            label = str(front.get("sensitivity") or "")
+            label = note_sensitivity_label(note)
             if label:
                 sensitivity_counts[label] = sensitivity_counts.get(label, 0) + 1
             if is_decision_record(front):
