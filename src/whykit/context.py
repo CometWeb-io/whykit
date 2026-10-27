@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .io import consistent_read
+from .sensitivity import scoped_report
 
 import argparse
 import json
@@ -79,6 +80,7 @@ def _budgeted(note: Note, max_chars: int) -> tuple[str, bool]:
 
 
 @consistent_read
+@scoped_report
 @path_cache()
 def build_context(
     root: Path,

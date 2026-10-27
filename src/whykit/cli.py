@@ -713,19 +713,22 @@ def _git_hooks_location(vault: Path) -> tuple[Path, str] | None:
     worktree (where `.git` is a file), and `core.hooksPath` may move the hooks,
     so ask Git instead of assuming `<vault>/.git/hooks`.
     """
+    from .immutability import GitScopeError, _git_prefix, git
+
     if not shutil.which("git"):
         return None
-    result = subprocess.run(
-        ["git", "-C", str(vault), "rev-parse", "--git-path", "hooks", "--show-prefix"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    lines = result.stdout.splitlines()
-    if result.returncode != 0 or not lines:
+    try:
+        prefix = _git_prefix(str(vault))
+        output = git("rev-parse", "--git-path", "hooks", root=str(vault))
+    except GitScopeError:
+        raise OSError(errno.EINVAL, "Git vault scope could not be verified; ambiguous paths are refused") from None
+    except subprocess.CalledProcessError:
         return None
-    hooks = Path(lines[0])
+    if not output.endswith("\n") or not output[:-1] or any(char in output[:-1] for char in "\r\n\0"):
+        raise OSError(errno.EINVAL, "Git hook location could not be verified; ambiguous paths are refused")
+    hooks = Path(output[:-1])
     if not hooks.is_absolute():
         hooks = vault / hooks
-    prefix = lines[1].strip() if len(lines) > 1 else ""
     return hooks, prefix
 
 
@@ -1128,6 +1131,8 @@ class _TopParser(_Parser):
         return super().parse_known_args(_hoist_root(raw, set(_subcommand_helps(self))), namespace)
 
     def format_help(self) -> str:
+        if self.prog != "whykit":
+            return super().format_help()
         formatter = self._get_formatter()
         formatter.add_usage(self.usage, self._actions, self._mutually_exclusive_groups)
         formatter.add_text(self.description)

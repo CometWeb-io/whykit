@@ -6,6 +6,7 @@ documents can also cite evidence and decisions can supersede one another.
 from __future__ import annotations
 
 from .io import consistent_read
+from .sensitivity import scoped_report
 
 import argparse
 import re
@@ -51,6 +52,7 @@ def wikilink_resolutions(note, vault_index: VaultIndex) -> Iterator[tuple[str, P
 
 
 @consistent_read
+@scoped_report
 @path_cache()
 def build_graph(
     root: Path,

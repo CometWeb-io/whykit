@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .io import consistent_read
+from .sensitivity import scoped_report
 
 import argparse
 import json
@@ -107,12 +108,14 @@ def _wikilink_view(root: Path, vault_index: VaultIndex) -> _WikilinkView:
     rare full-graph fallback reads the register: a register rewritten under a
     reused index is re-read.
     """
-    register = root / "00-context" / "evidence-register.md"
-    try:
-        stat = register.stat()
-        stamp: tuple[int, int] | None = (stat.st_mtime_ns, stat.st_size)
-    except OSError:
-        stamp = None
+    stamp: tuple[int, int] | None = None
+    if not vault_index.confined:
+        register = root / "00-context" / "evidence-register.md"
+        try:
+            stat = register.stat()
+            stamp = (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            pass
     key = ("impact.wikilinks", os.fspath(root), stamp)
     cached = vault_index.derived.get(key)
     if cached is None:
@@ -121,6 +124,7 @@ def _wikilink_view(root: Path, vault_index: VaultIndex) -> _WikilinkView:
 
 
 @consistent_read
+@scoped_report
 @path_cache()
 def analyze_impact(root: Path, target: str, *, vault: VaultIndex | None = None) -> dict:
     vault_index = vault or VaultIndex.load(root)

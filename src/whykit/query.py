@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .io import consistent_read
+from .sensitivity import scoped_report
 
 import argparse
 import json
@@ -41,6 +42,7 @@ def _summary(index: VaultIndex, note) -> dict:
 
 
 @consistent_read
+@scoped_report
 @path_cache()
 def query_vault(
     root: Path,

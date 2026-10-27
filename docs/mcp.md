@@ -480,3 +480,17 @@ Ambiguity between two *visible* records is still reported as `ambiguous`.
 
 The SDK is an optional extra (`mcp>=2.2,<2.4`). See the [security policy](../SECURITY.md)
 before connecting an MCP host to a real vault.
+
+## Global decision and review logs
+
+MCP withholds the raw global decision-log and review-log documents at every
+sensitivity ceiling. Native writes can copy a restricted record's title or
+review metadata into these lower-labeled tables. Their raw contents must not
+be available through record reads, resources, query matching, context or packs.
+Canonical paths and their case/`.MD` variants receive the same treatment.
+A denied log uses the ordinary unavailable-record behavior.
+
+Individual permitted records and bounded reports remain available. Inspect the
+actual global logs locally in a trusted editor when needed; raising the MCP
+ceiling does not re-enable their raw table reads. This restriction does not
+authenticate users or turn sensitivity labels into access control.

@@ -216,3 +216,33 @@ vault content. CI must choose REF from a trusted source and fetch its commit;
 unreadable or malformed base policy fails closed. A supplied ref is not trusted
 merely because the command accepts it. History compares the selected Git trees
 or index, not uncommitted files. Without a base, optional history is unchecked.
+
+### Derived global logs over MCP
+
+A global decision/review table can contain metadata copied from a restricted
+record even when the table itself is public. MCP therefore withholds both raw
+global logs from note/resource, query, context and pack surfaces at all ceilings,
+including case/`.MD` path aliases. A whole-table label does not authorize each
+row's copied contents. Permitted individual records remain readable; this is a
+data exposure boundary, not organizational identity or tenant authorization.
+
+### Captured scopes in Python reports
+
+Context, pack, graph, impact, trace, query, backlinks and status reports respect
+a supplied confined `VaultIndex` and its captured evidence-row grant. An explicit
+empty row grant stays empty. Without an explicit grant, a nested report may
+inherit its active parent view or classify a register already in the supplied
+index; it does not reopen an omitted register on disk. Nested views may narrow
+their parent's rows, but cannot refresh or expand the parent's captured payloads.
+
+`build_pack(allowed_sensitivities={"public"})` filters notes and evidence before
+building contexts and spending the body budget. Scoped reports withhold mixed
+or partially granted register bodies and raw global decision/review logs.
+Lint retains explicitly supplied synthetic notes while using the same row view.
+Unscoped calls retain full-vault behavior; the CLI pack command does not select
+a public ceiling automatically.
+
+These are captured read views, not identity or tenant authorization. Initial
+discovery may parse the source vault before classification. The writer lock
+coordinates cooperating writers; it does not make external editors atomic or
+turn a captured view into a live refresh of later disk changes.

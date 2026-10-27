@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .io import consistent_read
+from .sensitivity import scoped_report
 
 import argparse
 import json
@@ -55,6 +56,7 @@ def _normalize_target(root: Path, target: str, vault: VaultIndex) -> tuple[str, 
 
 
 @consistent_read
+@scoped_report
 @path_cache()
 def build_backlinks(root: Path, target: str, *, vault: VaultIndex | None = None) -> dict:
     root = root.resolve()
