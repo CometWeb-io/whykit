@@ -5,9 +5,9 @@ by corrected evidence. It finishes with an Explorer data export that keeps the
 review warning and excludes a restricted note and evidence row. Every command
 runs in the test suite. All names, reports and URLs below are fictional.
 
-You need Git, Python 3 and `whykit` on your PATH. From a source checkout use
-`uv tool install --from /path/to/whykit whykit`, or replace each `whykit` command
-with `uv run --project /path/to/whykit whykit`.
+You need Git, Python 3.11+ and `whykit` on your PATH. Install the published CLI
+with `uv tool install whykit` (uv 0.13.4+). From a source checkout, replace
+each `whykit` command with `uv run --project /path/to/whykit whykit`.
 
 ## 1. Create an isolated ledger and register the source
 

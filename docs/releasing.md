@@ -68,8 +68,9 @@ which fixes its certifi and Sigstore runtime. These floors follow the
 2. **Open a release pull request** that changes only release bookkeeping:
    - set `__version__` in `src/whykit/__init__.py` to the final version, with
      no `.dev` suffix;
-   - update the version and status line in [`README.md`](../README.md); keep
-     the source-checkout install instructions until step 9 succeeds;
+   - update the source version in [`README.md`](../README.md); keep the PyPI
+     install command unversioned until step 9 verifies the new version. Do not
+     replace confirmed package availability with a pre-publication notice;
    - move the `[Unreleased]` entries into a dated section using the
      [changelog template](#changelog-section-template) below.
 3. **Rehearse locally from a clean checkout** of the release branch:
@@ -138,8 +139,8 @@ which fixes its certifi and Sigstore runtime. These floors follow the
     attach it to the GitHub Release, if you create one.
 11. **Open the next development cycle** in a follow-up pull request: bump
     `__version__` to the next `.dev0`, start an empty `[Unreleased]` section,
-    and switch install instructions to the package index only after step 9
-    passed.
+    and keep the PyPI installation instructions current. Never recommend an
+    unpublished version in an index-install command.
 
 ## If something goes wrong
 

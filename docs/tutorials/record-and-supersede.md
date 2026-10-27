@@ -5,10 +5,10 @@ evidence behind it, change your mind when new evidence arrives, and watch the
 history check refuse a quiet rewrite. Every command on this page runs in the
 test suite, so the output you see is what the current version prints.
 
-You need Git and a `whykit` command on your `PATH`. From a WhyKit checkout,
-`uv tool install --from /path/to/whykit whykit` installs one. If you prefer not
-to install anything, run each command as `uv run --project /path/to/whykit
-whykit …` instead. The example company, sources and URLs are fictional.
+You need Git and a `whykit` command on your `PATH`. Install it from PyPI with
+`uv tool install whykit` (Python 3.11+, uv 0.13.4+). From a source checkout,
+you can run each command as `uv run --project /path/to/whykit whykit …`
+instead. The example company, sources and URLs are fictional.
 
 ## 1. Create a vault
 

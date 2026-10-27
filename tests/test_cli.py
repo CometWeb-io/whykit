@@ -313,8 +313,8 @@ class ContractTests(unittest.TestCase):
         self.assertNotIn("Obsidian vault + CI ledger", readme)
         self.assertNotIn("# ![CI]", readme)
         self.assertIn("https://docs.astral.sh/uv/getting-started/installation/", readme)
-        self.assertIn("init ../my-ledger", readme)
-        self.assertIn("lint --root ../my-ledger", readme)
+        self.assertIn("whykit init my-ledger", readme)
+        self.assertIn("whykit lint --root my-ledger", readme)
         # The adopt walk-through moved to the how-to guide; the README links to it.
         guide = (ROOT / "docs" / "guide.md").read_text(encoding="utf-8")
         self.assertIn("adopt ../old-docs --into ../my-ledger --profile obsidian-loose", guide)
@@ -360,8 +360,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn("uv run whykit init ../my-ledger", guide)
         self.assertIn("uv run whykit lint --root ../my-ledger", guide)
         self.assertNotIn("uv tool install --editable .", guide)
-        self.assertIn("not on PyPI yet", guide)
-        self.assertIn("do not run", guide.casefold())
+        self.assertIn("uv tool install whykit", guide)
         self.assertIn("--workstream notes", guide)
         with tempfile.TemporaryDirectory() as td:
             minimal_vault = Path(td) / "minimal"
@@ -382,13 +381,16 @@ class ContractTests(unittest.TestCase):
         self.assertNotIn("[![CI]", guide)
         self.assertIn("Obsidian is an optional editor", guide)
 
-    def test_unreleased_package_is_not_recommended_from_public_package_index(self) -> None:
+    def test_published_package_installation_has_no_prepublication_notice(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         scripts_readme = (ROOT / "scripts" / "README.md").read_text(encoding="utf-8")
         shim = (ROOT / "scripts" / "whykit.py").read_text(encoding="utf-8")
-        self.assertIn("no public PyPI release", readme)
-        self.assertIn("not published to PyPI yet", scripts_readme)
-        self.assertIn("Do not run `uv tool install whykit`", scripts_readme)
+        self.assertIn("uv tool install whykit", readme)
+        self.assertIn("uv tool install whykit", scripts_readme)
+        for path in ("README.md", "scripts/README.md", "docs/guide.md", "docs/mcp.md", "docs/troubleshooting.md"):
+            with self.subTest(path=path):
+                text = " ".join((ROOT / path).read_text(encoding="utf-8").split()).casefold()
+                self.assertNotRegex(text, r"(?:not (?:on|published to) pypi yet|no public pypi release|not yet\. it is a source preview)")
         self.assertIn("current end-user installation path", shim)
         self.assertNotIn("pipx install whykit is the supported route", shim)
 

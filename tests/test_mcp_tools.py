@@ -646,7 +646,7 @@ class MissingExtraTests(VaultToolsTestCase):
         self.assertEqual(caught.exception.code, 2)
         message = stderr.getvalue()
         self.assertIn("uv sync --extra mcp", message)
-        self.assertIn("git+https://github.com/CometWeb-io/whykit", message)
+        self.assertIn("uv tool install --upgrade 'whykit[mcp]'", message)
         self.assertNotIn("pip install 'whykit[mcp]'", message)
 
 

@@ -12,38 +12,40 @@ what is known, what was decided, and what still needs checking.
 
 **Python 3.11+ · No runtime dependencies · Apache-2.0**
 
-**Status:** `0.3.1` release preparation. No GitHub Release and no public PyPI release yet. Install from a source checkout until publication is verified. This checkout is not a tagged release.
+**Status:** public alpha, available on [PyPI](https://pypi.org/project/whykit/). Source version: `0.3.2`.
 
 [![CI](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml/badge.svg)](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml)
 
 ## 60-second quickstart
 
-You need Python 3.11+ and [`uv`](https://docs.astral.sh/uv/getting-started/installation/).
-WhyKit is not on PyPI yet, so run it from a checkout. The vault goes *next to*
-the checkout, never inside it.
+You need Python 3.11+ and [`uv` 0.13.4+](https://docs.astral.sh/uv/getting-started/installation/).
+Install the latest published release, then create a vault in your own working
+directory. No source checkout is needed.
 
 <!-- quickstart:start -->
 ```bash
-git clone https://github.com/CometWeb-io/whykit.git
-cd whykit
-uv sync --locked
+uv tool install whykit
 
 # 1. Create a vault.
-uv run whykit init ../my-ledger
+whykit init my-ledger
 
 # 2. Register a source, then a decision that cites it.
-uv run whykit new --root ../my-ledger evidence \
+whykit new --root my-ledger evidence \
   --source "Support ticket export, Q3" --type dataset \
   --location "https://example.com/exports/q3-tickets.csv" \
   --claims "Most onboarding tickets mention SSO"
-uv run whykit new --root ../my-ledger decision "Ship SSO before audit logs" \
+whykit new --root my-ledger decision "Ship SSO before audit logs" \
   --owner Platform --status draft --source E-001
 
 # 3. Check the vault and see what is due for review.
-uv run whykit lint --root ../my-ledger
-uv run whykit review --root ../my-ledger list --due-days 120
+whykit lint --root my-ledger
+whykit review --root my-ledger list --due-days 120
 ```
 <!-- quickstart:end -->
+
+If `whykit` is not found, run `uv tool update-shell` and open a new terminal.
+Use `uv tool upgrade whykit` to update an existing installation. For development
+or the optional Explorer, see [running from a checkout](docs/guide.md#run-whykit-from-a-checkout).
 
 What you should see:
 
