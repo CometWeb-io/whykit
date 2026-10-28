@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "scripts" / "whykit.py"
 
 _CACHE_DIR: Path | None = None
-_TEMPLATES: dict[tuple[str, ...], tuple[Path, dt.date]] = {}
+_TEMPLATES: dict[tuple[tuple[str, ...], dt.date | None], tuple[Path, dt.date]] = {}
 
 
 def _cache_dir() -> Path:
@@ -30,22 +30,26 @@ def _cache_dir() -> Path:
     return _CACHE_DIR
 
 
-def fresh_vault(destination: Path, *flags: str) -> dt.date:
+def fresh_vault(destination: Path, *flags: str, today: dt.date | None = None) -> dt.date:
     """Create a vault at `destination` as `whykit init [flags]` would.
 
     Returns the day the template was stamped, so date assertions can bracket
     the wall clock instead of assuming the run never crosses midnight.
+    A supplied fixture date uses the real init stamper and its own cache entry.
     """
-    key = tuple(flags)
+    key = (tuple(flags), today)
     if key not in _TEMPLATES:
         template = _cache_dir() / f"vault-{len(_TEMPLATES)}"
-        stamped = dt.date.today()
+        stamped = today or dt.date.today()
         result = subprocess.run(
             [sys.executable, str(CLI), "init", *flags, str(template)],
             text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=60,
         )
         if result.returncode != 0:
             raise RuntimeError(f"whykit init {' '.join(flags)} failed: {result.stderr}")
+        if today is not None:
+            from whykit.cli import _stamp_vault_dates
+            _stamp_vault_dates(template, today=today)
         _TEMPLATES[key] = (template, stamped)
     template, stamped = _TEMPLATES[key]
     shutil.copytree(template, destination, symlinks=True)

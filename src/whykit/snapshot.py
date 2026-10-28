@@ -15,6 +15,7 @@ from .graph import build_graph
 from .io import atomic_write_text, safe_export_target
 from .lint import collect_markdown, find_vault_root, is_markdown_name, is_vault_root, load_note, rel, path_cache
 from .status import build_status
+from .sensitivity import note_sensitivity_label
 from .vault_index import VaultIndex
 from .console import emit_machine
 
@@ -86,7 +87,7 @@ def _file_entry(
             "type": str(note.front.get("type") or ""),
             "status": str(note.front.get("status") or ""),
             "owner": str(note.front.get("owner") or ""),
-            "sensitivity": str(note.front.get("sensitivity") or ""),
+            "sensitivity": note_sensitivity_label(note),
             "source_of_truth": note.front.get("source_of_truth") is True,
             "decision_id": str(note.front.get("decision_id") or "") or None,
             "review_by": str(note.front.get("review_by") or "") or None,

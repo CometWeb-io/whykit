@@ -1,0 +1,1 @@
+The deployment rollback rehearsal retained the previous release. A failed health gate switched traffic back to that release.

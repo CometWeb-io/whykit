@@ -31,6 +31,18 @@ This installs the published release, not the code in this checkout. For local
 development use the checkout commands above; for a first vault follow the
 [README quickstart](../README.md#60-second-quickstart).
 
+## `agent_eval.py`
+
+Scores supplied JSONL responses against a citation/abstention rubric, offline
+and without model calls. See [Offline agent evaluation](../docs/agent-evaluation.md)
+for the checkout command, format, exit codes and limits. Public samples are
+synthetic scorer checks, not real-model benchmark results.
+
+## `agent_preflight.py`
+
+Read-only structural checks of explicitly declared decision dependencies; never
+authorizes execution. See [structural agent preflight](../docs/agent-preflight.md).
+
 ## `bench.py`
 
 Times the read commands on a vault, each in a fresh interpreter, and can record

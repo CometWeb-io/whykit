@@ -338,7 +338,7 @@ class ReferencePageTests(unittest.TestCase):
         documented: dict[str, set[str]] = {}
         for row in _table_rows(table):
             command = re.sub(r"\s*[<\[].*$", "", row[0].strip("`"))
-            documented[command] = set(re.findall(r"`(--[a-z-]+)`", row[2]))
+            documented[command] = set(re.findall(r"`(--[a-z][a-z0-9-]*)`", row[2]))
         leaves = _leaf_commands(build_parser())
         self.assertEqual(set(documented), set(leaves))
         for command, parser in leaves.items():

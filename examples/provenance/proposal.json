@@ -1,0 +1,7 @@
+{
+  "proposal_id": "synthetic-format-review",
+  "decision_ids": [
+    "D-003"
+  ],
+  "summary": "Inspect the pinned claim workflow; no execution authorization."
+}

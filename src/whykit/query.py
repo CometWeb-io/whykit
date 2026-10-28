@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .io import consistent_read
-from .sensitivity import scoped_report
+from .sensitivity import note_sensitivity_label, scoped_report
 
 import argparse
 import json
@@ -32,7 +32,7 @@ def _summary(index: VaultIndex, note) -> dict:
         "type": str(note.front.get("type") or ""),
         "status": str(note.front.get("status") or ""),
         "owner": str(note.front.get("owner") or ""),
-        "sensitivity": str(note.front.get("sensitivity") or ""),
+        "sensitivity": note_sensitivity_label(note),
         "source_of_truth": note.front.get("source_of_truth") is True,
         "decision_id": str(note.front.get("decision_id") or "") or None,
         "review_by": str(note.front.get("review_by") or "") or None,
@@ -58,8 +58,24 @@ def query_vault(
     canonical_only: bool = False,
     limit: int = 100,
     vault: VaultIndex | None = None,
+    ranking: str = "substring",
 ) -> dict:
     index = vault or VaultIndex.load(root)
+    if ranking not in {"substring", "bm25"}:
+        raise ValueError("unsupported ranking")
+    if ranking == "bm25":
+        from .retrieval import retrieve_bm25
+        report = query_vault(root, doc_type=doc_type, status=status, owner=owner,
+                             sensitivity=sensitivity, allowed_sensitivities=allowed_sensitivities,
+                             source_id=source_id, tag=tag, canonical_only=canonical_only,
+                             limit=0, vault=index)
+        ranked = retrieve_bm25(root, text or "", doc_type=doc_type, status=status, owner=owner,
+                                sensitivity=sensitivity, allowed_sensitivities=allowed_sensitivities,
+                                source_id=source_id, tag=tag, canonical_only=canonical_only,
+                                limit=len(index.notes), vault=index)
+        report["query"].update(text=text, ranking=ranking, limit=limit)
+        report.update(total=len(ranked), returned=len(ranked[:max(0, limit)]), results=ranked[:max(0, limit)])
+        return report
     needle = (text or "").casefold().strip()
     owner_needle = (owner or "").casefold().strip()
     tag_needle = (tag or "").casefold().strip()
@@ -144,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tag")
     parser.add_argument("--canonical-only", action="store_true")
     parser.add_argument("--limit", type=int, default=100)
+    parser.add_argument("--ranking", choices=("substring", "bm25"), default="substring")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     if args.limit < 0:
@@ -164,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         tag=args.tag,
         canonical_only=args.canonical_only,
         limit=args.limit,
+        ranking=args.ranking,
     )
     if args.json:
         emit_machine(json.dumps(report, ensure_ascii=False, indent=2))

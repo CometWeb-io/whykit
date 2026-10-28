@@ -7,6 +7,101 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+### Added
+
+- Optional `provenance.whykit_impact` declarations describe typed dependencies
+  on evidence, claims, decisions and implementation notes. Declarations use a
+  namespaced JSON scalar; existing records require no migration or rewrite.
+- `impact.invalid` starts as a warning for malformed owned declarations.
+  Implementation cards and dependent native records receive a restricted
+  effective floor and a closed dependency view before graph construction or retrieval.
+
+- Opt-in hybrid document retrieval combines BM25 with bounded typed-graph
+  proximity and explicit time/status/scope filters. Results expose score
+  components, paths, uncertainty and construction/traversal truncation; the
+  compiler can bind these explanations into its full byte budget. Existing
+  substring/BM25 defaults remain unchanged.
+
+- Compiled contexts distinguish locally applicable decision premises from
+  explicit references, with declared validity and bounded visible review and
+  supersession history. Query eligibility is applied before ranking.
+
+- Preview and import saved GitHub REST issue, pull-request and workflow-run
+  payloads into an existing restricted E-ID. Exact raw capture, observation
+  and immutable import receipt share a transaction. Exported metadata remains
+  untrusted attribution; no provider fetching or execution is performed.
+
+- Optional restricted Outcome declarations distinguish exact decimal baselines,
+  targets and observations, with content-pinned historical source checks.
+  Numeric agreement, causal effect and execution authority remain unchecked.
+- A scoped five-kind knowledge v2 view and explicit private migration bundles
+  preserve source bytes, directory inventory and extra fields. Restore uses a
+  new directory and transfers no Git history or trusted approval baseline.
+  Safe bundle export/restore currently require POSIX descriptor support.
+
+- Offline answer evaluation, structural preflight, explicit local multi-vault
+  status and opt-in BM25 through the installed CLI.
+- Byte-bounded compiled context with scoped input manifests and stale-report
+  verification; preflight can require current context covering every declared
+  decision. Results never grant execution authority.
+- Typed transitive dependency explanations and pinned Git snapshots with a
+  separate, explicitly declared validity interval.
+- Immutable local source captures and canonical Markdown claims with exact-byte
+  anchors. New decision approvals can pin the reviewed raw claim hashes;
+  preflight checks those pins, intervals and indirect evidence lifecycle.
+- Transactional source-observation ledgers preserve capture deduplication and
+  A → B → A history. Claim verification and preflight distinguish matching old
+  anchors from changed, unknown, ambiguous or future observations; compiled
+  context binds permitted observation/capture hashes and warns about drift.
+
+### Changed
+
+- Existing vaults and JSON v1 commands retain their current format. The optional
+  `claim` note type lives under `00-context/claims/`; captures use
+  `00-context/artifacts/`. Optional `outcome` notes live under
+  `00-context/outcomes/`. Older clients do not understand these new note types.
+  No command migrates or rewrites existing approved records. Add claim pins only
+  to a new draft before approval, or create a superseding decision.
+- Quote-containing claim notes have a restricted sensitivity floor, including
+  metadata downgrades. Sensitivity remains a filter, not authentication or ACL.
+  See the synthetic [format decision](examples/provenance/README.md) and
+  [claim format](docs/claims.md) before opting in.
+- Native claims without an observation ledger have unknown source freshness.
+  Review and recapture the source through preview/apply to record an observation;
+  old captures, claim pins and approval receipts are not migrated or rewritten.
+  `claim verify` now requires current observations for success and accepts
+  `--today` as a whole UTC calendar-day cutoff, rather than an instant clock.
+
+### Fixed
+
+- Accept stable capture and claim files on Windows while retaining file identity
+  checks and detecting changes within both path and descriptor metadata.
+
+- Reuse the captured graph constructor after hybrid permission and eligibility
+  admission, retaining full dependency closure and existing graph output.
+
+- Avoid redundant key normalization and empty register projections during scoped
+  graph work; preserve strict POSIX single- and double-slash path anchors.
+
+- Backdated confirmations cannot clear newer-dated review requests in compiled
+  premise selection or standalone preflight.
+
+- Standalone preflight respects explicit future, expired and invalid decision
+  validity, using the same interval semantics as temporal queries.
+
+- Withhold mixed decision/review-log raw bodies and whole-file hashes from compiled
+  context; bind visible row history without hidden-row ranking/count leakage.
+- Preflight compiled-context coverage requires an admitted decision premise;
+  an explicit future, expired or nonbinding reference cannot satisfy it.
+
+- Refuse FIFO, device and symlink inputs before blocking reads, including mutation
+  locks, evaluator inputs and proposal manifests; validate the opened descriptor.
+- Keep unreadable classifications out of BM25 statistics and context manifests;
+  refresh granted paths without expanding the grant and withhold claim quotes
+  whose source IDs are outside its scope.
+- Correct JSON Schema test equality for booleans/numbers and numeric, array and
+  string upper bounds; align the security documentation with current exports.
+
 ## [0.3.3] - 2026-10-27
 
 ### Fixed

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "$id": "https://cometweb.io/schemas/whykit/provenance-write.schema.json",
+  "title": "WhyKit reviewed provenance write",
+  "required": [
+    "contract_version",
+    "format",
+    "applied",
+    "expected_sha256",
+    "path"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "format": {
+      "enum": [
+        "whykit.artifact-capture/v1",
+        "whykit.claim-create/v1"
+      ]
+    },
+    "applied": {
+      "type": "boolean"
+    },
+    "expected_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "path": {
+      "type": "string"
+    },
+    "evidence_id": {
+      "type": "string"
+    },
+    "source_version": {
+      "type": "string"
+    },
+    "size_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "sensitivity": {
+      "enum": [
+        "public",
+        "internal",
+        "confidential",
+        "restricted"
+      ]
+    },
+    "recorded_at": {
+      "type": "string"
+    },
+    "already_exists": {
+      "type": "boolean"
+    },
+    "observation_path": {
+      "type": "string"
+    },
+    "observation_recorded_at": {
+      "type": "string"
+    },
+    "observation_added": {
+      "type": "boolean"
+    },
+    "claim_id": {
+      "type": "string"
+    },
+    "record": {
+      "type": "object"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

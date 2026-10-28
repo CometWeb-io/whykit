@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/claim-record.schema.json",
+  "title": "WhyKit canonical Markdown claim front matter",
+  "description": "Additive record at 00-context/claims/c-NNN.md. The body contains exactly one whykit-claim fenced JSON payload using claim-provenance.schema.json. Runtime validates payload identity, source_ids, real ordered dates and bounded size. Status draft and restricted classification confer no approval or authenticated human assessment.",
+  "type": "object",
+  "required": ["title", "type", "status", "owner", "created", "last_updated", "source_of_truth", "sensitivity", "claim_id", "source_ids"],
+  "properties": {
+    "title": {"type": "string", "pattern": "\\S"},
+    "type": {"const": "claim"},
+    "status": {"const": "draft"},
+    "owner": {"type": "string", "pattern": "\\S"},
+    "created": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(?![\\s\\S])"},
+    "last_updated": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(?![\\s\\S])"},
+    "source_of_truth": {"const": false},
+    "sensitivity": {"const": "restricted"},
+    "claim_id": {"type": "string", "maxLength": 18, "pattern": "^C-(?:00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})(?![\\s\\S])"},
+    "source_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^E-[0-9]{3,}(?![\\s\\S])"}},
+    "valid_from": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(?![\\s\\S])"},
+    "valid_until": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(?![\\s\\S])"}
+  },
+  "additionalProperties": false
+}

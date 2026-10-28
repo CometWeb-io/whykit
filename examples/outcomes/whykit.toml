@@ -1,0 +1,5 @@
+[defaults]
+require_hub_links = true
+
+[evidence_access_age_days]
+fixture = 90

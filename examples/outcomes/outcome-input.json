@@ -1,0 +1,31 @@
+{
+  "decision_id": "D-003",
+  "metric": {
+    "name": "Reviewed fixture items",
+    "unit": "items",
+    "definition": "Declared completed checks on two fixture dates; no causal attribution to the decision."
+  },
+  "baseline": {
+    "value": "1.000",
+    "as_of": "2026-09-10",
+    "claim": {
+      "claim_id": "C-002",
+      "sha256": "850ff5b4c66d8e1c59d76ae91323e79d13000c5a24af4cac6c2749a4d9e35e57"
+    }
+  },
+  "target": {
+    "value": "3.000",
+    "by": "2026-10-01"
+  },
+  "observed": {
+    "value": "2.000",
+    "as_of": "2026-09-17",
+    "claim": {
+      "claim_id": "C-002",
+      "sha256": "850ff5b4c66d8e1c59d76ae91323e79d13000c5a24af4cac6c2749a4d9e35e57"
+    }
+  },
+  "implementation_refs": [
+    "https://example.com/pull/1"
+  ]
+}

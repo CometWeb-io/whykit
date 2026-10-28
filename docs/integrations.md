@@ -47,6 +47,79 @@ Unknown keys inside `provenance` are allowed and ignored by the linter, so a
 producer can extend it without a format change. See
 [`schemas/provenance.schema.json`](../schemas/provenance.schema.json).
 
+## Optional claim provenance payload
+
+A producer can keep finer evidence links in its own payload, referenced by
+`provenance.payload_ref`, using
+[`claim-provenance.schema.json`](../schemas/claim-provenance.schema.json).
+This optional format is independent of vault front matter and the CLI's v1
+reports. No migration, new configuration or C-record directory is required.
+The CLI, linter, query, context and approval paths do not load or enforce it.
+Markdown remains the canonical human-readable record; do not replace its
+rationale with a payload reference.
+
+The installed Python module provides two offline checks:
+
+```python
+import hashlib
+from whykit.claim_provenance import validate_claim, verify_anchor
+
+source = b"Cache works.\r\n"
+payload = {
+    "format": "whykit.claim-provenance/v1",
+    "claim_id": "C-001",
+    "statement": "The captured source says the cache works.",
+    "links": [{
+        "evidence_id": "E-001",
+        "source_version": "sha256:" + hashlib.sha256(source).hexdigest(),
+        "location": {"start_byte": 0, "end_byte": 12, "quote": "Cache works."},
+        "assessment": {"kind": "model", "by": "example-model/v1", "relation": "supports"},
+    }],
+}
+validate_claim(payload)  # Raises ValueError on malformed input; does not mutate it.
+assert verify_anchor(payload["links"][0], source) == "matched"
+```
+
+`links` is required. An explicit `[]` means no evidence link has been supplied;
+it does not mean the statement is false. Each link requires an E-ID, source
+version, location and assessment. Unknown keys are rejected. The JSON Schema
+checks structure; `validate_claim` additionally checks ordered offsets, UTF-8
+encoding and quote byte length. Successful validation alone does not check a
+source or confirm that an E-ID exists in a vault.
+
+`source_version` is `sha256:` plus 64 lowercase hex digits over the **original
+bytes**. BOMs, CRLFs and Unicode sequences are not normalized. Locations use
+zero-based byte offsets with an exclusive end; `quote` is UTF-8 text and must
+occupy exactly that range. This atom handles textual fragments, not PDF page
+coordinates or other binary selectors. Updating a source requires a fresh hash
+and anchor, never an inferred reattachment.
+
+`verify_anchor` validates the link first, then reports:
+
+| Result | Meaning |
+|---|---|
+| `source_unavailable` | The caller supplied `None`; no source bytes were checked |
+| `version_mismatch` | Supplied bytes differ from the declared hash |
+| `location_mismatch` | The hash matches, but the range or quoted bytes do not |
+| `matched` | Exact quoted bytes occur at the declared range in this version |
+
+The caller resolves the E-ID and enforces access before supplying bytes. This
+module performs no file, network or vault reads and does not authenticate that
+the bytes came from the claimed source. These results never declare semantic
+support, contradiction, factual truth or execution permission.
+
+`assessment.kind` distinguishes a producer-declared `model` assessment from a
+producer-declared `human` assessment. `by` is attribution text, not verified
+identity. `relation` records that assessor's `supports` or `contradicts` claim;
+neither relation is computed from a byte match. Multiple assessments may
+coexist, including opposing assessments of the same fragment, without producing
+an automatic aggregate verdict. A `human` label grants no approval.
+
+This payload has no fact-validity interval, recorded-time history or point-in-time
+query semantics. Dates on an E row or a review must not be inferred as those
+times. Temporal reconstruction and integration with reviewed vault records need
+separate contracts; this format does not deliver a temporal knowledge graph.
+
 ## What does not belong here
 
 **Mutable validity overlays.** Several decision systems keep a live field —
@@ -149,3 +222,12 @@ being guessed.
 
 For full content, Markdown remains canonical. These reports are derived views,
 not a second database.
+
+## Outcomes and five-kind interchange
+
+The optional [Outcome format](outcomes.md) records declared exact-decimal
+baselines, targets and historical observations without causal conclusions.
+[Knowledge v2](knowledge-v2.md) projects Claim, EvidenceArtifact, Decision,
+ReviewEvent and Outcome while preserving existing source readers. Explicit
+private bundle/restore preserves raw files but transfers no Git history or
+trusted approval baseline; native safe migration currently requires POSIX.

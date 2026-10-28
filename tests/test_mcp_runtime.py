@@ -3,8 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
+import shutil
 import sys
+import sysconfig
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -18,6 +23,69 @@ except ModuleNotFoundError as exc:  # The core matrix intentionally omits the ex
     if exc.name != "mcp":
         raise
     Client = None
+
+
+def _documented_stdio_configs() -> dict[str, dict]:
+    doc = (ROOT / "docs" / "mcp.md").read_text(encoding="utf-8")
+    json_block = re.search(r'```json\n(.*?"mcpServers".*?)\n```', doc, re.S)
+    toml_block = re.search(r'```toml\n(\[mcp_servers\.whykit\].*?)\n```', doc, re.S)
+    assert json_block and toml_block, "keep both documented stdio configuration examples"
+    return {
+        "json": json.loads(json_block.group(1))["mcpServers"]["whykit"],
+        "codex-toml": tomllib.loads(toml_block.group(1))["mcp_servers"]["whykit"],
+    }
+
+
+class McpHostConfigurationTests(unittest.TestCase):
+    def test_documented_launch_arguments_match_the_published_cli(self) -> None:
+        from whykit.mcp_server import build_parser
+
+        for name, config in _documented_stdio_configs().items():
+            with self.subTest(config=name):
+                self.assertEqual(config["command"], "/absolute/path/to/whykit-mcp")
+                parsed = build_parser().parse_args(config["args"])
+                self.assertTrue(parsed.root.startswith("/absolute/path/to/"))
+                self.assertEqual(parsed.max_sensitivity, "public" if name == "codex-toml" else "internal")
+                self.assertFalse(parsed.http)
+
+
+@unittest.skipIf(Client is None, "install the optional whykit[mcp] extra")
+class McpHostConfigurationRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_documented_configs_launch_the_installed_entrypoint_outside_the_checkout(self) -> None:
+        from _jsonschema import validate
+        from whykit import __version__
+
+        executable = Path(sysconfig.get_path("scripts")) / ("whykit-mcp.exe" if os.name == "nt" else "whykit-mcp")
+        self.assertTrue(executable.is_file(), "install whykit[mcp] before running the adapter smoke")
+        schema = json.loads((ROOT / "schemas" / "query-result.schema.json").read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp) / "vault with spaces Łódź"
+            shutil.copytree(ROOT / "examples" / "tiny", vault)
+            for sensitivity in ("public", "internal", "restricted"):
+                _write_note(vault, f"notes/{sensitivity}.md", title=f"Adapter {sensitivity}",
+                            sensitivity=sensitivity, body="adapter-config-sentinel")
+            before = {p.relative_to(vault): p.read_bytes() for p in vault.rglob("*") if p.is_file()}
+            for name, config in _documented_stdio_configs().items():
+                with self.subTest(config=name):
+                    args = list(config["args"])
+                    args[args.index("--root") + 1] = str(vault)
+                    parameters = StdioServerParameters(command=str(executable), args=args, cwd=tmp)
+                    async with asyncio.timeout(20), Client(parameters, read_timeout_seconds=5) as client:
+                        self.assertEqual((client.server_info.name, client.server_info.version), ("whykit", __version__))
+                        tools = await client.list_tools()
+                        self.assertTrue(all(tool.annotations.read_only_hint for tool in tools.tools))
+                        result = await client.call_tool("query", {"text": "adapter-config-sentinel"})
+                        self.assertFalse(result.is_error)
+                        payload = result.structured_content
+                        self.assertEqual(json.loads(result.content[0].text), payload)
+                        self.assertEqual(validate(payload, schema), [])
+                        expected = {"notes/public.md"}
+                        if name == "json":
+                            expected.add("notes/internal.md")
+                        self.assertEqual({item["path"] for item in payload["results"]}, expected)
+                        self.assertEqual(payload["total"], len(expected))
+            after = {p.relative_to(vault): p.read_bytes() for p in vault.rglob("*") if p.is_file()}
+            self.assertEqual(after, before)
 
 
 @unittest.skipIf(Client is None, "install the optional whykit[mcp] extra")

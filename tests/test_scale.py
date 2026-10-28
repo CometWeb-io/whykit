@@ -18,6 +18,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -239,6 +240,10 @@ class PathHelperTest(unittest.TestCase):
             ("/a/b/c.md", "/a/b"), ("/a/b", "/a/b"), ("/a/bc/d.md", "/a/b"), ("/a/b/c.md", "/"),
             ("/", "/"), ("/a", "/a/b"), ("/a/b-c/d.md", "/a/b"), ("/x/y.md", "/a"), ("/a/b/.hidden", "/a/b"),
             ("/a/b/c d/e.md", "/a/b"), ("/a/b/\u00e9.md", "/a/b"), ("/A/b.md", "/a"),
+            ("//a/b.md", "/"), ("/a/b.md", "//"), ("//a/b.md", "//a"),
+            ("//a/b.md", "/a"), ("/a/b.md", "//a"), ("//", "//"),
+            ("//a", "//a"), ("//a-sibling/b.md", "//a"),
+            ("a/b.md", "a"), ("a/b.md", "/a"),
         ]
         for inner, outer in pairs:
             with self.subTest(path=inner, root=outer):
@@ -282,12 +287,22 @@ class NoteBodyTest(unittest.TestCase):
 
 class SharedStringPoolTest(unittest.TestCase):
     def test_front_matter_strings_are_shared_and_unchanged(self) -> None:
-        first = lint_mod.load_note(Path("a.md"), text='---\nstatus: approved\nowner: "Ops Lead"\ntags: [x, y]\n---\n')
-        second = lint_mod.load_note(Path("b.md"), text='---\nstatus: approved\nowner: "Ops Lead"\ntags: [x, y]\n---\n')
-        self.assertEqual(first.front, {"status": "approved", "owner": "Ops Lead", "tags": ["x", "y"]})
-        self.assertIs(first.front["status"], second.front["status"])
-        self.assertIs(first.front["owner"], second.front["owner"])
-        self.assertIs(next(iter(first.front)), next(iter(second.front)))
+        # Sharing is opportunistic once earlier operations fill the bounded pool.
+        with patch.dict(lint_mod._SHARED, clear=True):
+            first = lint_mod.load_note(Path("a.md"), text='---\nstatus: approved\nowner: "Ops Lead"\ntags: [x, y]\n---\n')
+            second = lint_mod.load_note(Path("b.md"), text='---\nstatus: approved\nowner: "Ops Lead"\ntags: [x, y]\n---\n')
+            self.assertEqual(first.front, {"status": "approved", "owner": "Ops Lead", "tags": ["x", "y"]})
+            self.assertIs(first.front["status"], second.front["status"])
+            self.assertIs(first.front["owner"], second.front["owner"])
+            self.assertIs(next(iter(first.front)), next(iter(second.front)))
+
+    def test_full_pool_preserves_values_without_expansion(self) -> None:
+        with patch.dict(lint_mod._SHARED, {"kept": "kept"}, clear=True), \
+                patch.object(lint_mod, "_SHARED_MAX_ENTRIES", 1):
+            value = " ".join(["Ops", "Lead"])
+            self.assertEqual(lint_mod._shared(value), "Ops Lead")
+            self.assertIs(lint_mod._shared(value), value)
+            self.assertEqual(lint_mod._SHARED, {"kept": "kept"})
 
     def test_pool_is_bounded(self) -> None:
         saved = dict(lint_mod._SHARED)

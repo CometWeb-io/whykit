@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import errno
+import json
 import os
 import re
 import shlex
@@ -428,9 +429,319 @@ def cmd_query(args: argparse.Namespace) -> int:
     if args.canonical_only:
         argv.append("--canonical-only")
     argv += ["--limit", str(args.limit)]
+    if args.ranking != "substring":
+        argv += ["--ranking", args.ranking]
     if args.json:
         argv.append("--json")
     return query_main(argv)
+
+
+def cmd_retrieve(args: argparse.Namespace) -> int:
+    from .hybrid_retrieval import retrieve_hybrid
+    from .messages import parse_iso_date
+
+    root = _resolve_vault(args.root)
+    if root is None or not is_vault_root(root):
+        return vault_not_found(args.root, json_mode=True)
+    try:
+        report = retrieve_hybrid(root, args.text, valid_on=parse_iso_date("--valid-on", args.valid_on),
+                                 validity=args.validity, decision_role=args.decision_role,
+                                 doc_type=args.doc_type, status=args.status, owner=args.owner,
+                                 sensitivity=args.sensitivity, source_id=args.source_id, tag=args.tag,
+                                 canonical_only=args.canonical_only, limit=args.limit,
+                                 allowed_sensitivities=_workflow_scope(args))
+    except ValueError:
+        return emit_error("invalid_argument", "invalid retrieval query, date, filters or limits", json_mode=True)
+    emit_machine(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    return 0 if report["status"] == "ranked" else 1
+
+
+def cmd_agent(args: argparse.Namespace) -> int:
+    from .agent_eval import evaluate, evaluation_succeeded
+    from .agent_preflight import check_proposal
+    from .messages import parse_iso_date
+
+    try:
+        if args.agent_command == "eval":
+            if not 0 <= args.min_pass_rate <= 1:
+                raise ValueError("invalid evaluation threshold")
+            report = evaluate(args.cases, args.responses)
+            code = 0 if evaluation_succeeded(report, args.min_pass_rate) else 1
+        else:
+            root = _resolve_vault(args.root)
+            if root is None or not is_vault_root(root):
+                return vault_not_found(args.root, json_mode=True)
+            today = parse_iso_date("--today", args.today) if args.today else dt.date.today()
+            report = check_proposal(root, args.proposal, today=today)
+            if args.context:
+                from .compiled_context import verify_compiled
+                raw_context = _read_context_report(args.context)
+                verification = verify_compiled(root, raw_context, today=today,
+                                                allowed_sensitivities=_workflow_scope(args))
+                report["context_verification"] = {"status": verification["status"], "execution_authorized": False}
+                current = verification["status"] == "current"
+                covered: set[str] = set()
+                if current:
+                    compiled = json.loads(raw_context)
+                    covered = {identity for item in compiled["contexts"]
+                               if item.get("applicability", {}).get("premise") is True
+                               and isinstance(identity := item.get("record", {}).get("decision_id"), str)
+                               and re.fullmatch(r"D-[0-9]{3,}", identity)}
+                missing = False
+                for finding in report["findings"]:
+                    problem = "context_not_current" if not current else "context_missing_decision"
+                    if not current or finding["decision_id"] not in covered:
+                        finding["problems"] = sorted(set(finding["problems"]) | {problem})
+                        missing = True
+                if missing:
+                    report["verdict"] = "blocked"
+            code = 0 if report["verdict"] == "pass" else 1
+    except ValueError:
+        return emit_error("invalid_argument", "invalid agent evaluation or proposal input", json_mode=True)
+    emit_machine(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    return code
+
+
+def _workflow_scope(args: argparse.Namespace) -> set[str]:
+    return set(SENSITIVITIES[:SENSITIVITIES.index(args.max_sensitivity) + 1])
+
+
+def _read_context_report(path: Path) -> bytes:
+    from .compiled_context import MAX_REPORT_BYTES
+    from .io import open_regular_binary
+
+    with open_regular_binary(path) as stream:
+        raw = stream.read(MAX_REPORT_BYTES + 1)
+    if len(raw) > MAX_REPORT_BYTES:
+        raise ValueError("context report exceeds the input limit")
+    return raw
+
+
+def cmd_compile_context(args: argparse.Namespace) -> int:
+    from .compiled_context import compile_context, serialize_compiled
+    from .messages import parse_iso_date
+
+    root = _resolve_vault(args.root)
+    if root is None or not is_vault_root(root):
+        return vault_not_found(args.root, json_mode=True)
+    try:
+        today = parse_iso_date("--today", args.today) if args.today else None
+        report = compile_context(root, targets=args.targets, query=args.query,
+                                 ranking=args.ranking, max_docs=args.max_docs,
+                                 max_bytes=args.max_bytes, today=today, agent=args.agent,
+                                 allowed_sensitivities=_workflow_scope(args))
+        wire = serialize_compiled(report)
+    except ValueError:
+        return emit_error("invalid_argument", "invalid context inputs, scope or byte budget", json_mode=True)
+    # Write the measured UTF-8 bytes directly: Windows newline translation would exceed the cap.
+    binary = getattr(sys.stdout, "buffer", None)
+    if binary is None:
+        sys.stdout.write(wire)
+    else:
+        sys.stdout.flush()
+        binary.write(wire.encode("utf-8"))
+        binary.flush()
+    return 0 if report["status"] == "compiled" else 1
+
+
+def cmd_verify_context(args: argparse.Namespace) -> int:
+    from .compiled_context import verify_compiled
+    from .messages import parse_iso_date
+
+    root = _resolve_vault(args.root)
+    if root is None or not is_vault_root(root):
+        return vault_not_found(args.root, json_mode=True)
+    try:
+        today = parse_iso_date("--today", args.today) if args.today else None
+        report = verify_compiled(root, _read_context_report(args.report), today=today,
+                                 allowed_sensitivities=_workflow_scope(args))
+    except ValueError:
+        return emit_error("invalid_argument", "invalid context report or date", json_mode=True)
+    emit_machine(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    return 0 if report["status"] == "current" else 1
+
+
+def cmd_deep_impact(args: argparse.Namespace) -> int:
+    from .dependency_graph import deep_impact
+
+    root = _resolve_vault(args.root)
+    if root is None or not is_vault_root(root):
+        return vault_not_found(args.root, json_mode=True)
+    try:
+        report = deep_impact(root, args.target, max_depth=args.max_depth, max_nodes=args.max_nodes,
+                             allowed_sensitivities=_workflow_scope(args))
+    except (ValueError, OSError, UnicodeError):
+        return emit_error("invalid_argument", "invalid impact target or traversal limits", json_mode=True)
+    emit_machine(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    return int(not report["exists"])
+
+
+def cmd_knowledge_at(args: argparse.Namespace) -> int:
+    from .messages import parse_iso_date
+    from .temporal_graph import knowledge_at
+
+    root = Path(args.root).expanduser().resolve() if args.root else (_resolve_vault(None) or Path.cwd())
+    try:
+        if not root.is_dir():
+            raise ValueError("historical vault root is not a directory")
+        report = knowledge_at(root, recorded_revision=args.recorded_revision,
+                              valid_on=parse_iso_date("--valid-on", args.valid_on), target=args.target,
+                              max_nodes=args.max_nodes, allowed_sensitivities=_workflow_scope(args))
+    except (ValueError, RuntimeError, subprocess.CalledProcessError):
+        return emit_error("invalid_argument", "invalid or unavailable historical knowledge snapshot", json_mode=True)
+    emit_machine(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    return 0 if report["exists"] else 1
+
+
+def cmd_artifact(args: argparse.Namespace) -> int:
+    from .artifact_store import capture_artifact
+
+    root = _resolve_vault(args.root)
+    if root is None or not is_vault_root(root):
+        return vault_not_found(args.root, json_mode=True)
+    try:
+        report = capture_artifact(root, args.evidence, args.source_file, recorded_at=args.recorded_at,
+                                  write=args.write, expected_sha256=args.expect_hash)
+    except ValueError:
+        return emit_error("invalid_argument", "invalid or changed artifact inputs; review a fresh preview", json_mode=True)
+    emit_machine(json.dumps({"contract_version": 1, **report}, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    from .github_import import import_github
+
+    root = _resolve_vault(args.root)
+    if root is None or not is_vault_root(root):
+        return vault_not_found(args.root, json_mode=True)
+    try:
+        report = import_github(root, args.evidence, args.input, kind=args.kind,
+                               repository=args.repository, recorded_at=args.recorded_at,
+                               write=args.write, expected_sha256=args.expect_hash)
+    except ValueError:
+        return emit_error("invalid_argument", "invalid or changed GitHub export inputs; review a fresh preview", json_mode=True)
+    emit_machine(json.dumps({"contract_version": 1, **report}, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def cmd_claim(args: argparse.Namespace) -> int:
+    from .artifact_store import _strict_json
+    from .claim_ledger import MAX_CLAIM_BYTES, create_claim, list_claims, read_claim, verify_claim
+    from .io import open_regular_binary
+    from .messages import parse_iso_date
+
+    root = _resolve_vault(args.root)
+    if root is None or not is_vault_root(root):
+        return vault_not_found(args.root, json_mode=True)
+    try:
+        code = 0
+        if args.claim_command == "create":
+            links = []
+            if args.links:
+                with open_regular_binary(args.links) as stream:
+                    raw = stream.read(MAX_CLAIM_BYTES + 1)
+                if len(raw) > MAX_CLAIM_BYTES:
+                    raise ValueError("claim links exceed input limit")
+                links = _strict_json(raw.decode("utf-8"))
+            today = parse_iso_date("--today", args.today) if args.today else None
+            report = create_claim(root, args.statement, links, title=args.title or " ".join(args.statement.split())[:80],
+                                  owner=args.owner, sensitivity=args.sensitivity, today=today,
+                                  valid_from=args.valid_from, valid_until=args.valid_until,
+                                  write=args.write, expected_sha256=args.expect_hash)
+        elif args.claim_command == "list":
+            report = {"claims": list_claims(root, allowed_sensitivities=_workflow_scope(args))}
+        elif args.claim_command == "show":
+            row = read_claim(root, args.target, allowed_sensitivities=_workflow_scope(args))
+            report = {"exists": row is not None, "record": row}
+            code = 0 if row is not None else 1
+        else:
+            today = parse_iso_date("--today", args.today) if args.today else None
+            report = verify_claim(root, args.target, allowed_sensitivities=_workflow_scope(args), today=today)
+            code = 0 if report["exists"] and not report["unlinked"] and all(
+                link["status"] == "matched" and link["source_state"] == "current" for link in report["links"]
+            ) else 1
+    except ValueError:
+        return emit_error("invalid_argument", "invalid or changed claim inputs; review a fresh preview", json_mode=True)
+    emit_machine(json.dumps({"contract_version": 1, **report}, ensure_ascii=False, sort_keys=True))
+    return code
+
+
+def cmd_workspace(args: argparse.Namespace) -> int:
+    from .messages import parse_iso_date
+    from .workspace import build_workspace_status
+
+    try:
+        today = parse_iso_date("--today", args.today) if args.today else None
+        report = build_workspace_status(args.manifest, today=today)
+    except ValueError:
+        return emit_error("invalid_argument", "invalid local workspace manifest or date", json_mode=True)
+    emit_machine(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    return int(any("error" in item or item["status"]["errors"] for item in report["vaults"]))
+
+
+def _read_workflow_json(path: Path, maximum: int):
+    from .artifact_store import _read_regular, _strict_json
+
+    raw = _read_regular(path, max_bytes=maximum)
+    assert raw is not None
+    return _strict_json(raw.decode("utf-8"))
+
+
+def cmd_outcome(args: argparse.Namespace) -> int:
+    from .messages import parse_iso_date
+    from .outcome_ledger import MAX_OUTCOME_BYTES, create_outcome, list_outcomes, read_outcome, verify_outcome
+
+    root = _resolve_vault(args.root)
+    if root is None or not is_vault_root(root):
+        return vault_not_found(args.root, json_mode=True)
+    try:
+        code = 0
+        if args.outcome_command == "create":
+            data = _read_workflow_json(args.input, MAX_OUTCOME_BYTES)
+            today = parse_iso_date("--today", args.today) if args.today else None
+            report = create_outcome(root, data, owner=args.owner, title=args.title, today=today,
+                                    write=args.write, expected_sha256=args.expect_hash)
+        elif args.outcome_command == "list":
+            report = {"outcomes": list_outcomes(root, allowed_sensitivities=_workflow_scope(args))}
+        elif args.outcome_command == "show":
+            row = read_outcome(root, args.target, allowed_sensitivities=_workflow_scope(args))
+            report = {"exists": row is not None, "record": row}
+            code = 0 if row is not None else 1
+        else:
+            today = parse_iso_date("--today", args.today) if args.today else None
+            report = verify_outcome(root, args.target, today=today, allowed_sensitivities=_workflow_scope(args))
+            code = 0 if report["observed_source_verified"] else 1
+    except ValueError:
+        return emit_error("invalid_argument", "invalid or changed outcome inputs; review a fresh preview", json_mode=True)
+    emit_machine(json.dumps({"contract_version": 1, **report}, ensure_ascii=False, sort_keys=True))
+    return code
+
+
+def cmd_knowledge(args: argparse.Namespace) -> int:
+    from .knowledge_v2 import (
+        MAX_BUNDLE_BYTES, UnsupportedMigrationPlatform, export_migration_bundle,
+        project_knowledge_v2, restore_migration_bundle,
+    )
+
+    try:
+        if args.knowledge_command == "restore":
+            report = restore_migration_bundle(_read_workflow_json(args.bundle, MAX_BUNDLE_BYTES), args.destination,
+                                              write=args.write, expected_sha256=args.expect_hash)
+        else:
+            root = _resolve_vault(args.root)
+            if root is None or not is_vault_root(root):
+                return vault_not_found(args.root, json_mode=True)
+            if args.knowledge_command == "view":
+                report = project_knowledge_v2(root, allowed_sensitivities=_workflow_scope(args))
+            else:
+                report = export_migration_bundle(root, args.output, full_local_scope=args.private,
+                                                 write=args.write, expected_sha256=args.expect_hash)
+    except UnsupportedMigrationPlatform:
+        return emit_error("operation_rejected", "safe knowledge export and restore require a supported POSIX host", json_mode=True)
+    except ValueError:
+        return emit_error("invalid_argument", "invalid, unavailable or changed knowledge migration inputs", json_mode=True)
+    emit_machine(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    return 0
 
 
 def cmd_context(args: argparse.Namespace) -> int:
@@ -1067,11 +1378,11 @@ Docs: https://github.com/CometWeb-io/whykit#readme"""
 # as five verbs rather than one flat list. Every command belongs to exactly one
 # group; tests/test_cli_consistency.py holds this table to the parser.
 COMMAND_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("author", "create and change records", ("init", "adopt", "new", "review", "evidence")),
-    ("check", "gate a vault or a change", ("lint", "check", "status", "trace", "history", "diff", "snapshot", "verify-snapshot")),
-    ("explore", "find and hand over context", ("query", "context", "pack", "graph", "backlinks", "impact")),
+    ("author", "create and change records", ("init", "adopt", "new", "review", "evidence", "artifact", "claim", "outcome", "import")),
+    ("check", "gate a vault or a change", ("lint", "check", "status", "trace", "history", "diff", "snapshot", "verify-snapshot", "agent", "verify-context")),
+    ("explore", "find and hand over context", ("query", "retrieve", "context", "pack", "graph", "backlinks", "impact", "compile-context", "deep-impact", "knowledge-at")),
     ("integrate", "connect hooks, viewers and shells", ("install-hooks", "explorer-index", "serve", "lsp", "completion")),
-    ("maintain", "inspect policy, rules and setup", ("policy", "rules", "doctor", "recover")),
+    ("maintain", "inspect policy, rules and setup", ("policy", "rules", "doctor", "recover", "workspace", "knowledge")),
 )
 
 COMMANDS_PREAMBLE = (
@@ -1341,8 +1652,27 @@ def build_parser() -> argparse.ArgumentParser:
     query.add_argument("--tag", help="filter by tag")
     query.add_argument("--canonical-only", action="store_true", help="only canonical documents")
     query.add_argument("--limit", type=int, default=100, metavar="N", help="maximum results (default: %(default)s)")
+    query.add_argument("--ranking", choices=("substring", "bm25"), default="substring", help="opt-in text ranking (default: %(default)s)")
     query.add_argument("--json", action="store_true", help=JSON_HELP)
     query.set_defaults(func=cmd_query)
+
+    retrieve = sub.add_parser("retrieve", help="combine lexical matches and typed dependencies within a current visible scope")
+    retrieve.add_argument("text", help="text query; graph proximity does not establish semantic support")
+    retrieve.add_argument("--root", help=ROOT_HELP)
+    retrieve.add_argument("--valid-on", required=True, help="evaluate declared validity on this YYYY-MM-DD date")
+    retrieve.add_argument("--validity", choices=("active_or_unknown", "active"), default="active_or_unknown", help="admit explicit unknown validity or require active intervals (default: %(default)s)")
+    retrieve.add_argument("--decision-role", choices=("premise", "reference"), default="premise", help="require applicable decisions or explicitly retrieve references (default: %(default)s)")
+    retrieve.add_argument("--type", dest="doc_type", help="filter by document type before ranking and graph construction")
+    retrieve.add_argument("--status", help="filter by status")
+    retrieve.add_argument("--owner", help="filter by owner")
+    retrieve.add_argument("--sensitivity", choices=SENSITIVITIES, help="filter to one classification within the ceiling")
+    retrieve.add_argument("--max-sensitivity", choices=SENSITIVITIES, default="public", help="local output classification ceiling (default: %(default)s)")
+    retrieve.add_argument("--source", dest="source_id", metavar="E-NNN", help="only records citing this evidence ID")
+    retrieve.add_argument("--tag", help="filter by tag")
+    retrieve.add_argument("--canonical-only", action="store_true", help="only canonical documents")
+    retrieve.add_argument("--limit", type=int, default=20, help="maximum results, 0–100 (default: %(default)s)")
+    retrieve.add_argument("--json", action="store_true", help=JSON_HELP)
+    retrieve.set_defaults(func=cmd_retrieve, json=True)
 
     context = sub.add_parser("context", help="build an evidence-aware context pack for one target")
     context.add_argument("target", help="vault-relative path, D-NNN or E-NNN")
@@ -1363,6 +1693,170 @@ def build_parser() -> argparse.ArgumentParser:
     pack.add_argument("--json", action="store_true", help="shorthand for --format json")
     pack.add_argument("--for", dest="agent", choices=("generic", "cursor", "claude", "codex"), default="generic", help="tailor the preamble to an agent host (default: %(default)s)")
     pack.set_defaults(func=cmd_pack)
+
+    compile_cmd = sub.add_parser("compile-context", help="compile current context within an exact UTF-8 output budget")
+    compile_cmd.add_argument("targets", nargs="*", help="vault-relative paths, D-NNN or E-NNN")
+    compile_cmd.add_argument("--root", help=ROOT_HELP)
+    compile_cmd.add_argument("--query", help="add records matching this text query")
+    compile_cmd.add_argument("--ranking", choices=("substring", "bm25", "hybrid"), default="substring", help="query ranking (default: %(default)s)")
+    compile_cmd.add_argument("--max-docs", type=int, default=8, help="maximum records (default: %(default)s)")
+    compile_cmd.add_argument("--max-bytes", type=int, default=32768, help="complete UTF-8 JSON output budget, including newline (default: %(default)s)")
+    compile_cmd.add_argument("--max-sensitivity", choices=SENSITIVITIES, default="public", help="local output classification ceiling (default: %(default)s)")
+    compile_cmd.add_argument("--today", help=TODAY_HELP)
+    compile_cmd.add_argument("--for", dest="agent", choices=("generic", "cursor", "claude", "codex"), default="generic", help="agent host preamble (default: %(default)s)")
+    compile_cmd.add_argument("--json", action="store_true", help=JSON_HELP)
+    compile_cmd.set_defaults(func=cmd_compile_context, json=True)
+
+    verify_context = sub.add_parser("verify-context", help="refuse stale, altered or differently scoped compiled context")
+    verify_context.add_argument("report", type=Path, help="local compiled-context JSON file")
+    verify_context.add_argument("--root", help=ROOT_HELP)
+    verify_context.add_argument("--max-sensitivity", choices=SENSITIVITIES, default="public", help="expected local output classification ceiling (default: %(default)s)")
+    verify_context.add_argument("--today", help=TODAY_HELP)
+    verify_context.add_argument("--json", action="store_true", help=JSON_HELP)
+    verify_context.set_defaults(func=cmd_verify_context, json=True)
+
+    deep = sub.add_parser("deep-impact", help="explain typed reverse dependency paths with bounded traversal")
+    deep.add_argument("target", help="vault-relative path, D-NNN or E-NNN")
+    deep.add_argument("--root", help=ROOT_HELP)
+    deep.add_argument("--max-depth", type=int, default=8, help="maximum reverse dependency distance (default: %(default)s)")
+    deep.add_argument("--max-nodes", type=int, default=1000, help="maximum visited nodes (default: %(default)s)")
+    deep.add_argument("--max-sensitivity", choices=SENSITIVITIES, default="public", help="local output classification ceiling (default: %(default)s)")
+    deep.add_argument("--json", action="store_true", help=JSON_HELP)
+    deep.set_defaults(func=cmd_deep_impact, json=True)
+
+    knowledge = sub.add_parser("knowledge-at", help="read a pinned Git snapshot with explicit validity intervals")
+    knowledge.add_argument("--root", help=ROOT_HELP)
+    knowledge.add_argument("--recorded-revision", default="HEAD", help="Git revision to resolve and pin (default: %(default)s)")
+    knowledge.add_argument("--valid-on", required=True, help="evaluate explicit validity intervals on this YYYY-MM-DD date")
+    knowledge.add_argument("--target", help="optional vault-relative path, D-NNN or E-NNN")
+    knowledge.add_argument("--max-nodes", type=int, default=1000, help="maximum returned nodes (default: %(default)s)")
+    knowledge.add_argument("--max-sensitivity", choices=SENSITIVITIES, default="public", help="local output classification ceiling (default: %(default)s)")
+    knowledge.add_argument("--json", action="store_true", help=JSON_HELP)
+    knowledge.set_defaults(func=cmd_knowledge_at, json=True)
+
+    agent = sub.add_parser("agent", help="evaluate supplied answers or inspect proposal dependencies")
+    agent_sub = agent.add_subparsers(dest="agent_command", required=True)
+    agent_eval = agent_sub.add_parser("eval", help="score supplied JSONL answers offline")
+    agent_eval.add_argument("--cases", required=True, type=Path, help="local benchmark case JSONL file")
+    agent_eval.add_argument("--responses", required=True, type=Path, help="local supplied-answer JSONL file; no model calls")
+    agent_eval.add_argument("--min-pass-rate", type=float, default=1.0, help="minimum case pass fraction from 0 to 1 (default: %(default)s)")
+    agent_eval.add_argument("--json", action="store_true", help=JSON_HELP)
+    agent_eval.set_defaults(func=cmd_agent, json=True)
+    agent_preflight = agent_sub.add_parser("preflight", help="inspect declared dependencies without authorizing execution")
+    agent_preflight.add_argument("--root", help=ROOT_HELP)
+    agent_preflight.add_argument("--proposal", required=True, type=Path, help="local JSON proposal with declared decision IDs")
+    agent_preflight.add_argument("--context", type=Path, help="require current compiled context covering every declared decision")
+    agent_preflight.add_argument("--max-sensitivity", choices=SENSITIVITIES, default="public", help="expected compiled-context classification ceiling (default: %(default)s)")
+    agent_preflight.add_argument("--today", help=TODAY_HELP)
+    agent_preflight.add_argument("--json", action="store_true", help=JSON_HELP)
+    agent_preflight.set_defaults(func=cmd_agent, json=True)
+
+    workspace = sub.add_parser("workspace", help="inspect explicitly listed local vaults")
+    workspace_sub = workspace.add_subparsers(dest="workspace_command", required=True)
+    workspace_status = workspace_sub.add_parser("status", help="report local-only counts across vaults")
+    workspace_status.add_argument("manifest", type=Path, help="local TOML manifest listing vault aliases and roots")
+    workspace_status.add_argument("--today", help=TODAY_HELP)
+    workspace_status.add_argument("--json", action="store_true", help=JSON_HELP)
+    workspace_status.set_defaults(func=cmd_workspace, json=True)
+
+    imports = sub.add_parser("import", help="capture saved provider exports without fetching or granting authority")
+    import_sub = imports.add_subparsers(dest="import_command", required=True)
+    github = import_sub.add_parser("github", help="preview a saved issue, pull request or workflow-run REST object")
+    github.add_argument("--root", help=ROOT_HELP)
+    github.add_argument("--input", required=True, type=Path, help="one bounded local GitHub REST JSON object; never fetched")
+    github.add_argument("--evidence", required=True, help="existing restricted E-NNN with matching canonical resource location")
+    github.add_argument("--kind", required=True, choices=("issue", "pull-request", "workflow-run"), help="explicit REST object profile; no shape guessing")
+    github.add_argument("--repository", required=True, help="expected owner/repo; declared binding, not authenticated identity")
+    github.add_argument("--recorded-at", required=True, help="declared local observation time, ISO UTC with seconds")
+    github.add_argument("--write", action="store_true", help="apply only the import identified by --expect-hash")
+    github.add_argument("--expect-hash", help="expected_sha256 from a reviewed import preview")
+    github.add_argument("--json", action="store_true", help=JSON_HELP)
+    github.set_defaults(func=cmd_import, json=True)
+
+    outcome = sub.add_parser("outcome", help="record declared decision measurements without causal claims")
+    outcome_sub = outcome.add_subparsers(dest="outcome_command", required=True)
+    outcome_create = outcome_sub.add_parser("create", help="preview a restricted draft outcome, then apply its reviewed hash")
+    outcome_create.add_argument("--root", help=ROOT_HELP)
+    outcome_create.add_argument("--input", required=True, type=Path, help="local JSON metric, samples, decision and implementation references")
+    outcome_create.add_argument("--owner", required=True, help="person responsible for the declaration; attribution only")
+    outcome_create.add_argument("--title", help="note title (default: metric name)")
+    outcome_create.add_argument("--today", help=TODAY_HELP)
+    outcome_create.add_argument("--write", action="store_true", help="apply only the outcome identified by --expect-hash")
+    outcome_create.add_argument("--expect-hash", help="expected_sha256 from a reviewed outcome preview")
+    outcome_create.add_argument("--json", action="store_true", help=JSON_HELP)
+    outcome_create.set_defaults(func=cmd_outcome, json=True)
+    for name in ("list", "show", "verify"):
+        child = outcome_sub.add_parser(name, help=f"{name} outcomes within an explicit local sensitivity ceiling")
+        if name != "list":
+            child.add_argument("target", metavar="O-NNN", help="canonical outcome ID")
+        child.add_argument("--root", help=ROOT_HELP)
+        child.add_argument("--max-sensitivity", choices=SENSITIVITIES, default="public", help="local output classification ceiling (default: %(default)s)")
+        if name == "verify":
+            child.add_argument("--today", help=TODAY_HELP)
+        child.add_argument("--json", action="store_true", help=JSON_HELP)
+        child.set_defaults(func=cmd_outcome, json=True)
+
+    knowledge = sub.add_parser("knowledge", help="view the v2 contract or migrate exact source bytes")
+    knowledge_sub = knowledge.add_subparsers(dest="knowledge_command", required=True)
+    view = knowledge_sub.add_parser("view", help="project the five knowledge kinds within the permitted scope")
+    view.add_argument("--root", help=ROOT_HELP)
+    view.add_argument("--max-sensitivity", choices=SENSITIVITIES, default="public", help="local output classification ceiling (default: %(default)s)")
+    view.add_argument("--json", action="store_true", help=JSON_HELP)
+    view.set_defaults(func=cmd_knowledge, json=True)
+    bundle = knowledge_sub.add_parser("bundle", help="preview or export a full private migration bundle outside its vault")
+    bundle.add_argument("--root", help=ROOT_HELP)
+    bundle.add_argument("--private", action="store_true", help="explicitly include all local classifications and raw source bytes")
+    bundle.add_argument("--output", required=True, type=Path, help="new local bundle file outside the source vault")
+    bundle.add_argument("--write", action="store_true", help="create only the reviewed bundle identified by --expect-hash")
+    bundle.add_argument("--expect-hash", help="expected_sha256 from a reviewed export preview")
+    bundle.add_argument("--json", action="store_true", help=JSON_HELP)
+    bundle.set_defaults(func=cmd_knowledge, json=True)
+    restore = knowledge_sub.add_parser("restore", help="preview or restore exact data into a new destination; no Git history transfer")
+    restore.add_argument("bundle", type=Path, help="local v2 migration bundle JSON file")
+    restore.add_argument("--into", dest="destination", required=True, type=Path, help="new destination directory that must not exist")
+    restore.add_argument("--write", action="store_true", help="create only the destination identified by --expect-hash")
+    restore.add_argument("--expect-hash", help="expected_sha256 from a reviewed restore preview")
+    restore.add_argument("--json", action="store_true", help=JSON_HELP)
+    restore.set_defaults(func=cmd_knowledge, json=True)
+
+    artifact = sub.add_parser("artifact", help="capture immutable local evidence versions")
+    artifact_sub = artifact.add_subparsers(dest="artifact_command", required=True)
+    capture = artifact_sub.add_parser("capture", help="preview a local source capture, then apply its reviewed hash")
+    capture.add_argument("--root", help=ROOT_HELP)
+    capture.add_argument("--evidence", required=True, metavar="E-NNN", help="existing evidence register ID")
+    capture.add_argument("--source-file", required=True, type=Path, help="local regular file to capture; URLs are never fetched")
+    capture.add_argument("--recorded-at", required=True, help="UTC acquisition timestamp, e.g. 2026-10-27T12:00:00Z")
+    capture.add_argument("--write", action="store_true", help="apply only the capture identified by --expect-hash")
+    capture.add_argument("--expect-hash", help="expected_sha256 from a reviewed capture preview")
+    capture.add_argument("--json", action="store_true", help=JSON_HELP)
+    capture.set_defaults(func=cmd_artifact, json=True)
+
+    claim = sub.add_parser("claim", help="record and verify versioned, source-linked statements")
+    claim_sub = claim.add_subparsers(dest="claim_command", required=True)
+    claim_create = claim_sub.add_parser("create", help="preview a draft Markdown claim, then apply its reviewed hash")
+    claim_create.add_argument("statement", help="exact statement to record as a draft claim")
+    claim_create.add_argument("--root", help=ROOT_HELP)
+    claim_create.add_argument("--title", help="note title (default: first 80 characters of the statement)")
+    claim_create.add_argument("--owner", required=True, help="person responsible for the claim; attribution only")
+    claim_create.add_argument("--links", type=Path, help="JSON array of exact source anchors and declared assessments")
+    claim_create.add_argument("--sensitivity", choices=SENSITIVITIES, default="restricted", help="requested label; claim quotes retain a restricted floor (default: %(default)s)")
+    claim_create.add_argument("--valid-from", help="asserted inclusive validity start as YYYY-MM-DD")
+    claim_create.add_argument("--valid-until", help="asserted exclusive validity end as YYYY-MM-DD")
+    claim_create.add_argument("--today", help=TODAY_HELP)
+    claim_create.add_argument("--write", action="store_true", help="apply only the claim identified by --expect-hash")
+    claim_create.add_argument("--expect-hash", help="expected_sha256 from a reviewed claim preview")
+    claim_create.add_argument("--json", action="store_true", help=JSON_HELP)
+    claim_create.set_defaults(func=cmd_claim, json=True)
+    for name in ("list", "show", "verify"):
+        child = claim_sub.add_parser(name, help=f"{name} claims within an explicit local sensitivity ceiling")
+        if name != "list":
+            child.add_argument("target", metavar="C-NNN", help="canonical claim ID")
+        child.add_argument("--root", help=ROOT_HELP)
+        child.add_argument("--max-sensitivity", choices=SENSITIVITIES, default="public", help="local output classification ceiling (default: %(default)s)")
+        if name == "verify":
+            child.add_argument("--today", help="evaluate source observations through this UTC YYYY-MM-DD day (default: today)")
+        child.add_argument("--json", action="store_true", help=JSON_HELP)
+        child.set_defaults(func=cmd_claim, json=True)
 
     review = sub.add_parser("review", help="list review work or record a review event")
     review.add_argument("--root", help=ROOT_HELP)
@@ -1626,6 +2120,9 @@ def _run_command(args: argparse.Namespace, func) -> int:
     read_only = args.command in _CACHED_COMMANDS | {"policy", "rules", "history"}
     read_only = read_only or (args.command == "evidence" and getattr(args, "evidence_command", None) == "list")
     read_only = read_only or (args.command == "review" and args.review_command == "list")
+    read_only = read_only or (args.command == "agent" and args.agent_command == "preflight")
+    read_only = read_only or args.command in {"deep-impact", "verify-context"}
+    read_only = read_only or (args.command == "claim" and args.claim_command != "create")
     root = _resolve_vault(getattr(args, "root", None)) if read_only else None
     if args.command == "lint":
         from .lint import resolve_root

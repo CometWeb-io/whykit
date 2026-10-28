@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/deep-impact.schema.json",
+  "title": "WhyKit bounded possible reverse dependencies",
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "path",
+        "title",
+        "type",
+        "status",
+        "owner",
+        "sensitivity",
+        "decision_id",
+        "source_of_truth"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "document",
+            "evidence"
+          ]
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "sensitivity": {
+          "type": "string"
+        },
+        "decision_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence_id": {
+          "type": "string"
+        },
+        "source_of_truth": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "edge": {
+      "type": "object",
+      "required": [
+        "from",
+        "to",
+        "type"
+      ],
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "wikilink",
+            "evidence",
+            "supersedes",
+            "outcome_decision",
+            "measurement_claim"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "signal": {
+      "type": "object",
+      "required": [
+        "node",
+        "reason"
+      ],
+      "properties": {
+        "node": {
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "invalid_metadata",
+            "unavailable_dependency",
+            "unavailable_evidence",
+            "unavailable_decision",
+            "retired_evidence",
+            "dependency_cycle",
+            "validity_invalid",
+            "validity_unknown",
+            "overlapping_supersession"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "required": [
+    "contract_version",
+    "target",
+    "exists",
+    "ambiguous",
+    "target_node",
+    "results",
+    "edges",
+    "cycle_components",
+    "review_signals",
+    "limits",
+    "truncation",
+    "truncated",
+    "stats"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "target": {
+      "type": "string"
+    },
+    "exists": {
+      "type": "boolean"
+    },
+    "ambiguous": {
+      "type": "boolean"
+    },
+    "target_node": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/node"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "node",
+          "distance",
+          "path_nodes",
+          "path_edges"
+        ],
+        "properties": {
+          "node": {
+            "$ref": "#/$defs/node"
+          },
+          "distance": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "path_nodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "path_edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/edge"
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
+    },
+    "cycle_components": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "review_signals": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/signal"
+      }
+    },
+    "limits": {
+      "type": "object",
+      "required": [
+        "max_depth",
+        "max_nodes"
+      ],
+      "properties": {
+        "max_depth": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_nodes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "truncation": {
+      "type": "object",
+      "required": [
+        "max_depth",
+        "max_nodes"
+      ],
+      "properties": {
+        "max_depth": {
+          "type": "boolean"
+        },
+        "max_nodes": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "stats": {
+      "type": "object",
+      "required": [
+        "view_nodes",
+        "view_edges",
+        "visited_nodes"
+      ],
+      "properties": {
+        "view_nodes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "view_edges": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "visited_nodes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

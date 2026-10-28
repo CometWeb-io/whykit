@@ -61,6 +61,7 @@ the test suite fails if it drifts.
 | <a name="evidence.retired_date"></a>`evidence.retired_date` | error | A retired evidence row has an invalid retirement date. | Use a real YYYY-MM-DD date. |
 | <a name="fact.inline_evidence"></a>`fact.inline_evidence` | warning | A fact callout has no inline E-NNN citation. | Add an E-NNN in the callout. |
 | <a name="fact.evidence_missing"></a>`fact.evidence_missing` | warning | A fact callout cites an E-NNN with no populated register row. | Register the source or correct the cited ID. |
+| <a name="impact.invalid"></a>`impact.invalid` | warning | A native impact declaration has invalid owned syntax. | Use the canonical provenance.whykit_impact scalar and valid native path, kind, references and pins. |
 | <a name="frontmatter.invalid"></a>`frontmatter.invalid` | error | YAML front matter cannot be parsed. | Fix the front matter syntax. |
 | <a name="frontmatter.empty"></a>`frontmatter.empty` | warning | A required metadata key is present but has no value. | Fill in the value, or use the documented placeholder in templates. |
 | <a name="frontmatter.missing"></a>`frontmatter.missing` | error | A governed note has no YAML front matter. | Add the standard WhyKit front matter block. |

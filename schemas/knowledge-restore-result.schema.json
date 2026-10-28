@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/knowledge-restore-result.schema.json",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "format",
+    "applied",
+    "expected_sha256",
+    "destination",
+    "source_files",
+    "objects",
+    "exact_bytes_preserved",
+    "git_history_transferred",
+    "execution_authorized"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "format": {
+      "const": "whykit.knowledge-restore/v2"
+    },
+    "applied": {
+      "type": "boolean"
+    },
+    "expected_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "destination": {
+      "type": "string"
+    },
+    "source_files": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "objects": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "exact_bytes_preserved": {
+      "type": "boolean"
+    },
+    "git_history_transferred": {
+      "const": false
+    },
+    "execution_authorized": {
+      "const": false
+    }
+  },
+  "additionalProperties": false
+}

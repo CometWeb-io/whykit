@@ -1,0 +1,28 @@
+{
+  "description": "Synthetic development fixture, not an independent relevance evaluation. Grades: 2 directly answers the topic, 1 related background. No models or external data.",
+  "documents": [
+    {"path": "notes/queue.md", "title": "Queue delivery", "body": "A failed delivery enters the retry queue. Exponential backoff limits repeated requests. Idempotency prevents duplicate jobs."},
+    {"path": "notes/retries.md", "title": "Retry policy", "body": "Retry failed requests after a bounded delay. A queue worker may try three times before parking the job."},
+    {"path": "notes/carbon.md", "title": "Carbon measurement", "body": "The badge displays estimated carbon emissions from transferred bytes. Its estimate is not a certificate."},
+    {"path": "notes/badge.md", "title": "Badge rendering", "body": "Embed the carbon badge in a page footer. Keep its label accessible to screen readers."},
+    {"path": "notes/database.md", "title": "Database maintenance", "body": "Before a schema migration, take a SQLite backup. Restore it into an isolated directory and check integrity."},
+    {"path": "notes/storage.md", "title": "Storage recovery", "body": "A backup needs a tested restore procedure. Retain the previous database until verification finishes."},
+    {"path": "notes/approval.md", "title": "Approval integrity", "body": "A signature binds an approval to reviewed bytes. Trusted identity must be established separately. A content hash alone does not identify a reviewer."},
+    {"path": "notes/reviewer.md", "title": "Reviewer identity", "body": "Validate reviewer identity before accepting an approval. Review the authorization policy separately from the document hash."},
+    {"path": "notes/polish.md", "title": "Łódź", "body": "Zespół w Łodzi prowadzi rejestr decyzji. Przegląd wymaga aktualnego źródła."},
+    {"path": "notes/cats.md", "title": "Cat", "body": "The cat sleeps beside the window."},
+    {"path": "notes/catalogue.md", "title": "Catalogue", "body": "A catalogue lists available templates and their descriptions."},
+    {"path": "notes/access.md", "title": "Access control", "body": "Access control enforces caller permissions. A sensitivity label alone does not authorize access."}
+  ],
+  "queries": [
+    {"text": "queue retry", "relevance": {"notes/queue.md": 2, "notes/retries.md": 2}},
+    {"text": "carbon badge", "relevance": {"notes/carbon.md": 2, "notes/badge.md": 2}},
+    {"text": "SQLite migration backup", "relevance": {"notes/database.md": 2, "notes/storage.md": 1}},
+    {"text": "approval signature identity", "relevance": {"notes/approval.md": 2, "notes/reviewer.md": 1}},
+    {"text": "Łódź", "relevance": {"notes/polish.md": 2}},
+    {"text": "cat", "relevance": {"notes/cats.md": 2}},
+    {"text": "access control", "relevance": {"notes/access.md": 2}},
+    {"text": "backup", "relevance": {"notes/database.md": 2, "notes/storage.md": 2}},
+    {"text": "unobtainium", "relevance": {}}
+  ]
+}

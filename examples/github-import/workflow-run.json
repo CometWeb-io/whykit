@@ -1,0 +1,17 @@
+{
+  "created_at": "2026-09-17T10:00:00Z",
+  "updated_at": "2026-09-17T10:30:00Z",
+  "id": 9001,
+  "url": "https://api.github.com/repos/example-labs/fixture/actions/runs/9001",
+  "html_url": "https://github.com/example-labs/fixture/actions/runs/9001",
+  "head_sha": "cccccccccccccccccccccccccccccccccccccccc",
+  "run_attempt": 1,
+  "status": "queued",
+  "conclusion": null,
+  "repository": {
+    "full_name": "example-labs/fixture",
+    "html_url": "https://github.com/example-labs/fixture"
+  },
+  "head_repository": null,
+  "name": "Synthetic workflow"
+}
