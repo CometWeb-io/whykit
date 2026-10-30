@@ -48,8 +48,8 @@ mcp = ["mcp>=2.2,<2.4"]
 [dependency-groups]
 dev = [
   "mypy==2.4.0",
-  "ruff==0.16.10",
-  "zizmor==1.30.1",
+  "ruff==0.17.2",
+  "zizmor==1.31.1",
 ]
 # Release-artifact tooling: distribution metadata check (`twine check`) and the
 # CycloneDX SBOM generator (`cyclonedx-py`). Kept out of `dev` so a normal
@@ -63,7 +63,7 @@ dist = [
 # .pre-commit-hooks.yaml through `pre-commit try-repo`. Opt in with
 # `uv sync --group hooks`; the test skips when it is absent.
 hooks = [
-  "pre-commit==4.6.2",
+  "pre-commit==4.7.0",
 ]
 
 [project.urls]
