@@ -9,6 +9,9 @@ CLI and the lint rule codes.
 
 ### Added
 
+- `whykit trace D-NNN` takes the decision ID positionally, like `impact`,
+  `backlinks` and `context`; `--decision D-NNN` keeps working.
+
 - Optional `provenance.whykit_impact` declarations describe typed dependencies
   on evidence, claims, decisions and implementation notes. Declarations use a
   namespaced JSON scalar; existing records require no migration or rewrite.
