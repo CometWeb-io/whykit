@@ -56,6 +56,9 @@ CLI and the lint rule codes.
 
 ### Changed
 
+- Make the first-run CLI guidance and README example show how to record a
+  decision and trace it to a source. Machine-readable output is unchanged.
+
 - Existing vaults and JSON v1 commands retain their current format. The optional
   `claim` note type lives under `00-context/claims/`; captures use
   `00-context/artifacts/`. Optional `outcome` notes live under

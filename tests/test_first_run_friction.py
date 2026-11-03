@@ -6,6 +6,7 @@ import datetime as dt
 import io
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,52 @@ def git(*args: str, cwd: Path) -> None:
         ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", *args],
         cwd=cwd, check=True, capture_output=True,
     )
+
+
+class FirstRunGuidanceTests(unittest.TestCase):
+    def test_windows_guidance_keeps_powershell_metacharacters_literal(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            vault = Path(td) / "literal $(Get-Date) 'one'"
+            fake_os = mock.Mock(wraps=os)
+            fake_os.name = "nt"
+            out = io.StringIO()
+            with mock.patch.object(cli, "os", fake_os), contextlib.redirect_stdout(out):
+                self.assertEqual(cli.main(["init", str(vault)]), 0)
+            text = out.getvalue()
+            self.assertIn("PowerShell", text)
+            quoted = "'" + str(vault).replace("'", "''") + "'"
+            self.assertIn(f"--root {quoted}", text)
+
+    def test_init_explains_the_vault_and_prints_a_runnable_check_for_paths_with_spaces(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            vault = Path(td) / "my decisions"
+            result = run("init", str(vault))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("decisions and sources", result.stdout)
+            self.assertIn("AGENTS.md", result.stdout)
+            self.assertIn("starter", result.stdout.lower())
+            if os.name != "nt":
+                start = next((line for line in result.stdout.splitlines() if line.strip().startswith("Start:")), None)
+                self.assertIsNotNone(start, "init should show a command to create the first decision")
+                start_command = shlex.split(start.split("Start:", 1)[1].strip())
+                created = run(*start_command[start_command.index("new"):])
+                self.assertEqual(created.returncode, 0, created.stderr)
+                self.assertIn("created D-001", created.stdout)
+                line = next(line for line in result.stdout.splitlines() if line.strip().startswith("Check:"))
+                command = shlex.split(line.split("Check:", 1)[1].strip())
+                self.assertEqual(command[-3:], ["lint", "--root", str(vault)])
+                checked = run(*command[-3:])
+                self.assertEqual(checked.returncode, 0, checked.stderr)
+                self.assertIn("0 error(s)", checked.stdout)
+
+    def test_init_json_remains_a_single_machine_readable_document(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            vault = Path(td) / "ledger"
+            result = run("init", str(vault), "--json")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["root"], str(vault))
+            self.assertEqual(payload["layout"], "minimal")
 
 
 class VaultTestCase(unittest.TestCase):
@@ -276,7 +323,7 @@ class InitNextStepTests(unittest.TestCase):
             out = io.StringIO()
             with mock.patch.object(cli, "SOURCE_ROOT", source_root), contextlib.redirect_stdout(out):
                 self.assertEqual(cli.main(["init", os.path.join(td, "v")]), 0)
-            return next(line for line in out.getvalue().splitlines() if line.strip().startswith("3."))
+            return next(line for line in out.getvalue().splitlines() if line.strip().startswith("Check:"))
 
     def test_installed_tool_is_told_the_bare_command(self) -> None:
         with tempfile.TemporaryDirectory() as td:

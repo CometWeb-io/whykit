@@ -13,7 +13,7 @@ evidence register (E-NNN) ──cited by──> decision record (D-NNN) ──re
 This page explains what each part is, which files hold it, and what the linter
 does and does not check about it. Commands are shown as `whykit …`; from a
 source checkout, prefix them with `uv run` and pass `--root` (see the
-[README](../README.md#60-second-quickstart)).
+[README](../README.md#try-it)).
 
 ## The vault
 

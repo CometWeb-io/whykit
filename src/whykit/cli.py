@@ -255,16 +255,16 @@ def cmd_init(args: argparse.Namespace) -> int:
     else:
         print("Layout: full starter with optional workstreams (--full)")
     print()
-    print("Next, in order:")
-    print("  1. Answer every TODO in AGENTS.md - that file is the contract agents work under.")
-    print("  2. Replace the starter content in 00-context/ before treating anything as canonical.")
-    # Match the README cold-install path (`uv sync` + `uv run whykit` from the
-    # checkout), where bare `whykit` is not on PATH. An installed tool has no
-    # checkout to run from, so it gets the bare command instead.
-    if _is_whykit_package_source_root(SOURCE_ROOT):
-        print(f"  3. From the WhyKit checkout: uv run whykit lint --root {target}")
-    else:
-        print(f"  3. Check it: whykit lint --root {target}")
+    print("This folder keeps decisions and sources together as Markdown files.")
+    root_arg = "'" + str(target).replace("'", "''") + "'" if os.name == "nt" else shlex.quote(str(target))
+    command = "uv run whykit" if _is_whykit_package_source_root(SOURCE_ROOT) else "whykit"
+    if os.name == "nt":
+        print("Run these commands in PowerShell:")
+    print(f'Start: {command} new --root {root_arg} decision "Your first decision"')
+    print("Link a source to your decision using the README quickstart.")
+    print("Before relying on the vault, replace the starter content in 00-context/.")
+    print("Before using agents or CI, answer the TODOs in AGENTS.md.")
+    print(f"Check: {command} lint --root {root_arg}")
     return 0
 
 
@@ -1524,7 +1524,7 @@ def _add_leaf_root(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = _TopParser(
         prog="whykit",
-        description="WhyKit - a Git-native evidence and decision ledger.",
+        description="WhyKit keeps decisions and their sources together in Markdown.",
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
