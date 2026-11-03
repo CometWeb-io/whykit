@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -362,12 +363,20 @@ class ContractTests(unittest.TestCase):
         self.assertIn("uv tool install whykit", guide)
         self.assertIn("--workstream notes", guide)
         with tempfile.TemporaryDirectory() as td:
-            minimal_vault = Path(td) / "minimal"
+            minimal_vault = Path(td) / "minimal vault"
             init = run("init", "--minimal", str(minimal_vault))
             self.assertEqual(init.returncode, 0, init.stderr)
             self.assertTrue((minimal_vault / "notes").is_dir())
             self.assertFalse((minimal_vault / "07-research").exists())
-            self.assertIn(f"uv run whykit lint --root {minimal_vault}", init.stdout)
+            line = next(line for line in init.stdout.splitlines() if line.startswith("Check: "))
+            prefix = "Check: uv run whykit lint --root "
+            self.assertTrue(line.startswith(prefix), line)
+            root_arg = line.removeprefix(prefix)
+            if os.name == "nt":
+                self.assertTrue(root_arg.startswith("'") and root_arg.endswith("'"), root_arg)
+                self.assertEqual(root_arg[1:-1].replace("''", "'"), str(minimal_vault))
+            else:
+                self.assertEqual(shlex.split(root_arg), [str(minimal_vault)])
             self.assertNotIn("&& whykit lint", init.stdout)
         self.assertNotIn("whykit/scripts/whykit.py", guide)
         self.assertNotIn("warning:32", guide)
