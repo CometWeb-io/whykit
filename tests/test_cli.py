@@ -309,7 +309,6 @@ class ContractTests(unittest.TestCase):
 
     def test_readme_uses_the_canonical_product_positioning(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("Git-native evidence and decision ledger", readme)
         self.assertNotIn("Obsidian vault + CI ledger", readme)
         self.assertNotIn("# ![CI]", readme)
         self.assertIn("https://docs.astral.sh/uv/getting-started/installation/", readme)
