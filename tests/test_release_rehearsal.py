@@ -148,12 +148,40 @@ class NotesAndCommandsTests(unittest.TestCase):
         sha = "a" * 40
         ready = rehearsal.owner_commands("0.3.0", sha, pending=False)
         self.assertIn(f'git tag -a v0.3.0 -m "WhyKit 0.3.0" {sha}', ready)
+        self.assertIn(f"git merge-base --is-ancestor {sha} origin/main", ready)
+        self.assertNotIn('test "$(git rev-parse HEAD)"', ready)
         self.assertIn("git push origin v0.3.0", ready)
         self.assertNotIn("--tags", ready)
         self.assertNotIn("--force", ready)
         pending = rehearsal.owner_commands("0.3.0", sha, pending=True)
         self.assertIn('__version__ = "0.3.0"', pending)
-        self.assertIn("git tag -a v0.3.0 -m \"WhyKit 0.3.0\" <merged-main-sha>", pending)
+        self.assertIn("git tag -a v0.3.0 -m \"WhyKit 0.3.0\" <candidate-sha>", pending)
+
+    def test_parser_accepts_an_explicit_candidate_checkout(self) -> None:
+        args = rehearsal.build_parser().parse_args(["--root", "/tmp/candidate", "--skip-build"])
+        self.assertEqual(args.root, "/tmp/candidate")
+        with mock.patch.object(rehearsal, "rehearse", return_value=0) as run:
+            self.assertEqual(rehearsal.main(["--root", "/tmp/candidate", "--skip-build"]), 0)
+        self.assertEqual(run.call_args.kwargs["root"], Path("/tmp/candidate"))
+
+    @unittest.skipIf(os.name == "nt", "shell command safety regression runs on POSIX")
+    def test_tag_commands_stop_when_ancestor_check_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            calls = folder / "calls"
+            shim = folder / "git"
+            shim.write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "$CALLS"\n[ "$1" != merge-base ]\n', encoding="utf-8")
+            shim.chmod(0o755)
+            env = {**os.environ, "PATH": f"{folder}{os.pathsep}{os.environ.get('PATH', '')}", "CALLS": str(calls)}
+            result = subprocess.run(["/bin/sh", "-c", rehearsal.owner_commands("0.3.0", "a" * 40, pending=False)],
+                                    env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(calls.read_text(encoding="utf-8").splitlines(), ["fetch", "merge-base"])
+
+    def test_missing_candidate_checkout_is_reported_cleanly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(io.StringIO()) as error:
+            self.assertEqual(rehearsal.main(["--root", str(Path(tmp) / "missing"), "--skip-build"]), 2)
+        self.assertIn("candidate checkout", error.getvalue())
 
     def test_supported_pythons_come_from_the_classifiers(self) -> None:
         versions = rehearsal.supported_pythons(ROOT)
@@ -235,7 +263,7 @@ class SkipBuildRehearsalTests(unittest.TestCase):
         self.assertIn("PASS    next version is 0.3.0", out)
         self.assertIn("PENDING version alignment", out)
         self.assertIn("RELEASE PULL REQUEST STILL PENDING", out)
-        self.assertIn("git push origin v0.3.0", out)
+        self.assertNotIn("git push", out)
         notes = (self.tmp / "work" / "release-notes-v0.3.0.md").read_text(encoding="utf-8")
         self.assertIn("- New exit code.", notes)
         self.assertIn("compare/v0.2.0...v0.3.0", notes)
@@ -265,8 +293,9 @@ class SkipBuildRehearsalTests(unittest.TestCase):
         code, out = self.rehearse()
         self.assertEqual(code, 0, out)
         self.assertIn("PASS    commit is on origin/main", out)
-        self.assertIn("READY TO TAG", out)
-        self.assertIn(f'git tag -a v0.3.0 -m "WhyKit 0.3.0" {head}', out)
+        self.assertIn("LOCAL REHEARSAL INCOMPLETE", out)
+        self.assertNotIn("READY TO TAG", out)
+        self.assertNotIn("git tag", out)
         self.assert_never_released()
 
     def test_final_candidate_without_origin_main_remains_pending(self) -> None:
