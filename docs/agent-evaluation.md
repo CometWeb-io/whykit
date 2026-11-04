@@ -7,7 +7,12 @@ scoring with passing a real-model benchmark.
 
 ## Quickstart
 
-Run from a source checkout with development dependencies installed:
+With the development version installed, run from a source checkout to use the
+included example files:
+
+    whykit agent eval --cases examples/agent-eval/cases.jsonl --responses examples/agent-eval/responses.jsonl
+
+From a source checkout, the script is also available:
 
     uv run python scripts/agent_eval.py --cases examples/agent-eval/cases.jsonl --responses examples/agent-eval/responses.jsonl
 
@@ -94,8 +99,9 @@ and blinded human assessments separately; absent measurements remain unknown,
 not zero. Public sample scores are deterministic development checks, not an
 independent holdout, model comparison, proof of value, or deployment evidence.
 
-This tool is available as a source-checkout script and importable
-`whykit.agent_eval.evaluate(cases_path, responses_path)` function. It is not a
-`whykit` CLI subcommand. Its report format is `whykit.agent-eval/v1`; existing
+This tool is available through `whykit agent eval`, as a source-checkout script,
+and as the importable `whykit.agent_eval.evaluate(cases_path, responses_path)`
+function. The CLI command is unreleased in 0.4 development; it is not in 0.3.4.
+Its report format is `whykit.agent-eval/v1`; existing
 CLI JSON contracts are unchanged. A pass checks only the supplied rubric and
 does not approve an agent action or authenticate a reviewer.

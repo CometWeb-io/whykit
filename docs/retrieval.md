@@ -1,5 +1,11 @@
 # Opt-in retrieval
 
+Default substring query and Explorer search normalize Unicode text and use
+case-insensitive folding. Their search and ranking rules differ, and Python
+and the browser may use different Unicode database versions; characters added
+in newer Unicode versions can therefore produce different matches across hosts.
+Normalization does not change vault files, record identities or permissions.
+
 The Python function `whykit.retrieval.retrieve_bm25` retrieves notes using BM25
 term ranking. `whykit query --ranking bm25` and `compile-context --ranking bm25`
 opt in to that lexical engine. Their defaults remain substring matching.
