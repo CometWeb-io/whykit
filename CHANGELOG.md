@@ -7,7 +7,22 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-11-03
+
+### Fixed
+
+- Allow the release secret scan to ignore one historical synthetic test marker
+  by its exact fingerprint; other findings remain subject to scanning.
+- Include the previously unpublished 0.3.3 fixes: honor evidence-row grants in
+  scoped reports and packs, and withhold raw global decision and review logs
+  from MCP to prevent restricted metadata from leaking.
+- Fix nested command help and preserve exact Git vault paths in history checks,
+  snapshot comparisons, hooks and CI. Previously generated hooks are not
+  rewritten; regenerate affected hooks with `whykit install-hooks --force`.
+
 ## [0.3.3] - 2026-10-27
+
+Source tag only. The release secret scan blocked publication before upload.
 
 ### Fixed
 
