@@ -128,9 +128,11 @@ which fixes its certifi and Sigstore runtime. These floors follow the
    with a merge commit and verify ancestry afterwards. Squash or rebase merging
    does not preserve the candidate SHA.
 5. **Check the exact candidate in GitHub Actions.** Run the manual
-   `Release candidate check` workflow from the protected default branch with the
-   candidate's full SHA, expected version and both archive digests from step 3.
-   It verifies main ancestry, runs
+   `Release candidate check` workflow from the protected default branch after
+   verifying that its reviewed fixed SHA is the candidate. The workflow is
+   currently pinned to 0.3.4; change the pin in a reviewed PR before testing a
+   later candidate. Supply the expected version and both archive digests from
+   step 3. It verifies main ancestry, runs
    candidate tests and the history scan, and builds candidate-bound archives
    and an SBOM without publish permissions. Download its artifact; confirm the
    SBOM lists only `whykit` at the release version. The build fails if either

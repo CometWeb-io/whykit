@@ -23,6 +23,16 @@ IDENTITY = {
 
 @unittest.skipIf(os.name == 'nt', 'The validation step runs in bash on an Ubuntu runner')
 class CandidateValidationTests(unittest.TestCase):
+    def test_workflow_checks_out_only_the_reviewed_candidate(self) -> None:
+        import re
+
+        text = WORKFLOW.read_text(encoding='utf-8')
+        candidate = '34c24d0a24a499a1cd16f0e1ad4c9ef0c985751d'
+        self.assertNotIn('inputs.candidate_sha', text)
+        self.assertIn(f'CANDIDATE_SHA: {candidate}', text)
+        refs = re.findall(r'^\s+ref: ([0-9a-f]{40})\s*$', text, re.MULTILINE)
+        self.assertEqual(refs, [candidate] * 5)
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
