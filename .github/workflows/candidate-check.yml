@@ -1,0 +1,220 @@
+name: Release candidate check
+
+# Manual pre-tag evidence only. This workflow cannot publish or create tags.
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Full commit SHA of the candidate already reachable from main
+        required: true
+        type: string
+      version:
+        description: Expected final package version without the v prefix
+        required: true
+        type: string
+      wheel_sha256:
+        description: Wheel digest from the clean local rehearsal
+        required: true
+        type: string
+      sdist_sha256:
+        description: Source distribution digest from the clean local rehearsal
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: candidate
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          EXPECTED_VERSION: ${{ inputs.version }}
+          EXPECTED_WHEEL_SHA256: ${{ inputs.wheel_sha256 }}
+          EXPECTED_SDIST_SHA256: ${{ inputs.sdist_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid candidate SHA' >&2; exit 1; }
+          [[ "$EXPECTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid version' >&2; exit 1; }
+          [[ "$EXPECTED_WHEEL_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo 'Invalid wheel digest' >&2; exit 1; }
+          [[ "$EXPECTED_SDIST_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo 'Invalid sdist digest' >&2; exit 1; }
+          git cat-file -e "$CANDIDATE_SHA^{commit}"
+          test "$(git rev-parse "$CANDIDATE_SHA^{commit}")" = "$CANDIDATE_SHA"
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor "$CANDIDATE_SHA" origin/main
+          actual_version="$(git show "$CANDIDATE_SHA:src/whykit/__init__.py" | python3 -c 'import re,sys; print(re.search(r"^__version__ = \"([^\"]+)\"", sys.stdin.read(), re.M).group(1))')"
+          test "$actual_version" = "$EXPECTED_VERSION"
+          test -z "$(git tag --list "v$EXPECTED_VERSION")"
+          echo "sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          printf 'Candidate: `%s`\nVersion: `%s`\n' "$CANDIDATE_SHA" "$actual_version" >> "$GITHUB_STEP_SUMMARY"
+
+  tests:
+    needs: validate
+    name: Candidate tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python: '3.11'}
+          - {os: ubuntu-latest, python: '3.12'}
+          - {os: ubuntu-latest, python: '3.13'}
+          - {os: ubuntu-latest, python: '3.14'}
+          - {os: windows-latest, python: '3.12'}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.13.5"
+          python-version: ${{ matrix.python }}
+          enable-cache: false
+      - run: uv sync --locked --no-dev
+      - run: uv run --no-sync python -m unittest discover -s tests -v
+      - run: uv run --no-sync whykit lint examples/tiny --strict --today 2026-09-17
+      - run: uv run --no-sync whykit lint examples/northline --strict --today 2026-09-17
+      - name: Lint, type and workflow checks
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        run: |
+          uv sync --locked --only-group dev
+          uv run --no-sync ruff check .
+          uv run --no-sync mypy
+          uv run --no-sync zizmor --offline .
+
+  mcp:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.13.5"
+          python-version: '3.12'
+          enable-cache: false
+      - name: Exercise supported MCP SDK versions
+        run: |
+          set -euo pipefail
+          uv sync --locked --no-dev --extra mcp
+          for version in 2.2.0 2.3.0; do
+            for suite in test_mcp_handshake test_mcp_backpressure test_mcp_frames test_mcp_response_budget test_mcp_sdk_contract test_mcp_http_limits; do
+              uv run --no-sync --with "mcp==$version" python -m unittest discover -s tests -p "$suite.py" -v
+            done
+          done
+
+  explorer:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.13.5"
+          python-version: '3.12'
+          enable-cache: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - run: uv sync --locked --no-dev
+      - run: npm ci --prefix apps/explorer
+      - run: npm run check --prefix apps/explorer
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/explorer
+      - run: npm run e2e
+        working-directory: apps/explorer
+
+  scan:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan full fetched history
+        env:
+          GITLEAKS_VERSION: '8.30.1'
+          GITLEAKS_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}" -o "$archive"
+          echo "${GITLEAKS_SHA256}  ${archive}" | sha256sum -c -
+          tar -xzf "$archive" gitleaks
+          ./gitleaks detect --source . --config .gitleaks.toml --redact --no-banner
+
+  package:
+    needs: [validate, tests, mcp, explorer, scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.13.5"
+          python-version: '3.12'
+          enable-cache: false
+      - name: Build and check candidate distributions
+        env:
+          EXPECTED_WHEEL_SHA256: ${{ inputs.wheel_sha256 }}
+          EXPECTED_SDIST_SHA256: ${{ inputs.sdist_sha256 }}
+        run: |
+          set -euo pipefail
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          uv build --out-dir dist
+          uv build --out-dir "$RUNNER_TEMP/dist-rebuild"
+          python3 scripts/check_dist.py dist --reproducible-against "$RUNNER_TEMP/dist-rebuild"
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+          test "${#wheels[@]}" -eq 1
+          test -f "${wheels[0]}"
+          test "${#sdists[@]}" -eq 1
+          test -f "${sdists[0]}"
+          printf '%s  %s\n' "$EXPECTED_WHEEL_SHA256" "${wheels[0]}" | sha256sum -c -
+          printf '%s  %s\n' "$EXPECTED_SDIST_SHA256" "${sdists[0]}" | sha256sum -c -
+          uv run --locked --only-group dist twine check --strict dist/*
+          uv venv --python 3.11 "$RUNNER_TEMP/wheel-venv"
+          uv pip install --python "$RUNNER_TEMP/wheel-venv/bin/python" dist/*.whl
+          "$RUNNER_TEMP/wheel-venv/bin/whykit" --version
+          uv run --locked --only-group dist cyclonedx-py environment --sv 1.6 --output-reproducible --of JSON -o "$RUNNER_TEMP/whykit.cdx.json" "$RUNNER_TEMP/wheel-venv/bin/python"
+          python3 scripts/check_dist.py dist --sbom "$RUNNER_TEMP/whykit.cdx.json"
+          mkdir -p sbom
+          cp "$RUNNER_TEMP/whykit.cdx.json" sbom/
+          (cd dist && sha256sum -- *) >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: candidate-distributions-${{ needs.validate.outputs.sha }}
+          path: |
+            dist/
+            sbom/
+          if-no-files-found: error
+          retention-days: 14

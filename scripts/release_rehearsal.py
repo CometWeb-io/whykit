@@ -250,17 +250,20 @@ def owner_commands(version: str, commit: str, *, pending: bool) -> str:
             # Before tagging: merge a release pull request that only sets
             # __version__ = "{version}" in src/whykit/__init__.py, updates the README
             # status line and moves [Unreleased] under "## [{version}] - YYYY-MM-DD".
-            # Then rerun this rehearsal on the merged main commit: the digests
-            # above belong to {commit[:12]} and will differ from the tag's."""))
-        target = "<merged-main-sha>"
+            # Rerun this rehearsal in a clean checkout of the exact candidate
+            # commit once that commit is reachable from main. The digests above
+            # belong to {commit[:12]} and do not validate a different commit."""))
+        target = "<candidate-sha>"
     else:
         target = commit
     steps.append(textwrap.dedent(f"""\
-        git switch main
-        git pull --ff-only
-        test "$(git rev-parse HEAD)" = "{target}"
-        git tag -a {tag} -m "WhyKit {version}" {target}
-        git push origin {tag}"""))
+        (
+          set -e
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor {target} origin/main
+          git tag -a {tag} -m "WhyKit {version}" {target}
+          git push origin {tag}
+        )"""))
     steps.append(textwrap.dedent("""\
         # Then watch the Release workflow: compare the digests in its run summary
         # with the ones above, and approve the `pypi` environment only if they match."""))
@@ -479,6 +482,8 @@ def rehearse(args: argparse.Namespace, root: Path = ROOT) -> int:
     # Resolve first: on macOS a temporary directory under /var is really under
     # /private/var, and the work-dir containment check must compare like with like.
     root = root.resolve()
+    if not root.is_dir():
+        raise RehearsalError(f"candidate checkout does not exist: {root}")
     if shutil.which("git") is None:
         raise RehearsalError("git is not on PATH")
     try:
@@ -569,8 +574,19 @@ def rehearse(args: argparse.Namespace, root: Path = ROOT) -> int:
     if rehearsal.failed:
         print(f"NOT READY: {sum(s.status == 'FAIL' for s in rehearsal.steps)} step(s) failed. Nothing was tagged or pushed.")
         return 1
-    state = "READY TO TAG" if not rehearsal.pending else "REHEARSAL PASSED, RELEASE PULL REQUEST STILL PENDING"
+    incomplete = (
+        args.skip_build or args.skip_mcp or any(step.status == "SKIP" for step in rehearsal.steps)
+        or (args.python is not None and not set(supported_pythons(root)).issubset(args.python))
+    )
+    state = (
+        "REHEARSAL INCOMPLETE; RELEASE PULL REQUEST STILL PENDING" if rehearsal.pending
+        else "LOCAL REHEARSAL INCOMPLETE; REMOTE RELEASE GATES STILL REQUIRED" if incomplete
+        else "LOCAL REHEARSAL PASSED; REMOTE RELEASE GATES STILL REQUIRED"
+    )
     print(f"{state}. This script has not tagged, pushed or uploaded anything.")
+    if rehearsal.pending or incomplete:
+        print("Complete the pending and skipped checks before preparing tag commands.")
+        return 0
     print("The maintainer runs, and only the maintainer runs:\n")
     print(textwrap.indent(owner_commands(candidate.version, commit, pending=rehearsal.pending), "    "))
     return 0
@@ -580,10 +596,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Rehearse a WhyKit release locally: build, check, install and smoke-test, then print the tag commands. Never tags, pushes or uploads.",
     )
+    parser.add_argument("--root", default=str(ROOT), help="clean candidate checkout to rehearse (default: the checkout containing this script)")
     parser.add_argument("--commit", default="HEAD", help="commit to rehearse; it must be checked out with a clean tree (default: HEAD)")
     parser.add_argument("--work-dir", help="directory for builds, virtual environments and release notes (default: a new temporary directory, kept)")
     parser.add_argument("--python", action="append", metavar="X.Y", help="smoke-test only this Python (repeatable; default: every supported version installed here)")
-    parser.add_argument("--skip-build", action="store_true", help="only check the tree, compute the version, write release notes and print the commands")
+    parser.add_argument("--skip-build", action="store_true", help="only check the tree, compute the version and write release notes")
     parser.add_argument("--skip-mcp", action="store_true", help="install the wheel without the mcp extra and skip the MCP list-tools smoke")
     parser.add_argument("--online", action="store_true", help="let uv use the network (default: UV_OFFLINE=1, everything from the local cache)")
     return parser
@@ -592,7 +609,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        return rehearse(args)
+        return rehearse(args, root=Path(args.root))
     except RehearsalError as exc:
         print(f"release_rehearsal: {exc}", file=sys.stderr)
         return 2

@@ -60,6 +60,16 @@ which fixes its certifi and Sigstore runtime. These floors follow the
    the maintainer and blocks deletion and updates, so a published version
    cannot be re-pointed.
 
+   GitHub's `Restrict creations` rule allows matching tag creation only to
+   actors on that ruleset's bypass list. Such a creation is a ruleset bypass,
+   even when the actor is the intended maintainer. If the release must involve
+   no bypass, the current rule does not provide a way to create the tag: stop
+   and resolve the policy explicitly. Do not disable the rule or broaden access
+   merely to make a release pass. The separate immutable-tag rule must have no
+   bypass for updates or deletion. If the owner explicitly authorizes the
+   creation-only exception, record that bypass; it does not replace CI or the
+   separate approval for the `pypi` environment.
+
 ## Cut a release
 
 1. **Pick the version.** The data contract, the CLI and the lint rule codes are
@@ -91,7 +101,7 @@ which fixes its certifi and Sigstore runtime. These floors follow the
    MCP client that lists the tools, writes release notes from the changelog,
    and prints the tag commands for step 6. It never tags, pushes or uploads.
    `uv` runs offline; pass `--online` once if the cache is cold. Use
-   `--skip-build` to check only the version, notes and commands, and
+   `--skip-build` to check only the version and notes, and
    `--python 3.11` to limit the smoke to one interpreter.
 
    A missing local `origin/main` reference leaves the main-containment gate
@@ -102,21 +112,45 @@ which fixes its certifi and Sigstore runtime. These floors follow the
    The archives stay in the work directory it names, outside the checkout.
    Before the version bump the rehearsal reports PENDING steps (a `.dev`
    version, an undated changelog section) and still exits 0; only a run that
-   says READY TO TAG is the one whose digests step 7 must match.
+   passes all local checks is the one whose digests step 7 must match. A local
+   pass does not establish remote CI, protection rules or publication readiness.
+
+   When the release candidate is an ancestor of current `main`, its checkout
+   and the checkout containing the current rehearsal tool can differ. Run the
+   current tool with `--root /path/to/clean-candidate --commit <full-sha>`.
+   Its ancestry check uses the candidate checkout's last-fetched `origin/main`;
+   refresh that reference first. Do not substitute `main`'s current SHA for the
+   candidate: it can contain unreleased code and a different package version.
 4. **Merge the pull request** once every required check is green. Then confirm
    that CI on the resulting `main` commit is green too; the release reruns the
-   same gates and will fail if they do not pass there.
-5. **Download the `distributions` artifact** from that `main` run and read the
-   SBOM. It must list `whykit` at the release version and no other component.
-6. **Tag the merged commit and push the tag.** This is the irreversible step:
+   same gates and will fail if they do not pass there. If the candidate is a
+   separate commit rather than the merge commit, preserve it in main's history
+   with a merge commit and verify ancestry afterwards. Squash or rebase merging
+   does not preserve the candidate SHA.
+5. **Check the exact candidate in GitHub Actions.** Run the manual
+   `Release candidate check` workflow from the protected default branch with the
+   candidate's full SHA, expected version and both archive digests from step 3.
+   It verifies main ancestry, runs
+   candidate tests and the history scan, and builds candidate-bound archives
+   and an SBOM without publish permissions. Download its artifact; confirm the
+   SBOM lists only `whykit` at the release version. The build fails if either
+   archive differs from step 3. A main CI artifact is valid for this purpose only when
+   it was built from the exact candidate SHA. The manual check is pre-tag
+   evidence, not a replacement for the release workflow's own tag checks.
+   Recheck the remote tag and PyPI version immediately before tagging; the
+   manual workflow's tag check is a snapshot, not a reservation.
+6. **Tag the exact candidate and push the tag.** This is the irreversible step:
    a version uploaded to PyPI can be yanked but never replaced. The rehearsal
    prints these commands with the commit filled in.
 
    ```bash
-   git switch main
-   git pull --ff-only
-   git tag -a vX.Y.Z -m "WhyKit X.Y.Z"
-   git push origin vX.Y.Z
+   (
+     set -e
+     git fetch origin main --no-tags
+     git merge-base --is-ancestor <candidate-sha> origin/main
+     git tag -a vX.Y.Z -m "WhyKit X.Y.Z" <candidate-sha>
+     git push origin vX.Y.Z
+   )
    ```
 
 7. **Watch the release run.** The `build` job writes the archive digests to the
