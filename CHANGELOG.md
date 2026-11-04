@@ -77,6 +77,11 @@ CLI and the lint rule codes.
 
 ### Fixed
 
+- Match canonically equivalent Unicode text in substring search and Explorer,
+  including casefolded search terms and metadata filters.
+- Correct the evaluation and workspace documentation to show their installed
+  development-version CLI commands.
+
 - Accept stable capture and claim files on Windows while retaining file identity
   checks and detecting changes within both path and descriptor metadata.
 

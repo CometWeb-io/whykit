@@ -30,7 +30,14 @@ directory. Unknown keys and unsupported manifest versions are rejected.
 
 ## Read the report
 
-With the package installed, call the local Python API:
+With the development version installed, run:
+
+```bash
+whykit workspace status /path/to/workspace.toml --today 2026-10-27 --json
+```
+
+The command is unreleased in 0.4 development; it is not in 0.3.4. You can also
+call the local Python API:
 
 ```python
 import datetime as dt
@@ -45,8 +52,7 @@ report = build_workspace_status(
 print(json.dumps(report, indent=2))
 ```
 
-The date argument is optional; the default is the current local date. This
-library API does not add a command or a new executable module.
+The date argument is optional; the default is the current local date.
 
 The JSON report follows [workspace-status.schema.json](../schemas/workspace-status.schema.json).
 It lists each alias with document, lint error, lint warning, due review and

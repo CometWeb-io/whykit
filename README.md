@@ -14,18 +14,19 @@ the source it cites and its review status.
 
 **Python 3.11+ · No runtime dependencies · Apache-2.0**
 
-**Status:** public alpha. [PyPI](https://pypi.org/project/whykit/) has `0.3.2`;
-this repository contains unreleased `0.4.0.dev0` work. The published version
-does not include the scoped-read privacy fixes on main. Keep sensitive vaults
-private; WhyKit's filters are not access controls. The [0.3.2 PyPI page](https://pypi.org/project/whykit/0.3.2/)
-links to the documentation for the installed version.
+**Status:** public alpha. The latest [PyPI release is 0.3.4](https://pypi.org/project/whykit/0.3.4/).
+This `main` branch also contains unreleased `0.4.0.dev0` work; some features
+described in the documentation below are not in 0.3.4. For the installed
+release, follow the documentation links on its PyPI page.
+Keep sensitive vaults private; WhyKit's filters are not access controls.
 
 [![CI](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml/badge.svg)](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml)
 
 ## Try it
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) (0.13.4+)
-and use Python 3.11+. The example below uses a fictional source. It creates a
+and use Python 3.11+. This example works with the published 0.3.4 release and
+uses a fictional source. It creates a
 folder called a *vault*: just the Markdown files WhyKit works with.
 
 <!-- quickstart:start -->
