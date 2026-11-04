@@ -1,0 +1,426 @@
+{
+  "as_of": "2026-10-27",
+  "canonical_tree_sha256": "0b6459d8b1edf322e707c20a0dc64f2834b9c7167ce1fbb945eeb31969ac1e86",
+  "evidence_intermediaries": 6,
+  "files": {
+    ".inputs/source-01.txt": {
+      "bytes": 126,
+      "sha256": "14a51a6da7b67c88f9d2bdd7870e6d46bafd65a5f9eeb380b8f51643fcf2f5aa"
+    },
+    ".inputs/source-02.txt": {
+      "bytes": 121,
+      "sha256": "453aa098622df285cf6eb4355e88fd48e187a951dfd04f143d209540e0cc77a2"
+    },
+    ".inputs/source-03.txt": {
+      "bytes": 118,
+      "sha256": "864a498ab5b93c27f1c6e91588e85d881a3b9ecaff92d2831677723881bfbdf4"
+    },
+    ".inputs/source-04.txt": {
+      "bytes": 125,
+      "sha256": "8ed15e08824a32febc9686aa08946b4c245e71a0910da609710eb581032da39b"
+    },
+    ".inputs/source-05.txt": {
+      "bytes": 118,
+      "sha256": "296bdbea28b7f76cbb183185abbeeb51def810ec6d4c76b168d5f0f1a7763224"
+    },
+    ".inputs/source-06.txt": {
+      "bytes": 128,
+      "sha256": "7d29e8f561b6b5e7edbbc3d04a7feb844bfbde5db28dd082028ea388473ac9b6"
+    },
+    "00-context/artifacts/E-001/14a51a6da7b67c88f9d2bdd7870e6d46bafd65a5f9eeb380b8f51643fcf2f5aa.json": {
+      "bytes": 448,
+      "sha256": "ae3d63e4a273faee5658f56370e58c026ca02e86d2a951b035bc7247bb5b0501"
+    },
+    "00-context/artifacts/E-002/453aa098622df285cf6eb4355e88fd48e187a951dfd04f143d209540e0cc77a2.json": {
+      "bytes": 444,
+      "sha256": "84263b884536da1a9eb771259b2847a933ebc623bde35ee7ba651ef68a17e51f"
+    },
+    "00-context/artifacts/E-003/864a498ab5b93c27f1c6e91588e85d881a3b9ecaff92d2831677723881bfbdf4.json": {
+      "bytes": 440,
+      "sha256": "ad8f199c9a8e95930f1142376d8f2db28f9cfa1775bab2065901155c2442b3c3"
+    },
+    "00-context/artifacts/E-004/8ed15e08824a32febc9686aa08946b4c245e71a0910da609710eb581032da39b.json": {
+      "bytes": 448,
+      "sha256": "594ed472f10d810349ad83446ada7f47c8abc2dce3095bef01ed9858a6deff67"
+    },
+    "00-context/artifacts/E-005/296bdbea28b7f76cbb183185abbeeb51def810ec6d4c76b168d5f0f1a7763224.json": {
+      "bytes": 440,
+      "sha256": "740b43ae08d4b6894be1b1cf8c71c043f3c56858518163e8ebf5ceba3e9a8878"
+    },
+    "00-context/artifacts/E-006/7d29e8f561b6b5e7edbbc3d04a7feb844bfbde5db28dd082028ea388473ac9b6.json": {
+      "bytes": 452,
+      "sha256": "0a282bd7f7cf5a0d758306e62f3a87b9f204c4e644da3809b607d7a830ee4f4b"
+    },
+    "00-context/claims/c-001.md": {
+      "bytes": 1034,
+      "sha256": "fd7528080caecf6293f38f4efdcfa89bacf5e6a70d4322cf87137d785f035c98"
+    },
+    "00-context/claims/c-002.md": {
+      "bytes": 1027,
+      "sha256": "a57e31df077344963f65930e55a21abcf8f4539d98c8271ca607935d1b70edc1"
+    },
+    "00-context/claims/c-003.md": {
+      "bytes": 1021,
+      "sha256": "82442782564d6be248ef9c774498a624e55d4249b393bc6fb7cf6ccf6fa30d4a"
+    },
+    "00-context/claims/c-004.md": {
+      "bytes": 1040,
+      "sha256": "dc02a11716b1a8ccdd9f6430405f028cb150dd834146acd0703528fcda1dd704"
+    },
+    "00-context/claims/c-005.md": {
+      "bytes": 1025,
+      "sha256": "980420df224a965dc3e6150a0ebf3d58cf1247869d3601e307acc03b27b3074d"
+    },
+    "00-context/claims/c-006.md": {
+      "bytes": 1042,
+      "sha256": "de17073c8118516a640aa5a0a258e6a2f8fb8db08ebd564de81963c0d957b0b9"
+    },
+    "00-context/evidence-register.md": {
+      "bytes": 2282,
+      "sha256": "f4073a7d6ad14d2a965c4f77f8ce9120aeb48bf3b8d081743c2fe0fcb015f327"
+    },
+    "00-context/observations/E-001.json": {
+      "bytes": 285,
+      "sha256": "ac7b77d395cb576633625e69f23bce4069061009d95faec3609696eeb304085a"
+    },
+    "00-context/observations/E-002.json": {
+      "bytes": 285,
+      "sha256": "69e8945601dd0873b9e5ca3266cdb98cbc963fce4a95ee0161d106edd1698330"
+    },
+    "00-context/observations/E-003.json": {
+      "bytes": 285,
+      "sha256": "ad6f3266a2fb461829b519128dd48c59ce17667342c7eda3fd161438a98e7dfe"
+    },
+    "00-context/observations/E-004.json": {
+      "bytes": 285,
+      "sha256": "06a20ae8e05617ef3e34dd91044b56ba555e0339a356a56450c1a9e6d4a402c9"
+    },
+    "00-context/observations/E-005.json": {
+      "bytes": 285,
+      "sha256": "0218c85674c798f1f0a404cc515e76d6690dbe4ecedce283711aee3dde76bbdc"
+    },
+    "00-context/observations/E-006.json": {
+      "bytes": 285,
+      "sha256": "c10ad5671464522e0f7b6c3db893f85bca53d4af692bcb474d1813d9cccedc3d"
+    },
+    "00-context/outcomes/o-001.md": {
+      "bytes": 954,
+      "sha256": "1eeb35096e97f2acf021d63327f2d1663a2e0041746a12721e496dad286c55c9"
+    },
+    "00-context/outcomes/o-002.md": {
+      "bytes": 952,
+      "sha256": "39b949b88165231a00b7a1ff72672ce06d028793b0037eab4dffeed377f9a381"
+    },
+    "00-context/outcomes/o-003.md": {
+      "bytes": 952,
+      "sha256": "5149f5d934fc1d2562bfea01bd784a8e994623e6a63d5a9e62c02f8a25ab0d4b"
+    },
+    "00-context/outcomes/o-004.md": {
+      "bytes": 952,
+      "sha256": "b7efc4fbcf190a75a270261d9128d5a95f0604e0831f6caf1cc3db77957c9fe1"
+    },
+    "00-context/outcomes/o-005.md": {
+      "bytes": 952,
+      "sha256": "31ae7cf0c0742bebc59490e649305a305c92c38d707d978fbb886c9ac256b728"
+    },
+    "00-context/outcomes/o-006.md": {
+      "bytes": 953,
+      "sha256": "67400d648102ddd898d848cffb9418231277253d6e092117ef4222dbabcbfc5e"
+    },
+    "00-context/review-log.md": {
+      "bytes": 4920,
+      "sha256": "9c1b39215951a032374f1b6d4f4f0280cba21c03b0db30282b079aa66ac3b4e8"
+    },
+    "06-decisions/d-001-retry-queue-previous-policy.md": {
+      "bytes": 1353,
+      "sha256": "268cb1423adaf15c77f83f10ee524b3f445847cb19ac1e69e480cebdf54df6f9"
+    },
+    "06-decisions/d-002-retry-queue-current-policy.md": {
+      "bytes": 1352,
+      "sha256": "4e9f45871e4e4cedd38d9cf84fe6b2dba7f1233dcbbfd26ba5f69bfd9f951f7f"
+    },
+    "06-decisions/d-003-backup-restore-previous-policy.md": {
+      "bytes": 1356,
+      "sha256": "9e562b18fa054513608deb11731d5ad8edc19b9d114c713a1b4ab972042b320a"
+    },
+    "06-decisions/d-004-backup-restore-current-policy.md": {
+      "bytes": 1392,
+      "sha256": "70b4461bb921dede1cd5fd43e9e3a2f21100645e753d43e26ed254839fd1760d"
+    },
+    "06-decisions/d-005-data-retention-previous-policy.md": {
+      "bytes": 1361,
+      "sha256": "0233ad7d872f679a486f355bf851f50ed2eb257ab4463c466ed45b9390a64737"
+    },
+    "06-decisions/d-006-data-retention-current-policy.md": {
+      "bytes": 1396,
+      "sha256": "9c910b15695f897e3cd27d71d5e82f46953240d1681ff08694e4613826456efa"
+    },
+    "06-decisions/d-007-deployment-rollback-previous-policy.md": {
+      "bytes": 1382,
+      "sha256": "ebc1105f036813675b4061203c8865b0453ccceb6d4435ee4ee37f7aea48244f"
+    },
+    "06-decisions/d-008-deployment-rollback-current-policy.md": {
+      "bytes": 1396,
+      "sha256": "038ab6601ed9aa48b23006d74b0bacebca2bbf0f764885d3b860a4bfdfa3e8e8"
+    },
+    "06-decisions/d-009-capture-provenance-previous-policy.md": {
+      "bytes": 1391,
+      "sha256": "f95ba4274759f302341b5c0e5352e7ee2d2e8c9300b5b3c77f9ba0d9792d4a11"
+    },
+    "06-decisions/d-010-capture-provenance-current-policy.md": {
+      "bytes": 1414,
+      "sha256": "e7a764993291f19ed37a991590d54879ed8c595dbc3f11f8f737220d71becda5"
+    },
+    "06-decisions/d-011-request-budgets-previous-policy.md": {
+      "bytes": 1379,
+      "sha256": "ec20aa443f5f8541165c057efeb0641d682f236c96cbf607c1f100e64b59355f"
+    },
+    "06-decisions/d-012-request-budgets-current-policy.md": {
+      "bytes": 1417,
+      "sha256": "a320cd2dfa07393bdab6d1d79f4e88c10ec9d7cb8207cb9fe295cd12302c1e0e"
+    },
+    "06-decisions/decision-log.md": {
+      "bytes": 2575,
+      "sha256": "41da8cbbb920f50aee148971f416035ee57cefd7a2396f0890498412c5a4cc29"
+    },
+    "Home.md": {
+      "bytes": 277,
+      "sha256": "724614c2a21cdb96b1b41753bfbd4e5fc7139acbc354fca299f772dc24abc2c8"
+    },
+    "notes/distractor-01.md": {
+      "bytes": 523,
+      "sha256": "8b798cdfcb0e62f1f7141b58e593fc03c081f78f57164db28f137d5d47f88bf0"
+    },
+    "notes/distractor-02.md": {
+      "bytes": 526,
+      "sha256": "f30494cbe32f724acfe3ded93df4061689d58c06238fa8b7f833e7a907ed28c1"
+    },
+    "notes/distractor-03.md": {
+      "bytes": 531,
+      "sha256": "709cb0bd3e421c25ace2689c1758b871f71064440947c23e873cbf522708222f"
+    },
+    "notes/distractor-04.md": {
+      "bytes": 552,
+      "sha256": "2e77bdbca3d2cfb5c205fac034278f44cdea83c3340353645386c8103a8fda42"
+    },
+    "notes/distractor-05.md": {
+      "bytes": 561,
+      "sha256": "e5152d0e04ebbde52d97c378a90fd89ae14200af3acd9788ec81ea3968795b66"
+    },
+    "notes/distractor-06.md": {
+      "bytes": 549,
+      "sha256": "99bc0a6a5c94a26ba60137ec4dd05bd5f14ee36af5fcf3e796d58c6d6b019b33"
+    },
+    "notes/navigation-01.md": {
+      "bytes": 320,
+      "sha256": "4288a67c138a900d3984e5c20a7222e179f54ccd448166dd5ec809854fd34a64"
+    },
+    "notes/navigation-02.md": {
+      "bytes": 320,
+      "sha256": "8120b82904fe958eac655d54118f68ebfc414d4649dfae8f9748a8a353eb35b2"
+    },
+    "notes/navigation-03.md": {
+      "bytes": 320,
+      "sha256": "4efcc5fe82dfba8ccf46663dd9857eb8b531fd4bc32f96ec47130901315844de"
+    },
+    "notes/navigation-04.md": {
+      "bytes": 320,
+      "sha256": "f739a4639a880e7d4cd0772969b2bb7d23d8e7f03e72b6ecea83f7de67b5b188"
+    },
+    "notes/navigation-05.md": {
+      "bytes": 320,
+      "sha256": "df4b56cb06951a8548ee148035939b156055dcb0656dd39c664498391ce30c30"
+    },
+    "notes/navigation-06.md": {
+      "bytes": 320,
+      "sha256": "3a2787bcd751fca75037f16695605b1664e7cb797ddfa4277652c35b7ba4e4c1"
+    },
+    "specifications/procedure-01.md": {
+      "bytes": 423,
+      "sha256": "ba26b24cdbdb6b94a234500753c7b9d61a09fc8d7c97b1df0a6c623cc665462f"
+    },
+    "specifications/procedure-02.md": {
+      "bytes": 447,
+      "sha256": "83220e2ddf64c084d75657a7eea9231244ac4d2aa914663ac6b3a44e2ff34d63"
+    },
+    "specifications/procedure-03.md": {
+      "bytes": 424,
+      "sha256": "7cc1f972c156afb74c3d317f8eaccfc6bfbcbf92a66e9be77bbd7f7bf02b4fc2"
+    },
+    "specifications/procedure-04.md": {
+      "bytes": 428,
+      "sha256": "02eb2a64f35e2767778eb3817e6a673c732e4c2026f8988a7ca88d8b945721d7"
+    },
+    "specifications/procedure-05.md": {
+      "bytes": 430,
+      "sha256": "ca13ab1b4e31b3cb971d0cf19e3b10a235aab6c8ec5237c36d5fca1c4deb986c"
+    },
+    "specifications/procedure-06.md": {
+      "bytes": 445,
+      "sha256": "2445e2f0cfc13e49117c8fbd4275c57108dc395b03348a56b1aeaa3f2ffb9138"
+    },
+    "whykit.toml": {
+      "bytes": 41,
+      "sha256": "055db695e5930166a9639f185ca279a8b9a56cee09d8e3d47a2f663ab4cc3ab0"
+    }
+  },
+  "format": "whykit.synthetic-hybrid-corpus/v1",
+  "generation_seed": null,
+  "non_ranked_markdown_backing": [
+    "Home.md",
+    "00-context/evidence-register.md",
+    "00-context/review-log.md",
+    "06-decisions/decision-log.md"
+  ],
+  "randomness": "none",
+  "rankable_documents": 42,
+  "rankable_paths": [
+    "00-context/claims/c-001.md",
+    "00-context/claims/c-002.md",
+    "00-context/claims/c-003.md",
+    "00-context/claims/c-004.md",
+    "00-context/claims/c-005.md",
+    "00-context/claims/c-006.md",
+    "00-context/outcomes/o-001.md",
+    "00-context/outcomes/o-002.md",
+    "00-context/outcomes/o-003.md",
+    "00-context/outcomes/o-004.md",
+    "00-context/outcomes/o-005.md",
+    "00-context/outcomes/o-006.md",
+    "06-decisions/d-001-retry-queue-previous-policy.md",
+    "06-decisions/d-002-retry-queue-current-policy.md",
+    "06-decisions/d-003-backup-restore-previous-policy.md",
+    "06-decisions/d-004-backup-restore-current-policy.md",
+    "06-decisions/d-005-data-retention-previous-policy.md",
+    "06-decisions/d-006-data-retention-current-policy.md",
+    "06-decisions/d-007-deployment-rollback-previous-policy.md",
+    "06-decisions/d-008-deployment-rollback-current-policy.md",
+    "06-decisions/d-009-capture-provenance-previous-policy.md",
+    "06-decisions/d-010-capture-provenance-current-policy.md",
+    "06-decisions/d-011-request-budgets-previous-policy.md",
+    "06-decisions/d-012-request-budgets-current-policy.md",
+    "notes/distractor-01.md",
+    "notes/distractor-02.md",
+    "notes/distractor-03.md",
+    "notes/distractor-04.md",
+    "notes/distractor-05.md",
+    "notes/distractor-06.md",
+    "notes/navigation-01.md",
+    "notes/navigation-02.md",
+    "notes/navigation-03.md",
+    "notes/navigation-04.md",
+    "notes/navigation-05.md",
+    "notes/navigation-06.md",
+    "specifications/procedure-01.md",
+    "specifications/procedure-02.md",
+    "specifications/procedure-03.md",
+    "specifications/procedure-04.md",
+    "specifications/procedure-05.md",
+    "specifications/procedure-06.md"
+  ],
+  "semantic_records": 48,
+  "topics": {
+    "budgets": {
+      "claim_id": "C-006",
+      "decision_id": "D-012",
+      "evidence_id": "E-006",
+      "partition": "locked",
+      "paths": {
+        "claim": "00-context/claims/c-006.md",
+        "decision": "06-decisions/d-012-request-budgets-current-policy.md",
+        "distractor": "notes/distractor-06.md",
+        "navigation": "notes/navigation-06.md",
+        "outcome": "00-context/outcomes/o-006.md",
+        "previous": "06-decisions/d-011-request-budgets-previous-policy.md",
+        "specification": "specifications/procedure-06.md"
+      },
+      "previous_id": "D-011",
+      "source_version": "sha256:7d29e8f561b6b5e7edbbc3d04a7feb844bfbde5db28dd082028ea388473ac9b6"
+    },
+    "capture": {
+      "claim_id": "C-005",
+      "decision_id": "D-010",
+      "evidence_id": "E-005",
+      "partition": "locked",
+      "paths": {
+        "claim": "00-context/claims/c-005.md",
+        "decision": "06-decisions/d-010-capture-provenance-current-policy.md",
+        "distractor": "notes/distractor-05.md",
+        "navigation": "notes/navigation-05.md",
+        "outcome": "00-context/outcomes/o-005.md",
+        "previous": "06-decisions/d-009-capture-provenance-previous-policy.md",
+        "specification": "specifications/procedure-05.md"
+      },
+      "previous_id": "D-009",
+      "source_version": "sha256:296bdbea28b7f76cbb183185abbeeb51def810ec6d4c76b168d5f0f1a7763224"
+    },
+    "restore": {
+      "claim_id": "C-002",
+      "decision_id": "D-004",
+      "evidence_id": "E-002",
+      "partition": "development",
+      "paths": {
+        "claim": "00-context/claims/c-002.md",
+        "decision": "06-decisions/d-004-backup-restore-current-policy.md",
+        "distractor": "notes/distractor-02.md",
+        "navigation": "notes/navigation-02.md",
+        "outcome": "00-context/outcomes/o-002.md",
+        "previous": "06-decisions/d-003-backup-restore-previous-policy.md",
+        "specification": "specifications/procedure-02.md"
+      },
+      "previous_id": "D-003",
+      "source_version": "sha256:453aa098622df285cf6eb4355e88fd48e187a951dfd04f143d209540e0cc77a2"
+    },
+    "retention": {
+      "claim_id": "C-003",
+      "decision_id": "D-006",
+      "evidence_id": "E-003",
+      "partition": "development",
+      "paths": {
+        "claim": "00-context/claims/c-003.md",
+        "decision": "06-decisions/d-006-data-retention-current-policy.md",
+        "distractor": "notes/distractor-03.md",
+        "navigation": "notes/navigation-03.md",
+        "outcome": "00-context/outcomes/o-003.md",
+        "previous": "06-decisions/d-005-data-retention-previous-policy.md",
+        "specification": "specifications/procedure-03.md"
+      },
+      "previous_id": "D-005",
+      "source_version": "sha256:864a498ab5b93c27f1c6e91588e85d881a3b9ecaff92d2831677723881bfbdf4"
+    },
+    "retry": {
+      "claim_id": "C-001",
+      "decision_id": "D-002",
+      "evidence_id": "E-001",
+      "partition": "development",
+      "paths": {
+        "claim": "00-context/claims/c-001.md",
+        "decision": "06-decisions/d-002-retry-queue-current-policy.md",
+        "distractor": "notes/distractor-01.md",
+        "navigation": "notes/navigation-01.md",
+        "outcome": "00-context/outcomes/o-001.md",
+        "previous": "06-decisions/d-001-retry-queue-previous-policy.md",
+        "specification": "specifications/procedure-01.md"
+      },
+      "previous_id": "D-001",
+      "source_version": "sha256:14a51a6da7b67c88f9d2bdd7870e6d46bafd65a5f9eeb380b8f51643fcf2f5aa"
+    },
+    "rollback": {
+      "claim_id": "C-004",
+      "decision_id": "D-008",
+      "evidence_id": "E-004",
+      "partition": "development",
+      "paths": {
+        "claim": "00-context/claims/c-004.md",
+        "decision": "06-decisions/d-008-deployment-rollback-current-policy.md",
+        "distractor": "notes/distractor-04.md",
+        "navigation": "notes/navigation-04.md",
+        "outcome": "00-context/outcomes/o-004.md",
+        "previous": "06-decisions/d-007-deployment-rollback-previous-policy.md",
+        "specification": "specifications/procedure-04.md"
+      },
+      "previous_id": "D-007",
+      "source_version": "sha256:8ed15e08824a32febc9686aa08946b4c245e71a0910da609710eb581032da39b"
+    }
+  }
+}

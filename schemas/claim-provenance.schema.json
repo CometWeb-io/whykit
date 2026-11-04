@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/claim-provenance.schema.json",
+  "title": "WhyKit optional claim provenance payload",
+  "description": "Producer-owned payload, not vault front matter or a CLI report. Structural schema only: validate_claim also checks ordered byte offsets, UTF-8 encoding and quote byte length. verify_anchor checks supplied source bytes. Neither establishes truth, identity or authorization.",
+  "type": "object",
+  "required": ["format", "claim_id", "statement", "links"],
+  "additionalProperties": false,
+  "properties": {
+    "format": {"const": "whykit.claim-provenance/v1"},
+    "claim_id": {"type": "string", "pattern": "^C-[0-9]{3,}(?![\\s\\S])"},
+    "statement": {"type": "string", "pattern": "\\S"},
+    "links": {
+      "type": "array",
+      "description": "An explicit empty list means no evidence link has been supplied, not that the statement is false. Multiple assessments of the same anchor may coexist; no semantic verdict is inferred.",
+      "items": {"$ref": "#/$defs/link"}
+    }
+  },
+  "$defs": {
+    "link": {
+      "type": "object",
+      "required": ["evidence_id", "source_version", "location", "assessment"],
+      "additionalProperties": false,
+      "properties": {
+        "evidence_id": {"type": "string", "pattern": "^E-[0-9]{3,}(?![\\s\\S])"},
+        "source_version": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
+          "description": "SHA-256 of the exact original bytes, with no BOM, newline or Unicode normalization. A content digest is not source identity."
+        },
+        "location": {
+          "type": "object",
+          "required": ["start_byte", "end_byte", "quote"],
+          "additionalProperties": false,
+          "properties": {
+            "start_byte": {"type": "integer", "minimum": 0},
+            "end_byte": {"type": "integer", "minimum": 1},
+            "quote": {"type": "string", "pattern": "\\S"}
+          },
+          "description": "Zero-based byte offsets, end exclusive; the quote is UTF-8 encoded and must match exactly. validate_claim requires start < end and matching quote byte length."
+        },
+        "assessment": {
+          "type": "object",
+          "required": ["kind", "by", "relation"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"enum": ["model", "human"]},
+            "by": {"type": "string", "pattern": "\\S"},
+            "relation": {"enum": ["supports", "contradicts"]}
+          },
+          "description": "Producer-declared semantic assessment and attribution; human is not authenticated review and model cannot become human by matching source bytes."
+        }
+      }
+    }
+  }
+}

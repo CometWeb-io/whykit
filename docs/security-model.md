@@ -96,9 +96,11 @@ permissions are trusted. WhyKit never asks for elevated rights.
 - **Unreadable labels fail closed.** A note whose front matter does not parse,
   or that spells the key differently (`Sensitivity:`), is treated as above
   every ceiling. A note with valid front matter and no label is `internal`.
-- **Evidence follows the register's label.** Register rows, counts and `E-NNN`
-  completions are shown only when `00-context/evidence-register.md` itself is
-  within the ceiling.
+- **Evidence rows inherit the stricter label.** A row inherits its register's
+  label and any stricter explicit row or replacement-chain label. Malformed or
+  ambiguous classifications fail closed. Counts and `E-NNN` completions include
+  only visible rows. A register body with per-row labels is withheld to avoid
+  exposing hidden rows. See [data classification](data-classification.md).
 - **Cursors cannot count hidden rows.** They are bound to the call, the
   ceiling and the visible ordering with a per-process key.
 - **No writes.** No tool modifies the vault, runs Git or reaches the network.
@@ -141,16 +143,18 @@ permissions are trusted. WhyKit never asks for elevated rights.
 - **The secret scan is a safety net.** It catches common credential shapes in
   text files, not encoded or novel secrets, and does not inspect binary files.
   Use your Git host's secret scanning as well.
-- **A pull request can change its own policy.** `whykit check` reads
-  `whykit.toml` from the checked-out change. A pull request that edits it can
-  relax its own gate (switch a profile's history check off, demote a rule)
-  in the same change. Security-relevant overrides are printed with every run
-  and need a written reason, but they are not refused. Protect `whykit.toml`
-  with a CODEOWNERS entry and required review, as you would a CI workflow.
-- **Explorer exports include every label.** `npm run index` writes confidential
-  and restricted notes into the static build and only warns. Do not publish an
-  Explorer build of a vault that is not public. The Explorer server binds to
-  loopback unless you pass `--allow-sensitive-network`.
+- **Policy enforcement needs a trusted baseline.** Without `--base`,
+  `whykit check` evaluates the checked-out policy, which a pull request can
+  weaken. With `--base REF`, both policies are evaluated against current
+  content; CI must supply a trusted, fetched revision. Protect `whykit.toml`
+  and CI workflows with CODEOWNERS and required review.
+- **A public export is not a disclosure assessment.** Normal Explorer builds
+  default to public-filtered indexes. The filter cannot identify mislabeled
+  secrets or every paraphrase of hidden material. Review the artifact before
+  publishing. Explicit private indexes contain the full local view and must
+  remain private; `whykit serve` uses this mode on loopback. Network exposure
+  requires the existing sensitive-network opt-in. See
+  [data classification](data-classification.md#public-exports).
 - **Bodies are untrusted data for agents.** The MCP server marks returned
   content as untrusted, but it cannot stop an agent from following
   instructions written in a note.
@@ -225,24 +229,3 @@ global logs from note/resource, query, context and pack surfaces at all ceilings
 including case/`.MD` path aliases. A whole-table label does not authorize each
 row's copied contents. Permitted individual records remain readable; this is a
 data exposure boundary, not organizational identity or tenant authorization.
-
-### Captured scopes in Python reports
-
-Context, pack, graph, impact, trace, query, backlinks and status reports respect
-a supplied confined `VaultIndex` and its captured evidence-row grant. An explicit
-empty row grant stays empty. Without an explicit grant, a nested report may
-inherit its active parent view or classify a register already in the supplied
-index; it does not reopen an omitted register on disk. Nested views may narrow
-their parent's rows, but cannot refresh or expand the parent's captured payloads.
-
-`build_pack(allowed_sensitivities={"public"})` filters notes and evidence before
-building contexts and spending the body budget. Scoped reports withhold mixed
-or partially granted register bodies and raw global decision/review logs.
-Lint retains explicitly supplied synthetic notes while using the same row view.
-Unscoped calls retain full-vault behavior; the CLI pack command does not select
-a public ceiling automatically.
-
-These are captured read views, not identity or tenant authorization. Initial
-discovery may parse the source vault before classification. The writer lock
-coordinates cooperating writers; it does not make external editors atomic or
-turn a captured view into a live refresh of later disk changes.

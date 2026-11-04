@@ -1,0 +1,1 @@
+The retry queue accepts at most three delivery attempts. Backoff separates attempts and duplicate delivery keys are rejected.

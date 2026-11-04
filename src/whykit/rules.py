@@ -75,6 +75,7 @@ _RULES = (
     Rule("evidence.retired_date", "error", "A retired evidence row has an invalid retirement date.", "Retirement history must be chronologically auditable.", "Use a real YYYY-MM-DD date."),
     Rule("fact.inline_evidence", "warning", "A fact callout has no inline E-NNN citation.", "Fact callouts visually claim verification, so the supporting source should be one click away.", "Add an E-NNN in the callout."),
     Rule("fact.evidence_missing", "warning", "A fact callout cites an E-NNN with no populated register row.", "A citation that resolves nowhere looks verified while pointing at nothing.", "Register the source or correct the cited ID."),
+    Rule("impact.invalid", "warning", "A native impact declaration has invalid owned syntax.", "Malformed dependency declarations cannot define a confined impact view.", "Use the canonical provenance.whykit_impact scalar and valid native path, kind, references and pins."),
     Rule("frontmatter.invalid", "error", "YAML front matter cannot be parsed.", "Governance metadata is unavailable when parsing fails.", "Fix the front matter syntax."),
     Rule("frontmatter.empty", "warning", "A required metadata key is present but has no value.", "An empty key passes the presence check while every value check skips it.", "Fill in the value, or use the documented placeholder in templates."),
     Rule("frontmatter.missing", "error", "A governed note has no YAML front matter.", "Status, owner, sensitivity and provenance would be undefined.", "Add the standard WhyKit front matter block."),

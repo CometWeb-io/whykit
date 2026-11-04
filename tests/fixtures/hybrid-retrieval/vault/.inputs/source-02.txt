@@ -1,0 +1,1 @@
+The backup restore rehearsal used an isolated directory. Database integrity was checked before live storage replacement.

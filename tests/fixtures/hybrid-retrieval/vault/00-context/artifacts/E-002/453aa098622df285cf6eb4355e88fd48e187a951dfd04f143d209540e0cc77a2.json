@@ -1,0 +1,9 @@
+{
+  "content_base64": "VGhlIGJhY2t1cCByZXN0b3JlIHJlaGVhcnNhbCB1c2VkIGFuIGlzb2xhdGVkIGRpcmVjdG9yeS4gRGF0YWJhc2UgaW50ZWdyaXR5IHdhcyBjaGVja2VkIGJlZm9yZSBsaXZlIHN0b3JhZ2UgcmVwbGFjZW1lbnQuCg==",
+  "evidence_id": "E-002",
+  "format": "whykit.evidence-artifact/v1",
+  "recorded_at": "2026-09-17T10:00:00Z",
+  "sensitivity": "public",
+  "size_bytes": 121,
+  "source_version": "sha256:453aa098622df285cf6eb4355e88fd48e187a951dfd04f143d209540e0cc77a2"
+}

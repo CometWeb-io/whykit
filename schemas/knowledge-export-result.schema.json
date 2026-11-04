@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/knowledge-export-result.schema.json",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "format",
+    "applied",
+    "expected_sha256",
+    "output",
+    "source_files",
+    "objects",
+    "bundle_sha256",
+    "git_history_transferred",
+    "source_git_modified",
+    "execution_authorized"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "format": {
+      "const": "whykit.knowledge-export/v2"
+    },
+    "applied": {
+      "type": "boolean"
+    },
+    "expected_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "output": {
+      "type": "string"
+    },
+    "source_files": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "objects": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "bundle_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "git_history_transferred": {
+      "const": false
+    },
+    "source_git_modified": {
+      "const": false
+    },
+    "execution_authorized": {
+      "const": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -213,6 +213,8 @@ def _relative_text(path: Path, root: Path) -> str | None:
             return path.relative_to(root).as_posix()
         except ValueError:
             return None
+    if inner.startswith("//") != outer.startswith("//"):
+        return None
     prefix = outer if outer.endswith("/") else outer + "/"
     return inner[len(prefix):] if inner.startswith(prefix) else None
 
@@ -334,6 +336,8 @@ ALLOWED_STATUS = {"template", "draft", "in_review", "approved", "superseded", "a
 # Records whose reasoning is closed: kept as written, never brought up to date.
 HISTORICAL_STATUSES = frozenset({"superseded", "archived"})
 ALLOWED_TYPE = {
+    "outcome",
+    "claim",
     "strategy",
     "research",
     "framework",
@@ -1993,6 +1997,17 @@ def _path_order(path: Path) -> list[str]:
     return os.path.normcase(os.fspath(path)).split(os.sep)
 
 
+
+def check_impact_format(root: Path, note: Note, findings: list[Finding]) -> None:
+    """Validate owned captured syntax without resolving or granting a dependency."""
+    from .impact_contract import is_impact_note, parse_impact_note
+    if is_impact_note(note):
+        try:
+            parse_impact_note(note, root)
+        except ValueError:
+            add(findings, root, note.path, 1, "warning", "impact.invalid",
+                "native impact declaration has invalid owned syntax; dependency visibility is unavailable")
+
 @consistent_read
 @scoped_report(project_notes=False)
 @path_cache()
@@ -2047,6 +2062,7 @@ def lint(
 
     for note in notes:
         check_front_matter(root, note, findings, today)
+        check_impact_format(root, note, findings)
         # The index memoises link resolution: a vault repeats the same targets
         # many times, and each uncached lookup costs several filesystem calls.
         check_wikilinks(root, note, index, findings, attachments, index_model.resolve_link)

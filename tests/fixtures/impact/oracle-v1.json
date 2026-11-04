@@ -1,0 +1,835 @@
+{
+  "acceptance": {
+    "binary_metrics": "precision/recall/FPR on complete permitted known8/64 core; uncertainty separately; never count hidden/unknown asTN",
+    "not_closed_by": [
+      "all_unknown",
+      "BFSreachability",
+      "hashchangealone",
+      "commercialpilot inventedgate"
+    ],
+    "ranking": "perconsumerkind, positives above knownunaffected/weakpossible; best justified typed path; no probability claim"
+  },
+  "core_counts": {
+    "affected": 8,
+    "consumer_judgments": 72,
+    "known_unaffected": 64,
+    "semantic_records_per_base_corpus": 28,
+    "source_events": 8,
+    "workflows": 2
+  },
+  "counts_note": "28logical core records is not an aggregate raw-file/version count; independent native snapshots/receipts/captures, Zvariants and successor records must be inventoried separately at later materialization freeze.",
+  "events": [
+    {
+      "after": "B",
+      "before": "A",
+      "config_snapshot": "A",
+      "expected_affected": [
+        "retry.specification.primary",
+        "retry.pull-request.primary",
+        "retry.task.primary",
+        "retry.planned-outcome.primary"
+      ],
+      "expected_input_evidence_states": {
+        "primary": "fragment_changed_named_fixed_width",
+        "secondary": "fragment_same_at_same_offset"
+      },
+      "expected_unaffected": [
+        "retry.specification.secondary",
+        "retry.pull-request.secondary",
+        "retry.task.secondary",
+        "retry.planned-outcome.secondary",
+        "retry.historical-outcome"
+      ],
+      "id": "retry.E.functional",
+      "root": "source_version",
+      "selected_after": "B",
+      "selected_before": "A",
+      "source_currentness_separate": true,
+      "workflow": "retry"
+    },
+    {
+      "after": "A",
+      "before": "A",
+      "config_snapshot": "A",
+      "expected_affected": [],
+      "expected_input_evidence_states": {
+        "primary": "version_not_changed",
+        "secondary": "version_not_changed"
+      },
+      "expected_unaffected": [
+        "retry.specification.primary",
+        "retry.pull-request.primary",
+        "retry.task.primary",
+        "retry.planned-outcome.primary",
+        "retry.specification.secondary",
+        "retry.pull-request.secondary",
+        "retry.task.secondary",
+        "retry.planned-outcome.secondary",
+        "retry.historical-outcome"
+      ],
+      "id": "retry.E.no-change",
+      "root": "source_version",
+      "selected_after": "A",
+      "selected_before": "A",
+      "source_currentness_separate": true,
+      "workflow": "retry"
+    },
+    {
+      "after": "A2",
+      "before": "A",
+      "config_snapshot": "A",
+      "expected_affected": [],
+      "expected_input_evidence_states": {
+        "primary": "fragment_same_at_same_offset",
+        "secondary": "fragment_same_at_same_offset"
+      },
+      "expected_unaffected": [
+        "retry.specification.primary",
+        "retry.pull-request.primary",
+        "retry.task.primary",
+        "retry.planned-outcome.primary",
+        "retry.specification.secondary",
+        "retry.pull-request.secondary",
+        "retry.task.secondary",
+        "retry.planned-outcome.secondary",
+        "retry.historical-outcome"
+      ],
+      "id": "retry.E.inert-bytes",
+      "root": "source_version",
+      "selected_after": "A2",
+      "selected_before": "A",
+      "source_currentness_separate": true,
+      "workflow": "retry"
+    },
+    {
+      "after": "B",
+      "before": "A",
+      "config_snapshot": "Z",
+      "expected_affected": [],
+      "expected_input_evidence_states": {
+        "primary": "selected_Z_version_not_changed",
+        "secondary": "selected_Z_version_not_changed"
+      },
+      "expected_unaffected": [
+        "retry.specification.primary",
+        "retry.pull-request.primary",
+        "retry.task.primary",
+        "retry.planned-outcome.primary",
+        "retry.specification.secondary",
+        "retry.pull-request.secondary",
+        "retry.task.secondary",
+        "retry.planned-outcome.secondary",
+        "retry.historical-outcome"
+      ],
+      "id": "retry.E.other-version",
+      "root": "source_version",
+      "selected_after": "Z",
+      "selected_before": "Z",
+      "source_currentness_separate": true,
+      "workflow": "retry"
+    },
+    {
+      "after": "B",
+      "before": "A",
+      "config_snapshot": "A",
+      "expected_affected": [
+        "budget.specification.primary",
+        "budget.pull-request.primary",
+        "budget.task.primary",
+        "budget.planned-outcome.primary"
+      ],
+      "expected_input_evidence_states": {
+        "primary": "fragment_changed_named_fixed_width",
+        "secondary": "fragment_same_at_same_offset"
+      },
+      "expected_unaffected": [
+        "budget.specification.secondary",
+        "budget.pull-request.secondary",
+        "budget.task.secondary",
+        "budget.planned-outcome.secondary",
+        "budget.historical-outcome"
+      ],
+      "id": "budget.E.functional",
+      "root": "source_version",
+      "selected_after": "B",
+      "selected_before": "A",
+      "source_currentness_separate": true,
+      "workflow": "budget"
+    },
+    {
+      "after": "A",
+      "before": "A",
+      "config_snapshot": "A",
+      "expected_affected": [],
+      "expected_input_evidence_states": {
+        "primary": "version_not_changed",
+        "secondary": "version_not_changed"
+      },
+      "expected_unaffected": [
+        "budget.specification.primary",
+        "budget.pull-request.primary",
+        "budget.task.primary",
+        "budget.planned-outcome.primary",
+        "budget.specification.secondary",
+        "budget.pull-request.secondary",
+        "budget.task.secondary",
+        "budget.planned-outcome.secondary",
+        "budget.historical-outcome"
+      ],
+      "id": "budget.E.no-change",
+      "root": "source_version",
+      "selected_after": "A",
+      "selected_before": "A",
+      "source_currentness_separate": true,
+      "workflow": "budget"
+    },
+    {
+      "after": "A2",
+      "before": "A",
+      "config_snapshot": "A",
+      "expected_affected": [],
+      "expected_input_evidence_states": {
+        "primary": "fragment_same_at_same_offset",
+        "secondary": "fragment_same_at_same_offset"
+      },
+      "expected_unaffected": [
+        "budget.specification.primary",
+        "budget.pull-request.primary",
+        "budget.task.primary",
+        "budget.planned-outcome.primary",
+        "budget.specification.secondary",
+        "budget.pull-request.secondary",
+        "budget.task.secondary",
+        "budget.planned-outcome.secondary",
+        "budget.historical-outcome"
+      ],
+      "id": "budget.E.inert-bytes",
+      "root": "source_version",
+      "selected_after": "A2",
+      "selected_before": "A",
+      "source_currentness_separate": true,
+      "workflow": "budget"
+    },
+    {
+      "after": "B",
+      "before": "A",
+      "config_snapshot": "Z",
+      "expected_affected": [],
+      "expected_input_evidence_states": {
+        "primary": "selected_Z_version_not_changed",
+        "secondary": "selected_Z_version_not_changed"
+      },
+      "expected_unaffected": [
+        "budget.specification.primary",
+        "budget.pull-request.primary",
+        "budget.task.primary",
+        "budget.planned-outcome.primary",
+        "budget.specification.secondary",
+        "budget.pull-request.secondary",
+        "budget.task.secondary",
+        "budget.planned-outcome.secondary",
+        "budget.historical-outcome"
+      ],
+      "id": "budget.E.other-version",
+      "root": "source_version",
+      "selected_after": "Z",
+      "selected_before": "Z",
+      "source_currentness_separate": true,
+      "workflow": "budget"
+    }
+  ],
+  "fixture_dates": {
+    "approval": "2026-09-17",
+    "valid_from": "2026-09-01",
+    "valid_on": "2026-10-27",
+    "valid_until": "2027-01-01"
+  },
+  "format": "whykit.impact-functional-oracle/v1",
+  "hash_namespaces": {
+    "claim_record_sha256": "exact raw native C Markdown",
+    "decision_record_sha256": "existing approval_record_hash; lifecycle excluded; NOT a semantic truth hash",
+    "document_raw_sha256": "raw spec/localPR/task/Outcome Markdown citation/snapshot",
+    "source_version": "sha256 exact raw captured bytes"
+  },
+  "native_materialization_required": [
+    "Use existing create/capture/claim/approve/review/outcome APIs, no hand-built approval receipts.",
+    "All fields/aliases/typed pins before approval; Dsuccessor genuinely newID/newapproval, no oldreasoning rewrite.",
+    "Both authorized captured versions verified; verify_anchor(oldlink,A) first; NEVER treat oldlink+verify_anchor(B) version_mismatch as fragmentdiff.",
+    "Only fixed-width named-field profile proves positive literal input identity; relocation/ambiguous identity unknown, no locator DSL/reanchor.",
+    "Reserved native implementation directory and metadata/path markers enforce restricted floor for specs/PR/tasks across EVERY public reader, even type/label downgrade.",
+    "Explicit D/C/E closure before hash/statistics; no full-index reload; historical Outcome unchanged; planned target can require newreview/version.",
+    "Freeze actual native artifact/source/config bytes, receipts, provenance/digests and writer logs BEFORE any future M08 engine implementation/ranking measurement."
+  ],
+  "scope": "Wholly synthetic local functional regressions, not independent human/model/pilot evidence",
+  "separate_uncertainty_and_security_controls": [
+    {
+      "after": "B_relocated",
+      "binary_FP_TN_denominator": false,
+      "expected_selector_state": "unknown",
+      "id": "relocated_fragment",
+      "reason": "Earlier field insert/order shift breaks logical identity of old byte range. A different same-offset slice is not proof the same field changed. No reanchor."
+    },
+    {
+      "binary_FP_TN_denominator": false,
+      "expected_selector_state": "unknown",
+      "id": "value_only_or_ambiguous_C_links"
+    },
+    {
+      "binary_FP_TN_denominator": false,
+      "expected_selector_state": "unknown",
+      "id": "wrong_version_or_quote_anchor"
+    },
+    {
+      "binary_FP_TN_denominator": false,
+      "expected": "possible_for_mention; affected_long_before_possible_short",
+      "id": "loose_mention_onehop_vs_strong_longchain"
+    },
+    {
+      "binary_FP_TN_denominator": false,
+      "expected": "unknown_not_unaffected",
+      "id": "missing_edge_pin_capture_or_duplicate_alias"
+    },
+    {
+      "binary_FP_TN_denominator": false,
+      "expected": "hidden=missing; no hash/body/count/budget effects; no grant expansion",
+      "id": "public_sparse_E_C_O_or_hidden_bridge"
+    },
+    {
+      "binary_FP_TN_denominator": false,
+      "expected": "no multiplicity boost; explicit uncertainty/truncation; use captured bytes",
+      "id": "cycle_diamond_limit_snapshot_A_disk_B"
+    }
+  ],
+  "state": "FROZEN_BEHAVIOR_DESIGN; VALIDATOR_NOT_EXECUTED; NATIVE_RECEIPTS_NOT_MATERIALIZED",
+  "supplemental_counts": {
+    "D_events": 4,
+    "additional_native_C_records_minimum": 2,
+    "additional_native_D_records_minimum": 2,
+    "affected": 8,
+    "consumer_judgments": 36,
+    "independent_workflows_added": 0,
+    "known_unaffected": 28
+  },
+  "supplemental_events": [
+    {
+      "after": "B",
+      "before": "A",
+      "config_snapshot": "A",
+      "counts_as_additional_independent_workflow": false,
+      "decision_digest_namespace": "decision_record_sha256=existing_approval_record_hash",
+      "expected_affected": [
+        "retry.specification.primary",
+        "retry.pull-request.primary",
+        "retry.task.primary",
+        "retry.planned-outcome.primary"
+      ],
+      "expected_input_evidence_states": {
+        "primary": "decision_record_changed",
+        "secondary": "decision_record_not_changed"
+      },
+      "expected_unaffected": [
+        "retry.specification.secondary",
+        "retry.pull-request.secondary",
+        "retry.task.secondary",
+        "retry.planned-outcome.secondary",
+        "retry.historical-outcome"
+      ],
+      "id": "retry.D.approved-supersession",
+      "native_transition": "real_new_C_and_D_approval; preserve_old_reasoning; allocate_newIDs",
+      "root": "approved_decision",
+      "selected_after": "B",
+      "selected_before": "A",
+      "workflow": "retry"
+    },
+    {
+      "after": "A",
+      "before": "A",
+      "config_snapshot": "A",
+      "counts_as_additional_independent_workflow": false,
+      "decision_digest_namespace": "decision_record_sha256=existing_approval_record_hash",
+      "expected_affected": [],
+      "expected_input_evidence_states": {
+        "primary": "decision_record_same_raw_lifecycle_changed",
+        "secondary": "decision_record_same_raw_unchanged"
+      },
+      "expected_unaffected": [
+        "retry.specification.primary",
+        "retry.pull-request.primary",
+        "retry.task.primary",
+        "retry.planned-outcome.primary",
+        "retry.specification.secondary",
+        "retry.pull-request.secondary",
+        "retry.task.secondary",
+        "retry.planned-outcome.secondary",
+        "retry.historical-outcome"
+      ],
+      "id": "retry.D.lifecycle-only",
+      "native_transition": "real_confirmed_review; review_by/last_updated_raw_changes_only",
+      "root": "approved_decision",
+      "selected_after": "A",
+      "selected_before": "A",
+      "workflow": "retry"
+    },
+    {
+      "after": "B",
+      "before": "A",
+      "config_snapshot": "A",
+      "counts_as_additional_independent_workflow": false,
+      "decision_digest_namespace": "decision_record_sha256=existing_approval_record_hash",
+      "expected_affected": [
+        "budget.specification.primary",
+        "budget.pull-request.primary",
+        "budget.task.primary",
+        "budget.planned-outcome.primary"
+      ],
+      "expected_input_evidence_states": {
+        "primary": "decision_record_changed",
+        "secondary": "decision_record_not_changed"
+      },
+      "expected_unaffected": [
+        "budget.specification.secondary",
+        "budget.pull-request.secondary",
+        "budget.task.secondary",
+        "budget.planned-outcome.secondary",
+        "budget.historical-outcome"
+      ],
+      "id": "budget.D.approved-supersession",
+      "native_transition": "real_new_C_and_D_approval; preserve_old_reasoning; allocate_newIDs",
+      "root": "approved_decision",
+      "selected_after": "B",
+      "selected_before": "A",
+      "workflow": "budget"
+    },
+    {
+      "after": "A",
+      "before": "A",
+      "config_snapshot": "A",
+      "counts_as_additional_independent_workflow": false,
+      "decision_digest_namespace": "decision_record_sha256=existing_approval_record_hash",
+      "expected_affected": [],
+      "expected_input_evidence_states": {
+        "primary": "decision_record_same_raw_lifecycle_changed",
+        "secondary": "decision_record_same_raw_unchanged"
+      },
+      "expected_unaffected": [
+        "budget.specification.primary",
+        "budget.pull-request.primary",
+        "budget.task.primary",
+        "budget.planned-outcome.primary",
+        "budget.specification.secondary",
+        "budget.pull-request.secondary",
+        "budget.task.secondary",
+        "budget.planned-outcome.secondary",
+        "budget.historical-outcome"
+      ],
+      "id": "budget.D.lifecycle-only",
+      "native_transition": "real_confirmed_review; review_by/last_updated_raw_changes_only",
+      "root": "approved_decision",
+      "selected_after": "A",
+      "selected_before": "A",
+      "workflow": "budget"
+    }
+  ],
+  "workflows": [
+    {
+      "claim_ids": [
+        "C-001",
+        "C-002"
+      ],
+      "consumers": [
+        {
+          "branch": "primary",
+          "draft_settings_A": 3,
+          "draft_settings_Z": 4,
+          "functional_profile": "retry.primary",
+          "id": "retry.specification.primary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "specification",
+          "path": "00-context/implementations/specs/retry-primary.md",
+          "sensitivity": "restricted",
+          "type": "specification"
+        },
+        {
+          "branch": "primary",
+          "draft_settings_A": 3,
+          "draft_settings_Z": 4,
+          "external_ref": "https://changes.example/retry/pr/7",
+          "functional_profile": "retry.primary",
+          "id": "retry.pull-request.primary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "pull-request",
+          "number": 7,
+          "path": "00-context/implementations/pull-requests/retry-primary.md",
+          "repository_key": "alpha.example/repo",
+          "sensitivity": "restricted",
+          "source_identity_authenticated": false,
+          "type": "reference"
+        },
+        {
+          "branch": "primary",
+          "draft_settings_A": 3,
+          "draft_settings_Z": 4,
+          "functional_profile": "retry.primary",
+          "id": "retry.task.primary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "task",
+          "path": "00-context/implementations/tasks/retry-primary.md",
+          "sensitivity": "restricted",
+          "type": "reference"
+        },
+        {
+          "branch": "primary",
+          "draft_settings_A": 3,
+          "draft_settings_Z": 4,
+          "functional_profile": "retry.primary",
+          "id": "retry.planned-outcome.primary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "planned-outcome",
+          "path": "00-context/outcomes/o-001.md",
+          "sensitivity": "restricted",
+          "type": "outcome"
+        },
+        {
+          "branch": "secondary",
+          "draft_settings_A": 1000,
+          "draft_settings_Z": 1000,
+          "functional_profile": "retry.secondary",
+          "id": "retry.specification.secondary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "specification",
+          "path": "00-context/implementations/specs/retry-secondary.md",
+          "sensitivity": "restricted",
+          "type": "specification"
+        },
+        {
+          "branch": "secondary",
+          "draft_settings_A": 1000,
+          "draft_settings_Z": 1000,
+          "external_ref": "https://changes.example/retry/pr/7",
+          "functional_profile": "retry.secondary",
+          "id": "retry.pull-request.secondary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "pull-request",
+          "number": 7,
+          "path": "00-context/implementations/pull-requests/retry-secondary.md",
+          "repository_key": "alpha.example/repo",
+          "sensitivity": "restricted",
+          "source_identity_authenticated": false,
+          "type": "reference"
+        },
+        {
+          "branch": "secondary",
+          "draft_settings_A": 1000,
+          "draft_settings_Z": 1000,
+          "functional_profile": "retry.secondary",
+          "id": "retry.task.secondary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "task",
+          "path": "00-context/implementations/tasks/retry-secondary.md",
+          "sensitivity": "restricted",
+          "type": "reference"
+        },
+        {
+          "branch": "secondary",
+          "draft_settings_A": 1000,
+          "draft_settings_Z": 1000,
+          "functional_profile": "retry.secondary",
+          "id": "retry.planned-outcome.secondary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "planned-outcome",
+          "path": "00-context/outcomes/o-002.md",
+          "sensitivity": "restricted",
+          "type": "outcome"
+        },
+        {
+          "branch": "historical",
+          "functional_profile": "historical.immutable",
+          "historical_measurement_verified": false,
+          "historical_record": {
+            "as_of": "2026-09-17",
+            "claim": null,
+            "declared_observed": {
+              "calls": 3,
+              "result": "exhausted"
+            },
+            "source_key": "A"
+          },
+          "id": "retry.historical-outcome",
+          "kind": "historical-outcome",
+          "path": "00-context/outcomes/o-003.md",
+          "sensitivity": "restricted",
+          "type": "outcome"
+        }
+      ],
+      "decision_ids": [
+        "D-001",
+        "D-002"
+      ],
+      "evidence_id": "E-001",
+      "fields": {
+        "primary": "attempts",
+        "secondary": "timeout_ms"
+      },
+      "fragments": [
+        {
+          "branch": "primary",
+          "claim_id": "C-001",
+          "end_byte": 13,
+          "evidence_id": "E-001",
+          "identity_profile": "fixed_width_named_JSON_field_only; relocation/ambiguous identity is UNKNOWN, no reanchor",
+          "quote": "\"attempts\":3",
+          "source_version": "sha256:8bbfbf68cce98ebc5134244783e805cab14435ae2e5d656283ac4a1ae9ed264d",
+          "start_byte": 1
+        },
+        {
+          "branch": "secondary",
+          "claim_id": "C-002",
+          "end_byte": 31,
+          "evidence_id": "E-001",
+          "identity_profile": "fixed_width_named_JSON_field_only; relocation/ambiguous identity is UNKNOWN, no reanchor",
+          "quote": "\"timeout_ms\":1000",
+          "source_version": "sha256:8bbfbf68cce98ebc5134244783e805cab14435ae2e5d656283ac4a1ae9ed264d",
+          "start_byte": 14
+        }
+      ],
+      "functional_reason": "Three failures followed by a fourth-attempt success: cap3 exhausts, cap4 succeeds. Timeout1000 remains unchanged.",
+      "historical": {
+        "as_of": "2026-09-17",
+        "claim": null,
+        "declared_observed": {
+          "calls": 3,
+          "result": "exhausted"
+        },
+        "source_key": "A"
+      },
+      "id": "retry",
+      "outcome_ids": [
+        "O-001",
+        "O-002",
+        "O-003"
+      ],
+      "sources": {
+        "A": {
+          "source_version": "sha256:8bbfbf68cce98ebc5134244783e805cab14435ae2e5d656283ac4a1ae9ed264d",
+          "utf8": "{\"attempts\":3,\"timeout_ms\":1000,\"note\":\"a\"}\n"
+        },
+        "A2": {
+          "source_version": "sha256:95a093b01e739f7f6c9c6d899fb5ecfa11eca76c3d551b283830975bfeec9063",
+          "utf8": "{\"attempts\":3,\"timeout_ms\":1000,\"note\":\"b\"}\n"
+        },
+        "B": {
+          "source_version": "sha256:434445a0e99e4da9ff66b068b0c0f398b83be1a9c90754a028bf38bc9a4bb086",
+          "utf8": "{\"attempts\":4,\"timeout_ms\":1000,\"note\":\"a\"}\n"
+        },
+        "B_relocated": {
+          "source_version": "sha256:1c28910e661b31e574c2757896112da9ad1e414ab15e7fff218daab003e1f56a",
+          "utf8": "{\"note\":\"a\",\"attempts\":4,\"timeout_ms\":1000}\n"
+        },
+        "Z": {
+          "source_version": "sha256:a4cb8ac490b27cda9a886ff1a2db8bede14de60e66650f1b7d2594d536b0f0eb",
+          "utf8": "{\"attempts\":4,\"timeout_ms\":1000,\"note\":\"z\"}\n"
+        }
+      }
+    },
+    {
+      "claim_ids": [
+        "C-003",
+        "C-004"
+      ],
+      "consumers": [
+        {
+          "branch": "primary",
+          "draft_settings_A": 64,
+          "draft_settings_Z": 65,
+          "functional_profile": "budget.primary",
+          "id": "budget.specification.primary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "specification",
+          "path": "00-context/implementations/specs/budget-primary.md",
+          "sensitivity": "restricted",
+          "type": "specification"
+        },
+        {
+          "branch": "primary",
+          "draft_settings_A": 64,
+          "draft_settings_Z": 65,
+          "external_ref": "https://changes.example/budget/pr/7",
+          "functional_profile": "budget.primary",
+          "id": "budget.pull-request.primary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "pull-request",
+          "number": 7,
+          "path": "00-context/implementations/pull-requests/budget-primary.md",
+          "repository_key": "beta.example/repo",
+          "sensitivity": "restricted",
+          "source_identity_authenticated": false,
+          "type": "reference"
+        },
+        {
+          "branch": "primary",
+          "draft_settings_A": 64,
+          "draft_settings_Z": 65,
+          "functional_profile": "budget.primary",
+          "id": "budget.task.primary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "task",
+          "path": "00-context/implementations/tasks/budget-primary.md",
+          "sensitivity": "restricted",
+          "type": "reference"
+        },
+        {
+          "branch": "primary",
+          "draft_settings_A": 64,
+          "draft_settings_Z": 65,
+          "functional_profile": "budget.primary",
+          "id": "budget.planned-outcome.primary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "planned-outcome",
+          "path": "00-context/outcomes/o-004.md",
+          "sensitivity": "restricted",
+          "type": "outcome"
+        },
+        {
+          "branch": "secondary",
+          "draft_settings_A": true,
+          "draft_settings_Z": true,
+          "functional_profile": "budget.secondary",
+          "id": "budget.specification.secondary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "specification",
+          "path": "00-context/implementations/specs/budget-secondary.md",
+          "sensitivity": "restricted",
+          "type": "specification"
+        },
+        {
+          "branch": "secondary",
+          "draft_settings_A": true,
+          "draft_settings_Z": true,
+          "external_ref": "https://changes.example/budget/pr/7",
+          "functional_profile": "budget.secondary",
+          "id": "budget.pull-request.secondary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "pull-request",
+          "number": 7,
+          "path": "00-context/implementations/pull-requests/budget-secondary.md",
+          "repository_key": "beta.example/repo",
+          "sensitivity": "restricted",
+          "source_identity_authenticated": false,
+          "type": "reference"
+        },
+        {
+          "branch": "secondary",
+          "draft_settings_A": true,
+          "draft_settings_Z": true,
+          "functional_profile": "budget.secondary",
+          "id": "budget.task.secondary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "task",
+          "path": "00-context/implementations/tasks/budget-secondary.md",
+          "sensitivity": "restricted",
+          "type": "reference"
+        },
+        {
+          "branch": "secondary",
+          "draft_settings_A": true,
+          "draft_settings_Z": true,
+          "functional_profile": "budget.secondary",
+          "id": "budget.planned-outcome.secondary",
+          "interpretation": "Fixture config/artifact behavior, not graph distance, edge count or provider status",
+          "kind": "planned-outcome",
+          "path": "00-context/outcomes/o-005.md",
+          "sensitivity": "restricted",
+          "type": "outcome"
+        },
+        {
+          "branch": "historical",
+          "functional_profile": "historical.immutable",
+          "historical_measurement_verified": false,
+          "historical_record": {
+            "as_of": "2026-09-17",
+            "claim": null,
+            "declared_observed": {
+              "accepted": false,
+              "wire_bytes": 65
+            },
+            "source_key": "A"
+          },
+          "id": "budget.historical-outcome",
+          "kind": "historical-outcome",
+          "path": "00-context/outcomes/o-006.md",
+          "sensitivity": "restricted",
+          "type": "outcome"
+        }
+      ],
+      "decision_ids": [
+        "D-003",
+        "D-004"
+      ],
+      "evidence_id": "E-002",
+      "fields": {
+        "primary": "max_response_bytes",
+        "secondary": "include_lf"
+      },
+      "fragments": [
+        {
+          "branch": "primary",
+          "claim_id": "C-003",
+          "end_byte": 24,
+          "evidence_id": "E-002",
+          "identity_profile": "fixed_width_named_JSON_field_only; relocation/ambiguous identity is UNKNOWN, no reanchor",
+          "quote": "\"max_response_bytes\":64",
+          "source_version": "sha256:e8fb2f06e4426dd021b4d114db1b0306332023299556616f24d9e4b18255b19d",
+          "start_byte": 1
+        },
+        {
+          "branch": "secondary",
+          "claim_id": "C-004",
+          "end_byte": 42,
+          "evidence_id": "E-002",
+          "identity_profile": "fixed_width_named_JSON_field_only; relocation/ambiguous identity is UNKNOWN, no reanchor",
+          "quote": "\"include_lf\":true",
+          "source_version": "sha256:e8fb2f06e4426dd021b4d114db1b0306332023299556616f24d9e4b18255b19d",
+          "start_byte": 25
+        }
+      ],
+      "functional_reason": "The JSON envelope with26U+017C characters and one x is65UTF8bytes includingLF: limit64 refuses, limit65 accepts. LF inclusion remains true.",
+      "historical": {
+        "as_of": "2026-09-17",
+        "claim": null,
+        "declared_observed": {
+          "accepted": false,
+          "wire_bytes": 65
+        },
+        "source_key": "A"
+      },
+      "id": "budget",
+      "outcome_ids": [
+        "O-004",
+        "O-005",
+        "O-006"
+      ],
+      "sources": {
+        "A": {
+          "source_version": "sha256:e8fb2f06e4426dd021b4d114db1b0306332023299556616f24d9e4b18255b19d",
+          "utf8": "{\"max_response_bytes\":64,\"include_lf\":true,\"note\":\"a\"}\n"
+        },
+        "A2": {
+          "source_version": "sha256:ed6c4b4a5e807070d3fbd2e5baf262eb909e7aaa4bd0ad08946fa0894bb1de2a",
+          "utf8": "{\"max_response_bytes\":64,\"include_lf\":true,\"note\":\"b\"}\n"
+        },
+        "B": {
+          "source_version": "sha256:beaefc58132ae2a326789494bfc5df581ece7d194d8e3721de299b37fa531ac6",
+          "utf8": "{\"max_response_bytes\":65,\"include_lf\":true,\"note\":\"a\"}\n"
+        },
+        "B_relocated": {
+          "source_version": "sha256:bf91c0082a6c585d6440b54829f96a3bba4d2650a9d92982971c7fa9403be2f8",
+          "utf8": "{\"note\":\"a\",\"max_response_bytes\":65,\"include_lf\":true}\n"
+        },
+        "Z": {
+          "source_version": "sha256:65f0157c5488bbeacd0536200486695ddfa14209734a9ea84fdcc23d9258f487",
+          "utf8": "{\"max_response_bytes\":65,\"include_lf\":true,\"note\":\"z\"}\n"
+        }
+      }
+    }
+  ]
+}

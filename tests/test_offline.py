@@ -8,6 +8,7 @@ checked here: every vault command runs in-process with the socket layer broken.
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import io
 import shutil
 import socket
@@ -70,6 +71,7 @@ class OfflineTests(unittest.TestCase):
                 ("impact", "E-001", "--root", r),
                 ("trace", "--root", r),
                 ("query", "Example", "--root", r),
+                ("retrieve", "Example", "--root", r, "--valid-on", "2026-09-17", "--max-sensitivity", "restricted"),
                 ("context", "D-001", "--root", r),
                 ("pack", "D-001", "--root", r),
                 ("review", "--root", r, "list"),
@@ -148,16 +150,118 @@ class OfflineTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertIn(b"publishDiagnostics", stdout.getvalue())
 
+    def test_provenance_and_context_workflows_run_without_network(self) -> None:
+        from whykit.compiled_context import compile_context, serialize_compiled
+
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td).resolve()
+            vault = base / "vault"
+            shutil.copytree(ROOT / "examples" / "provenance", vault,
+                            ignore=shutil.ignore_patterns(".whykit", ".git"))
+            source = base / "source.txt"
+            source.write_text("Local synthetic source.\n", encoding="utf-8")
+            context = base / "context.json"
+            with _no_network():
+                report = compile_context(vault, targets=["D-003"], today=dt.date(2026, 9, 17),
+                                         allowed_sensitivities={"public", "internal", "confidential", "restricted"})
+                context.write_text(serialize_compiled(report), encoding="utf-8")
+            manifest = base / "workspace.toml"
+            manifest.write_text('workspace_version = 1\naudience = "local"\n[[vaults]]\nalias = "fixture"\nroot = "vault"\n', encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(vault)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(vault), "add", "-A"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(vault), "-c", "user.name=t", "-c", "user.email=t@example.com",
+                            "commit", "-qm", "synthetic snapshot"], check=True, capture_output=True)
+            r = str(vault)
+            steps = (
+                ("agent", "eval", "--cases", str(ROOT / "examples/agent-eval/cases.jsonl"),
+                 "--responses", str(ROOT / "examples/agent-eval/responses.jsonl")),
+                ("agent", "preflight", "--root", r, "--proposal", str(vault / "proposal.json"),
+                 "--context", str(context), "--max-sensitivity", "restricted", "--today", "2026-09-17"),
+                ("workspace", "status", str(manifest), "--today", "2026-09-17"),
+                ("query", "decision", "--root", r, "--ranking", "bm25", "--json"),
+                ("compile-context", "D-003", "--root", r, "--max-sensitivity", "restricted", "--today", "2026-09-17"),
+                ("compile-context", "--query", "observations", "--ranking", "hybrid", "--root", r,
+                 "--max-sensitivity", "restricted", "--today", "2026-09-17"),
+                ("verify-context", str(context), "--root", r, "--max-sensitivity", "restricted", "--today", "2026-09-17"),
+                ("deep-impact", "E-004", "--root", r, "--max-sensitivity", "restricted"),
+                ("knowledge-at", "--root", r, "--valid-on", "2026-09-17", "--max-sensitivity", "restricted"),
+                ("artifact", "capture", "--root", r, "--evidence", "E-004", "--source-file", str(source),
+                 "--recorded-at", "2026-09-17T12:00:00Z"),
+                ("claim", "create", "Unlinked draft", "--root", r, "--owner", "Example Owner"),
+                ("claim", "list", "--root", r, "--max-sensitivity", "restricted"),
+                ("claim", "show", "C-001", "--root", r, "--max-sensitivity", "restricted"),
+                ("claim", "verify", "C-001", "--root", r, "--max-sensitivity", "restricted"),
+            )
+            for argv in steps:
+                with self.subTest(command=argv[:2]):
+                    self.assertEqual(self._run(*argv), 0, argv)
+
+    def test_outcome_and_migration_workflows_run_without_network(self) -> None:
+        import json
+
+        from whykit.knowledge_v2 import _NATIVE_IO_AVAILABLE
+
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td).resolve()
+            vault = base / "vault"
+            shutil.copytree(ROOT / "examples/outcomes", vault,
+                            ignore=shutil.ignore_patterns(".whykit", ".git"))
+            r = str(vault)
+            for args in (
+                ("outcome", "create", "--root", r, "--input", str(vault / "outcome-input.json"),
+                 "--owner", "Ada Example", "--today", "2026-09-17"),
+                ("outcome", "list", "--root", r, "--max-sensitivity", "restricted"),
+                ("outcome", "show", "O-001", "--root", r, "--max-sensitivity", "restricted"),
+                ("outcome", "verify", "O-001", "--root", r, "--max-sensitivity", "restricted", "--today", "2026-09-17"),
+                ("knowledge", "view", "--root", r, "--max-sensitivity", "restricted"),
+            ):
+                self.assertEqual(self._run(*args), 0, args)
+            if _NATIVE_IO_AVAILABLE:
+                bundle = base / "bundle.json"
+                for args in (
+                    ("knowledge", "bundle", "--root", r, "--private", "--output", str(bundle)),
+                    ("knowledge", "restore", str(bundle), "--into", str(base / "restored")),
+                ):
+                    output = io.StringIO()
+                    with _no_network(), contextlib.redirect_stdout(output):
+                        self.assertEqual(main(list(args)), 0)
+                    plan = json.loads(output.getvalue())
+                    self.assertEqual(self._run(*args, "--write", "--expect-hash", plan["expected_sha256"]), 0)
+
+    def test_saved_github_import_runs_without_network(self) -> None:
+        import json
+
+        from _vaults import fresh_vault
+        from whykit.scaffold import create_evidence
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve() / "vault"
+            fresh_vault(root)
+            source = ROOT / "examples/github-import/issue.json"
+            with _no_network():
+                eid = create_evidence(root, source="Synthetic issue", kind="dataset",
+                                      location="https://github.com/example-labs/fixture/issues/7",
+                                      claims="Untrusted fixture metadata", sensitivity="restricted")
+                args = ["import", "github", "--root", str(root), "--kind", "issue",
+                        "--repository", "example-labs/fixture", "--evidence", eid,
+                        "--input", str(source), "--recorded-at", "2026-09-17T12:00:00Z"]
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(main(args), 0)
+                plan = json.loads(output.getvalue())
+                self.assertEqual(self._run(*args, "--write", "--expect-hash", plan["expected_sha256"]), 0)
+
     def test_the_command_list_covers_the_cli(self) -> None:
         # A new subcommand must be added to the offline run, or excluded here
         # with a reason.
         parser = build_parser()
         subparsers = next(a for a in parser._actions if a.dest == "command")
         covered = {
-            "init", "new", "lint", "status", "graph", "backlinks", "impact", "query", "context",
+            "init", "new", "lint", "status", "graph", "backlinks", "impact", "query", "retrieve", "context",
             "pack", "review", "evidence", "snapshot", "verify-snapshot", "policy", "rules",
             "adopt", "explorer-index", "history", "check", "install-hooks", "doctor", "recover",
-            "trace", "completion", "diff", "lsp",
+            "trace", "completion", "diff", "lsp", "agent", "workspace", "artifact", "claim",
+            "compile-context", "verify-context", "deep-impact", "knowledge-at", "outcome", "knowledge", "import",
         }
         excluded = {"serve"}  # starts the optional Explorer dev server
         self.assertEqual(set(subparsers.choices), covered | excluded)

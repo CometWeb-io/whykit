@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/context-verification.schema.json",
+  "title": "WhyKit compiled context verification",
+  "type": "object",
+  "required": ["format", "contract_version", "status", "reason", "execution_authorized", "signature_verified"],
+  "properties": {
+    "format": {"const": "whykit.compiled-context-verification/v1"},
+    "contract_version": {"const": 1},
+    "status": {"enum": ["current", "stale", "refused"]},
+    "reason": {"type": "string", "minLength": 1},
+    "execution_authorized": {"const": false},
+    "signature_verified": {"const": false}
+  },
+  "additionalProperties": false
+}

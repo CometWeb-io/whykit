@@ -25,6 +25,124 @@ from whykit.vault_index import VaultIndex
 
 
 class ReadIsolationTests(unittest.TestCase):
+    def assert_lock_refused_in_child(self, root, mode, *, swap_fifo=False):
+        child = subprocess.run(
+            [sys.executable, "-c", """
+import sys
+import os
+from contextlib import nullcontext
+from pathlib import Path
+from unittest.mock import patch
+from whykit import io
+lock = io.vault_read_lock if sys.argv[2] == 'read' else io.vault_mutation_lock
+real_open = os.open
+def swapped_open(path, flags, *args, **kwargs):
+    Path(path).unlink()
+    os.mkfifo(path)
+    return real_open(path, flags, *args, **kwargs)
+try:
+    with (patch.object(io.os, 'open', side_effect=swapped_open) if sys.argv[3] == 'swap' else nullcontext()), lock(Path(sys.argv[1]), timeout=0):
+        raise SystemExit('unsafe mutation lock was accepted')
+except (OSError, RuntimeError):
+    print('refused')
+""", str(root), mode, "swap" if swap_fifo else "static"], capture_output=True, text=True, timeout=2,
+            env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
+        )
+        self.assertEqual(child.returncode, 0, child.stderr)
+        self.assertEqual(child.stdout, "refused\n")
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "requires POSIX FIFOs")
+    def test_fifo_mutation_lock_fails_without_blocking_open(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".whykit").mkdir()
+            os.mkfifo(root / ".whykit/mutation.lock")
+            for mode in ("read", "write"):
+                with self.subTest(mode=mode):
+                    self.assert_lock_refused_in_child(root, mode)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "requires POSIX FIFOs")
+    def test_fifo_swapped_in_at_open_also_fails_without_blocking(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".whykit").mkdir()
+            path = root / ".whykit/mutation.lock"
+            for mode in ("read", "write"):
+                with self.subTest(mode=mode):
+                    if path.exists():
+                        path.unlink()
+                    path.write_bytes(b"original")
+                    self.assert_lock_refused_in_child(root, mode, swap_fifo=True)
+
+    def test_directory_mutation_lock_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".whykit/mutation.lock").mkdir(parents=True)
+            for mode in ("read", "write"):
+                with self.subTest(mode=mode):
+                    self.assert_lock_refused_in_child(root, mode)
+
+    @unittest.skipIf(os.name == "nt", "symlink creation may require privileges")
+    def test_symlink_mutation_lock_cannot_read_or_overwrite_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".whykit").mkdir()
+            target = root / "private.txt"
+            target.write_bytes(b"private lock target")
+            (root / ".whykit/mutation.lock").symlink_to(target)
+            for mode in ("read", "write"):
+                with self.subTest(mode=mode):
+                    self.assert_lock_refused_in_child(root, mode)
+                    self.assertEqual(target.read_bytes(), b"private lock target")
+
+    @unittest.skipIf(os.name == "nt", "requires a POSIX character device")
+    def test_lock_checks_the_opened_descriptor_and_closes_special_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".whykit").mkdir()
+            path = root / ".whykit/mutation.lock"
+            for lock in (io.vault_read_lock, io.vault_mutation_lock):
+                with self.subTest(lock=lock.__name__):
+                    path.write_bytes(b"unchanged")
+                    descriptor = os.open(os.devnull, os.O_RDWR)
+                    try:
+                        with patch.object(io.os, "open", return_value=descriptor):
+                            with self.assertRaises(OSError):
+                                with lock(root, timeout=0):
+                                    self.fail("special file descriptor accepted")
+                        with self.assertRaises(OSError):
+                            os.fstat(descriptor)
+                        self.assertEqual(path.read_bytes(), b"unchanged")
+                    finally:
+                        try:
+                            os.close(descriptor)
+                        except OSError:
+                            pass
+
+    @unittest.skipUnless(hasattr(os, "O_NOFOLLOW"), "requires no-follow open")
+    def test_last_component_symlink_swap_is_refused_at_open(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".whykit").mkdir()
+            path = root / ".whykit/mutation.lock"
+            target = root / "private.txt"
+            target.write_bytes(b"private lock target")
+            real_open = os.open
+            def swapped_open(filename, flags, *args, **kwargs):
+                path.unlink()
+                path.symlink_to(target)
+                return real_open(filename, flags, *args, **kwargs)
+            for lock in (io.vault_read_lock, io.vault_mutation_lock):
+                with self.subTest(lock=lock.__name__):
+                    if path.is_symlink():
+                        path.unlink()
+                    path.write_bytes(b"original")
+                    with patch.object(io.os, "open", side_effect=swapped_open):
+                        with self.assertRaises(OSError):
+                            with lock(root, timeout=0):
+                                self.fail("symlink swap accepted")
+                    self.assertEqual(target.read_bytes(), b"private lock target")
+
     def test_an_async_child_cannot_inherit_the_parent_write_lock(self):
         async def check(root):
             async def read():

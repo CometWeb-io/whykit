@@ -1,0 +1,454 @@
+{
+  "description": "Frozen intended-use stipulations, NOT graph-distance-derived, human-independent gold or model accuracy. Main 24 cases share one date and explicit local scope; paired controls separately test scope/time.",
+  "format": "whykit.synthetic-hybrid-qrels/v1",
+  "negative_controls": [
+    {
+      "decision_role": "reference",
+      "expect_empty": true,
+      "id": "absent-development",
+      "kind": "no_lexical_seed",
+      "partition": "development",
+      "rationale": "No permitted document satisfies this asserted instruction/verification or exact no-match task. Partial lexical references may be returned; record false-positive@K, do not pretend the lexical ranker detects semantic negation. For scope controls, native C/O denial is mandatory, while other public references remain allowed.",
+      "relevance": {},
+      "text": "unobtainium spectrograph"
+    },
+    {
+      "decision_role": "reference",
+      "expect_empty": true,
+      "id": "absent-locked",
+      "kind": "no_lexical_seed",
+      "partition": "locked",
+      "rationale": "No permitted document satisfies this asserted instruction/verification or exact no-match task. Partial lexical references may be returned; record false-positive@K, do not pretend the lexical ranker detects semantic negation. For scope controls, native C/O denial is mandatory, while other public references remain allowed.",
+      "relevance": {},
+      "text": "xylophonic zeppelin"
+    },
+    {
+      "decision_role": "premise",
+      "expect_empty": false,
+      "id": "unsafe-retry",
+      "kind": "unsupported_instruction",
+      "partition": "development",
+      "rationale": "No permitted document satisfies this asserted instruction/verification or exact no-match task. Partial lexical references may be returned; record false-positive@K, do not pretend the lexical ranker detects semantic negation. For scope controls, native C/O denial is mandatory, while other public references remain allowed.",
+      "relevance": {},
+      "text": "authorize unlimited retry attempts"
+    },
+    {
+      "decision_role": "premise",
+      "expect_empty": false,
+      "id": "unsafe-retention",
+      "kind": "opposite_answer",
+      "partition": "development",
+      "rationale": "No permitted document satisfies this asserted instruction/verification or exact no-match task. Partial lexical references may be returned; record false-positive@K, do not pretend the lexical ranker detects semantic negation. For scope controls, native C/O denial is mandatory, while other public references remain allowed.",
+      "relevance": {},
+      "text": "retain original payload forever"
+    },
+    {
+      "decision_role": "reference",
+      "expect_empty": false,
+      "id": "partial-token",
+      "kind": "substring_token_boundary",
+      "partition": "development",
+      "rationale": "No permitted document satisfies this asserted instruction/verification or exact no-match task. Partial lexical references may be returned; record false-positive@K, do not pretend the lexical ranker detects semantic negation. For scope controls, native C/O denial is mandatory, while other public references remain allowed.",
+      "relevance": {},
+      "text": "restor"
+    },
+    {
+      "decision_role": "reference",
+      "expect_empty": false,
+      "id": "unverified-value",
+      "kind": "unsupported_verification",
+      "partition": "locked",
+      "rationale": "No permitted document satisfies this asserted instruction/verification or exact no-match task. Partial lexical references may be returned; record false-positive@K, do not pretend the lexical ranker detects semantic negation. For scope controls, native C/O denial is mandatory, while other public references remain allowed.",
+      "relevance": {},
+      "text": "independently certified response duration"
+    },
+    {
+      "allowed_sensitivities": [
+        "public"
+      ],
+      "decision_role": "reference",
+      "expect_empty": false,
+      "id": "scope-public-claim",
+      "kind": "public_native_claim_denial",
+      "partition": "locked",
+      "rationale": "No permitted document satisfies this asserted instruction/verification or exact no-match task. Partial lexical references may be returned; record false-positive@K, do not pretend the lexical ranker detects semantic negation. For scope controls, native C/O denial is mandatory, while other public references remain allowed.",
+      "relevance": {},
+      "text": "immutable digest quoted range"
+    },
+    {
+      "allowed_sensitivities": [
+        "public"
+      ],
+      "decision_role": "reference",
+      "expect_empty": false,
+      "id": "scope-public-outcome",
+      "kind": "public_native_outcome_denial",
+      "partition": "locked",
+      "rationale": "No permitted document satisfies this asserted instruction/verification or exact no-match task. Partial lexical references may be returned; record false-positive@K, do not pretend the lexical ranker detects semantic negation. For scope controls, native C/O denial is mandatory, while other public references remain allowed.",
+      "relevance": {},
+      "text": "measured duration window"
+    }
+  ],
+  "paired_controls": [
+    "denied_high_tf_notes_and_hidden_hub",
+    "public_and_sparse_evidence_row_grants",
+    "half_open_start_end_and_unknown",
+    "expired_previous_and_unapproved_future_successor",
+    "source_A_B_A_and_wrong_pinned_version",
+    "captured_A_disk_B",
+    "cycle_diamond_navigation_false_positives",
+    "read_only_inherited_persistent_cache",
+    "construction_refusal_no_partial_corpus"
+  ],
+  "partitions": {
+    "development": [
+      "retry",
+      "restore",
+      "retention",
+      "rollback"
+    ],
+    "locked": [
+      "capture",
+      "budgets"
+    ]
+  },
+  "positive_intents": [
+    {
+      "decision_role": "premise",
+      "id": "retry-choice",
+      "intent": "choice",
+      "partition": "development",
+      "rationale": "Task asks for the current declared choice. The approved current decision states it; the instructions apply it; the captured declaration is supporting background. The rejected alternative and navigation do not answer it.",
+      "relevance": {
+        "retry:claim": 1,
+        "retry:decision": 2,
+        "retry:specification": 1
+      },
+      "text": "retry queue current policy",
+      "topic": "retry"
+    },
+    {
+      "decision_role": "reference",
+      "id": "retry-source",
+      "intent": "source",
+      "partition": "development",
+      "rationale": "Task asks for the actual source declaration containing these concrete details. The claim reproduces its exact byte range; the current decision is policy background, not a substitute for the quote. E rows are not rankable results.",
+      "relevance": {
+        "retry:claim": 2,
+        "retry:decision": 1
+      },
+      "text": "backoff duplicate delivery",
+      "topic": "retry"
+    },
+    {
+      "decision_role": "reference",
+      "id": "retry-observed",
+      "intent": "observed",
+      "partition": "development",
+      "rationale": "Task asks for the locally declared observed duration for this process. The outcome is the sole record with the stipulated observed number. Decision and source declaration identify its process only; the source pin does not verify that number or causality.",
+      "relevance": {
+        "retry:claim": 1,
+        "retry:decision": 1,
+        "retry:outcome": 2
+      },
+      "text": "retry queue observed duration",
+      "topic": "retry"
+    },
+    {
+      "decision_role": "reference",
+      "id": "retry-procedure",
+      "intent": "procedure",
+      "partition": "development",
+      "rationale": "Task asks for executable instructions for the chosen process. The specification supplies ordered steps; the decision and declaration explain the choice but do not replace those instructions. Navigation and rejected instructions are grade zero.",
+      "relevance": {
+        "retry:claim": 1,
+        "retry:decision": 1,
+        "retry:specification": 2
+      },
+      "text": "retry queue operating procedure",
+      "topic": "retry"
+    },
+    {
+      "decision_role": "premise",
+      "id": "restore-choice",
+      "intent": "choice",
+      "partition": "development",
+      "rationale": "Task asks for the current declared choice. The approved current decision states it; the instructions apply it; the captured declaration is supporting background. The rejected alternative and navigation do not answer it.",
+      "relevance": {
+        "restore:claim": 1,
+        "restore:decision": 2,
+        "restore:specification": 1
+      },
+      "text": "backup restore current policy",
+      "topic": "restore"
+    },
+    {
+      "decision_role": "reference",
+      "id": "restore-source",
+      "intent": "source",
+      "partition": "development",
+      "rationale": "Task asks for the actual source declaration containing these concrete details. The claim reproduces its exact byte range; the current decision is policy background, not a substitute for the quote. E rows are not rankable results.",
+      "relevance": {
+        "restore:claim": 2,
+        "restore:decision": 1
+      },
+      "text": "isolated database integrity",
+      "topic": "restore"
+    },
+    {
+      "decision_role": "reference",
+      "id": "restore-observed",
+      "intent": "observed",
+      "partition": "development",
+      "rationale": "Task asks for the locally declared observed duration for this process. The outcome is the sole record with the stipulated observed number. Decision and source declaration identify its process only; the source pin does not verify that number or causality.",
+      "relevance": {
+        "restore:claim": 1,
+        "restore:decision": 1,
+        "restore:outcome": 2
+      },
+      "text": "backup restore observed duration",
+      "topic": "restore"
+    },
+    {
+      "decision_role": "reference",
+      "id": "restore-procedure",
+      "intent": "procedure",
+      "partition": "development",
+      "rationale": "Task asks for executable instructions for the chosen process. The specification supplies ordered steps; the decision and declaration explain the choice but do not replace those instructions. Navigation and rejected instructions are grade zero.",
+      "relevance": {
+        "restore:claim": 1,
+        "restore:decision": 1,
+        "restore:specification": 2
+      },
+      "text": "backup restore operating procedure",
+      "topic": "restore"
+    },
+    {
+      "decision_role": "premise",
+      "id": "retention-choice",
+      "intent": "choice",
+      "partition": "development",
+      "rationale": "Task asks for the current declared choice. The approved current decision states it; the instructions apply it; the captured declaration is supporting background. The rejected alternative and navigation do not answer it.",
+      "relevance": {
+        "retention:claim": 1,
+        "retention:decision": 2,
+        "retention:specification": 1
+      },
+      "text": "data retention current policy",
+      "topic": "retention"
+    },
+    {
+      "decision_role": "reference",
+      "id": "retention-source",
+      "intent": "source",
+      "partition": "development",
+      "rationale": "Task asks for the actual source declaration containing these concrete details. The claim reproduces its exact byte range; the current decision is policy background, not a substitute for the quote. E rows are not rankable results.",
+      "relevance": {
+        "retention:claim": 2,
+        "retention:decision": 1
+      },
+      "text": "payload deletion aggregate counts",
+      "topic": "retention"
+    },
+    {
+      "decision_role": "reference",
+      "id": "retention-observed",
+      "intent": "observed",
+      "partition": "development",
+      "rationale": "Task asks for the locally declared observed duration for this process. The outcome is the sole record with the stipulated observed number. Decision and source declaration identify its process only; the source pin does not verify that number or causality.",
+      "relevance": {
+        "retention:claim": 1,
+        "retention:decision": 1,
+        "retention:outcome": 2
+      },
+      "text": "data retention observed duration",
+      "topic": "retention"
+    },
+    {
+      "decision_role": "reference",
+      "id": "retention-procedure",
+      "intent": "procedure",
+      "partition": "development",
+      "rationale": "Task asks for executable instructions for the chosen process. The specification supplies ordered steps; the decision and declaration explain the choice but do not replace those instructions. Navigation and rejected instructions are grade zero.",
+      "relevance": {
+        "retention:claim": 1,
+        "retention:decision": 1,
+        "retention:specification": 2
+      },
+      "text": "data retention operating procedure",
+      "topic": "retention"
+    },
+    {
+      "decision_role": "premise",
+      "id": "rollback-choice",
+      "intent": "choice",
+      "partition": "development",
+      "rationale": "Task asks for the current declared choice. The approved current decision states it; the instructions apply it; the captured declaration is supporting background. The rejected alternative and navigation do not answer it.",
+      "relevance": {
+        "rollback:claim": 1,
+        "rollback:decision": 2,
+        "rollback:specification": 1
+      },
+      "text": "deployment rollback current policy",
+      "topic": "rollback"
+    },
+    {
+      "decision_role": "reference",
+      "id": "rollback-source",
+      "intent": "source",
+      "partition": "development",
+      "rationale": "Task asks for the actual source declaration containing these concrete details. The claim reproduces its exact byte range; the current decision is policy background, not a substitute for the quote. E rows are not rankable results.",
+      "relevance": {
+        "rollback:claim": 2,
+        "rollback:decision": 1
+      },
+      "text": "previous release health gate",
+      "topic": "rollback"
+    },
+    {
+      "decision_role": "reference",
+      "id": "rollback-observed",
+      "intent": "observed",
+      "partition": "development",
+      "rationale": "Task asks for the locally declared observed duration for this process. The outcome is the sole record with the stipulated observed number. Decision and source declaration identify its process only; the source pin does not verify that number or causality.",
+      "relevance": {
+        "rollback:claim": 1,
+        "rollback:decision": 1,
+        "rollback:outcome": 2
+      },
+      "text": "deployment rollback observed duration",
+      "topic": "rollback"
+    },
+    {
+      "decision_role": "reference",
+      "id": "rollback-procedure",
+      "intent": "procedure",
+      "partition": "development",
+      "rationale": "Task asks for executable instructions for the chosen process. The specification supplies ordered steps; the decision and declaration explain the choice but do not replace those instructions. Navigation and rejected instructions are grade zero.",
+      "relevance": {
+        "rollback:claim": 1,
+        "rollback:decision": 1,
+        "rollback:specification": 2
+      },
+      "text": "deployment rollback operating procedure",
+      "topic": "rollback"
+    },
+    {
+      "decision_role": "premise",
+      "id": "capture-choice",
+      "intent": "choice",
+      "partition": "locked",
+      "rationale": "Task asks for the current declared choice. The approved current decision states it; the instructions apply it; the captured declaration is supporting background. The rejected alternative and navigation do not answer it.",
+      "relevance": {
+        "capture:claim": 1,
+        "capture:decision": 2,
+        "capture:specification": 1
+      },
+      "text": "capture provenance current policy",
+      "topic": "capture"
+    },
+    {
+      "decision_role": "reference",
+      "id": "capture-source",
+      "intent": "source",
+      "partition": "locked",
+      "rationale": "Task asks for the actual source declaration containing these concrete details. The claim reproduces its exact byte range; the current decision is policy background, not a substitute for the quote. E rows are not rankable results.",
+      "relevance": {
+        "capture:claim": 2,
+        "capture:decision": 1
+      },
+      "text": "immutable digest quoted range",
+      "topic": "capture"
+    },
+    {
+      "decision_role": "reference",
+      "id": "capture-observed",
+      "intent": "observed",
+      "partition": "locked",
+      "rationale": "Task asks for the locally declared observed duration for this process. The outcome is the sole record with the stipulated observed number. Decision and source declaration identify its process only; the source pin does not verify that number or causality.",
+      "relevance": {
+        "capture:claim": 1,
+        "capture:decision": 1,
+        "capture:outcome": 2
+      },
+      "text": "capture provenance observed duration",
+      "topic": "capture"
+    },
+    {
+      "decision_role": "reference",
+      "id": "capture-procedure",
+      "intent": "procedure",
+      "partition": "locked",
+      "rationale": "Task asks for executable instructions for the chosen process. The specification supplies ordered steps; the decision and declaration explain the choice but do not replace those instructions. Navigation and rejected instructions are grade zero.",
+      "relevance": {
+        "capture:claim": 1,
+        "capture:decision": 1,
+        "capture:specification": 2
+      },
+      "text": "capture provenance operating procedure",
+      "topic": "capture"
+    },
+    {
+      "decision_role": "premise",
+      "id": "budgets-choice",
+      "intent": "choice",
+      "partition": "locked",
+      "rationale": "Task asks for the current declared choice. The approved current decision states it; the instructions apply it; the captured declaration is supporting background. The rejected alternative and navigation do not answer it.",
+      "relevance": {
+        "budgets:claim": 1,
+        "budgets:decision": 2,
+        "budgets:specification": 1
+      },
+      "text": "request budgets current policy",
+      "topic": "budgets"
+    },
+    {
+      "decision_role": "reference",
+      "id": "budgets-source",
+      "intent": "source",
+      "partition": "locked",
+      "rationale": "Task asks for the actual source declaration containing these concrete details. The claim reproduces its exact byte range; the current decision is policy background, not a substitute for the quote. E rows are not rankable results.",
+      "relevance": {
+        "budgets:claim": 2,
+        "budgets:decision": 1
+      },
+      "text": "UTF-8 envelope newline refusal",
+      "topic": "budgets"
+    },
+    {
+      "decision_role": "reference",
+      "id": "budgets-observed",
+      "intent": "observed",
+      "partition": "locked",
+      "rationale": "Task asks for the locally declared observed duration for this process. The outcome is the sole record with the stipulated observed number. Decision and source declaration identify its process only; the source pin does not verify that number or causality.",
+      "relevance": {
+        "budgets:claim": 1,
+        "budgets:decision": 1,
+        "budgets:outcome": 2
+      },
+      "text": "request budgets observed duration",
+      "topic": "budgets"
+    },
+    {
+      "decision_role": "reference",
+      "id": "budgets-procedure",
+      "intent": "procedure",
+      "partition": "locked",
+      "rationale": "Task asks for executable instructions for the chosen process. The specification supplies ordered steps; the decision and declaration explain the choice but do not replace those instructions. Navigation and rejected instructions are grade zero.",
+      "relevance": {
+        "budgets:claim": 1,
+        "budgets:decision": 1,
+        "budgets:specification": 2
+      },
+      "text": "request budgets operating procedure",
+      "topic": "budgets"
+    }
+  ],
+  "rules": [
+    "Never change qrels/phrasing/partition after reading ranking outputs; report every loss.",
+    "Per-scope denominator excludes denied records; a denied output is an unconditional privacy failure.",
+    "Evidence intermediaries and source citations do not consume or create hidden Recall hits.",
+    "Graph proximity is not a relevance grade or semantic support judgment.",
+    "Zero-positive queries have null Recall/nDCG; false positives reported separately."
+  ]
+}

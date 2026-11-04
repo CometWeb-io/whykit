@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "$id": "https://cometweb.io/schemas/whykit/claim-verification.schema.json",
+  "title": "WhyKit exact source anchor verification",
+  "required": [
+    "contract_version",
+    "format",
+    "claim_id",
+    "exists",
+    "links",
+    "unlinked"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "format": {
+      "const": "whykit.claim-verification/v1"
+    },
+    "claim_id": {
+      "type": "string"
+    },
+    "exists": {
+      "type": "boolean"
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "evidence_id",
+          "source_version",
+          "status",
+          "assessment",
+          "source_state"
+        ],
+        "properties": {
+          "evidence_id": {
+            "type": "string"
+          },
+          "source_version": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "matched",
+              "source_unavailable",
+              "version_mismatch",
+              "location_mismatch"
+            ]
+          },
+          "assessment": {
+            "type": "object"
+          },
+          "source_state": {
+            "enum": [
+              "current",
+              "changed",
+              "unknown",
+              "ambiguous",
+              "future",
+              null
+            ],
+            "description": "Latest explicit source-byte observation at UTC calendar-day precision, not semantic support or authenticated time. Null means unavailable within the requested visibility set."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "unlinked": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Anchor status and observed source currentness are independent. Changed, unknown, ambiguous or future source bytes require review; matching an anchor never grants authority or verifies semantic truth."
+}

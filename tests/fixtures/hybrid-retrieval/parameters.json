@@ -1,0 +1,73 @@
+{
+  "allowed_sensitivities": [
+    "public",
+    "internal",
+    "confidential",
+    "restricted"
+  ],
+  "arm_order": [
+    "A",
+    "B",
+    "C",
+    "D"
+  ],
+  "arms": {
+    "A": "query_vault substring on shared canonical permission/document view; ordinary lifecycle semantics",
+    "B": "retrieve_bm25 on identical permission/document view; ordinary lifecycle semantics",
+    "C": "rank_prepared max_depth=0 with exact D validity/status/applicability policy",
+    "D": "rank_prepared max_depth=2 with frozen hybrid recipe"
+  },
+  "construction_limits": {
+    "edges": 200000,
+    "objects": 25000,
+    "query_utf8_bytes": 4096,
+    "tokens": 2000000,
+    "visible_utf8_bytes": 67108864
+  },
+  "cost_gates": {
+    "D_to_C_warm_p95_ratio_max": 2,
+    "fresh_process_p95_seconds_max": 10,
+    "incremental_rss_20k_mib_max": 256,
+    "warm_p95_seconds_max": 1
+  },
+  "discarded_warmups": 1,
+  "external_calls": 0,
+  "format": "whykit.synthetic-hybrid-parameters/v1",
+  "fresh_process_repeats": 30,
+  "fresh_process_timing": "After module imports; includes initial scope capture/filter/rank and UTF-8 JSON+LF serialization; OS caches not flushed; corpus materialization excluded",
+  "limit": 5,
+  "max_depth": 2,
+  "max_edges": 2048,
+  "max_nodes": 256,
+  "metrics_k": [
+    3,
+    5
+  ],
+  "model_calls": 0,
+  "monetary_spend": "0",
+  "ontology": "Unique Markdown document path at pinned corpus bytes; evidence rows/citations are not result hits",
+  "performance_cases": [
+    "retry-choice",
+    "budgets-procedure"
+  ],
+  "permission_adapter": {
+    "admitted_note_paths": "corpus-manifest.rankable_paths plus scale/ and private-controls/ for paired mutation scenarios",
+    "baseline_time_policy": "A/B retain ordinary lifecycle behavior; C/D use intent-specific identical validity/decision-role filters",
+    "captured_backing_paths": [
+      "00-context/evidence-register.md",
+      "00-context/review-log.md",
+      "06-decisions/decision-log.md"
+    ],
+    "excluded_map": "Home.md is not a semantic or ranked record; global logs/raw per-row register are removed by captured canonical view before every arm"
+  },
+  "repeats": 30,
+  "scale_distractors": [
+    0,
+    1000,
+    20000
+  ],
+  "scope": "Synthetic development regression; locked topics are not independent human gold; no default ranking promotion",
+  "seed_limit": 16,
+  "valid_on": "2026-10-27",
+  "validity": "active_or_unknown"
+}

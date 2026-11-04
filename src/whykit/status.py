@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .io import consistent_read
-from .sensitivity import scoped_report
+from .sensitivity import note_sensitivity_label, scoped_report
 
 import argparse
 import datetime as dt
@@ -88,7 +88,7 @@ def build_status(
         status_value = str(note.front.get("status") or "")
         if status_value:
             document_states[status_value] = document_states.get(status_value, 0) + 1
-        sensitivity = str(note.front.get("sensitivity") or "")
+        sensitivity = note_sensitivity_label(note)
         if sensitivity:
             sensitivity_counts[sensitivity] = sensitivity_counts.get(sensitivity, 0) + 1
         if is_decision_record(note.front):

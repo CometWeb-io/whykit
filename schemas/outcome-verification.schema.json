@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/outcome-verification.schema.json",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "format",
+    "outcome_id",
+    "exists",
+    "decision_state",
+    "baseline",
+    "observed",
+    "observed_source_verified",
+    "values_checked",
+    "causality_checked",
+    "execution_authorized"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "format": {
+      "const": "whykit.outcome-verification/v1"
+    },
+    "outcome_id": {
+      "type": "string"
+    },
+    "exists": {
+      "type": "boolean"
+    },
+    "decision_state": {
+      "enum": [
+        "available",
+        "missing",
+        "invalid",
+        "ambiguous",
+        "unavailable"
+      ]
+    },
+    "baseline": {
+      "type": "object",
+      "required": [
+        "state",
+        "claim_id",
+        "pin_and_anchor_matched",
+        "source_states"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "absent",
+            "unlinked",
+            "verified",
+            "missing_claim",
+            "claim_changed",
+            "invalid_claim",
+            "unverified_anchor",
+            "unavailable"
+          ]
+        },
+        "claim_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pin_and_anchor_matched": {
+          "type": "boolean"
+        },
+        "source_states": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "current",
+              "changed",
+              "unknown",
+              "ambiguous",
+              "future",
+              "invalid",
+              "unavailable"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "observed": {
+      "type": "object",
+      "required": [
+        "state",
+        "claim_id",
+        "pin_and_anchor_matched",
+        "source_states"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "absent",
+            "unlinked",
+            "verified",
+            "missing_claim",
+            "claim_changed",
+            "invalid_claim",
+            "unverified_anchor",
+            "unavailable"
+          ]
+        },
+        "claim_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pin_and_anchor_matched": {
+          "type": "boolean"
+        },
+        "source_states": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "current",
+              "changed",
+              "unknown",
+              "ambiguous",
+              "future",
+              "invalid",
+              "unavailable"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "observed_source_verified": {
+      "type": "boolean"
+    },
+    "values_checked": {
+      "const": false
+    },
+    "causality_checked": {
+      "const": false
+    },
+    "execution_authorized": {
+      "const": false
+    }
+  },
+  "additionalProperties": false
+}

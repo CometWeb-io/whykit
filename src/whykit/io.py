@@ -19,7 +19,7 @@ import time
 from contextlib import contextmanager
 from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import TextIO
+from typing import BinaryIO, TextIO
 
 
 def _sync_directory(path: Path) -> None:
@@ -306,6 +306,31 @@ def _pending_transactions(root: Path) -> bool:
     return False
 
 
+def open_regular_binary(path: Path, *, write: bool = False) -> BinaryIO:
+    """Open a regular file without blocking on or following a special target.
+
+    Callers must still bound reads and hold the vault lock for governed writes.
+    """
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError(errno.EBUSY, "non-regular file refused")
+    flags = os.O_RDWR | os.O_CREAT | os.O_APPEND if write else os.O_RDONLY
+    # A FIFO swapped in after lstat must not block before the lock timeout starts.
+    flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(path, flags, 0o666)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError(errno.EBUSY, "non-regular file refused")
+        return os.fdopen(descriptor, "a+b" if write else "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 @contextmanager
 def vault_read_lock(root: Path, *, timeout: float = 15.0) -> Iterator[None]:
     """Hold a shared OS lock without writing to the vault; pending recovery fails closed.
@@ -324,7 +349,7 @@ def vault_read_lock(root: Path, *, timeout: float = 15.0) -> Iterator[None]:
     if state.is_symlink() or lock_path.is_symlink():
         raise OSError(errno.EBUSY, "symlinked mutation state refused")
     try:
-        handle = lock_path.open("rb")
+        handle = open_regular_binary(lock_path)
     except FileNotFoundError:
         handle = None
     token = None
@@ -388,7 +413,7 @@ def vault_mutation_lock(root: Path, *, timeout: float = 15.0) -> Iterator[None]:
         yield
         return
     lock_path = safe_vault_target(root, ".whykit/mutation.lock")
-    handle = lock_path.open("a+b")
+    handle = open_regular_binary(lock_path, write=True)
     deadline = time.monotonic() + timeout
     token = None
     ownership = _HeldLock("write", _lock_owner())

@@ -1,0 +1,1 @@
+The data retention declaration sets thirty days for payload deletion. Aggregate counts omit original payload content.

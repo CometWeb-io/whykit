@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/source-observations.schema.json",
+  "title": "WhyKit bounded per-evidence source observations",
+  "description": "Canonical JSON, one file at 00-context/observations/E-NNN.json. Runtime additionally validates real canonical UTC timestamps, unique event tuples and the 64 KiB encoded limit. Append order is recording order, not datetime order; latest selection compares UTC datetimes. Events are operator declarations, not source truth or trusted timestamps.",
+  "type": "object",
+  "required": ["format", "evidence_id", "observations"],
+  "additionalProperties": false,
+  "properties": {
+    "format": {"const": "whykit.source-observations/v1"},
+    "evidence_id": {"type": "string", "pattern": "^E-[0-9]{3,}(?![\\s\\S])"},
+    "observations": {
+      "type": "array", "minItems": 1, "maxItems": 256,
+      "items": {
+        "type": "object", "required": ["source_version", "recorded_at", "sensitivity"],
+        "additionalProperties": false,
+        "properties": {
+          "source_version": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])"},
+          "recorded_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z(?![\\s\\S])"},
+          "sensitivity": {"enum": ["public", "internal", "confidential", "restricted"]}
+        }
+      }
+    }
+  }
+}

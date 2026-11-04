@@ -1,0 +1,25 @@
+{
+  "created_at": "2026-09-17T10:00:00Z",
+  "updated_at": "2026-09-17T10:30:00Z",
+  "id": 2001,
+  "number": 8,
+  "url": "https://api.github.com/repos/example-labs/fixture/pulls/8",
+  "html_url": "https://github.com/example-labs/fixture/pull/8",
+  "state": "open",
+  "closed_at": null,
+  "merged_at": null,
+  "merge_commit_sha": null,
+  "base": {
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "repo": {
+      "full_name": "example-labs/fixture",
+      "html_url": "https://github.com/example-labs/fixture"
+    }
+  },
+  "head": {
+    "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "repo": null
+  },
+  "title": "Synthetic pull request",
+  "body": "Synthetic deleted-fork case; no approval or merge is asserted."
+}

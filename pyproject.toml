@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 [project]
 name = "whykit"
 dynamic = ["version", "readme"]
-description = "Git-native evidence and decision ledger for teams and AI agents"
+description = "Keep decisions, their reasoning, and supporting sources together in Markdown"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"

@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/agent-preflight-result.schema.json",
+  "title": "WhyKit structural agent preflight result",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "format",
+    "proposal_id",
+    "proposal_sha256",
+    "as_of",
+    "review_scope",
+    "verdict",
+    "review_required",
+    "execution_authorized",
+    "semantics_checked",
+    "trusted_history_checked",
+    "referenced_decisions",
+    "findings"
+  ],
+  "properties": {
+    "format": {
+      "type": "string",
+      "const": "whykit.agent-preflight/v1"
+    },
+    "proposal_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+    },
+    "proposal_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "as_of": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "review_scope": {
+      "type": "string",
+      "const": "explicit_decision_ids_only"
+    },
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "blocked",
+        "needs_review"
+      ]
+    },
+    "review_required": {
+      "type": "boolean",
+      "const": true
+    },
+    "execution_authorized": {
+      "type": "boolean",
+      "const": false
+    },
+    "semantics_checked": {
+      "type": "boolean",
+      "const": false
+    },
+    "trusted_history_checked": {
+      "type": "boolean",
+      "const": false
+    },
+    "referenced_decisions": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "findings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "decision_id",
+          "problems"
+        ],
+        "properties": {
+          "decision_id": {
+            "type": "string",
+            "pattern": "^D-[0-9]{3,}$"
+          },
+          "problems": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "review_overdue",
+                "stale_evidence",
+                "evidence_age_unbounded",
+                "invalid_decision_record",
+                "not_binding",
+                "superseded",
+                "unverified_local_approval",
+                "invalid_record_timestamp",
+                "invalid_review_date",
+                "unreviewed_decision",
+                "no_evidence",
+                "missing_evidence",
+                "retired_evidence",
+                "ambiguous_evidence",
+                "unverifiable_evidence_access",
+                "unknown_or_ambiguous_decision",
+                "invalid_claim_ids",
+                "invalid_claim_versions",
+                "missing_claim",
+                "invalid_claim_record",
+                "claim_snapshot_changed",
+                "claim_verification_failed",
+                "unverified_claim_anchor",
+                "claim_snapshot_unpinned",
+                "claim_unlinked",
+                "claim_contradicted",
+                "claim_model_assessment",
+                "context_not_current",
+                "context_missing_decision",
+                "claim_not_current",
+                "claim_validity_unknown",
+                "claim_source_changed",
+                "claim_source_unknown",
+                "claim_source_ambiguous",
+                "claim_source_future",
+                "decision_not_yet_valid",
+                "decision_expired",
+                "invalid_decision_validity",
+                "review_update_required",
+                "review_supersede_required"
+              ]
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "contract_version": {
+      "const": 1
+    },
+    "context_verification": {
+      "type": "object",
+      "required": [
+        "status",
+        "execution_authorized"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "current",
+            "stale",
+            "refused"
+          ]
+        },
+        "execution_authorized": {
+          "const": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

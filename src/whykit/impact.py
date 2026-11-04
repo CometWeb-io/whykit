@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .io import consistent_read
-from .sensitivity import scoped_report
+from .sensitivity import note_sensitivity_label, scoped_report
 
 import argparse
 import json
@@ -32,7 +32,7 @@ def _note_summary(root: Path, note) -> dict:
         "type": str(note.front.get("type") or ""),
         "status": str(note.front.get("status") or ""),
         "owner": str(note.front.get("owner") or ""),
-        "sensitivity": str(note.front.get("sensitivity") or "internal"),
+        "sensitivity": note_sensitivity_label(note, "internal"),
         "source_of_truth": note.front.get("source_of_truth") is True,
     }
 

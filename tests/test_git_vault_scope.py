@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import errno
 from pathlib import Path
@@ -12,27 +11,12 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from test_dependency_graph import write_note, write_register
 from test_history_gate import APPROVED
 from whykit.ci_formats import github_annotations, source_root
 from whykit.immutability import _git_prefix, changed_records
 from whykit.diff import build_diff
-
-
-def write_note(root: Path, path: str, body: str = "", **metadata) -> Path:
-    target = root / path
-    target.parent.mkdir(parents=True, exist_ok=True)
-    front = {"title": path, "sensitivity": "public", **metadata}
-    target.write_text("---\n" + "\n".join(f"{key}: {json.dumps(value)}" for key, value in front.items())
-                      + "\n---\n" + body, encoding="utf-8")
-    return target
-
-
-def write_register(root: Path) -> Path:
-    return write_note(root, "00-context/evidence-register.md", """
-| ID | Source | Type | Date | Accessed | Location | Claims it supports |
-|---|---|---|---|---|---|---|
-| E-001 | Synthetic source | report | 2026-10-01 | 2026-10-01 | https://example.com/report | Synthetic claim |
-""")
+from whykit.temporal_graph import knowledge_at
 
 
 class GitVaultScopeTests(unittest.TestCase):
@@ -97,6 +81,15 @@ class GitVaultScopeTests(unittest.TestCase):
         report = build_diff(selected, base, head)
         self.assertEqual(report["prefix"], " kb/")
         self.assertEqual([item["id"] for item in report["decisions"]["added"]], ["D-002"])
+        self.assertEqual(_git_prefix(str(selected)), " kb/")
+
+    def test_leading_space_never_selects_a_sibling_snapshot(self) -> None:
+        selected = self.vault(" kb", "SELECTED_VAULT")
+        self.vault("kb", "OTHER_VAULT_CANARY")
+        commit = self.commit("synthetic whitespace namespace")
+        report = knowledge_at(selected, valid_on="2026-10-01", recorded_revision=commit,
+                              target="D-001", allowed_sensitivities={"public"})
+        self.assertEqual(report["nodes"][0]["title"], "SELECTED_VAULT")
         self.assertEqual(_git_prefix(str(selected)), " kb/")
 
     @unittest.skipIf(os.name == "nt", "Windows forbids newline paths")

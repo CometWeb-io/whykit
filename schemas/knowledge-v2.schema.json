@@ -1,0 +1,1098 @@
+{
+  "type": "object",
+  "required": [
+    "contract_version",
+    "format",
+    "scope",
+    "objects",
+    "git_history_transferred",
+    "semantics_checked",
+    "execution_authorized"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "format": {
+      "const": "whykit.knowledge/v2"
+    },
+    "scope": {
+      "enum": [
+        "filtered",
+        "full_local"
+      ]
+    },
+    "objects": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind",
+              "id",
+              "sensitivity",
+              "source",
+              "data"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "Claim"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sensitivity": {
+                "enum": [
+                  "public",
+                  "internal",
+                  "confidential",
+                  "restricted"
+                ]
+              },
+              "source": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "sha256",
+                  "row_sha256",
+                  "occurrence"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  },
+                  "sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "row_sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "occurrence": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              "data": {
+                "type": "object",
+                "required": [
+                  "record",
+                  "payload"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "record": {
+                    "$ref": "#/$defs/claim-record"
+                  },
+                  "payload": {
+                    "$ref": "#/$defs/claim-provenance"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind",
+              "id",
+              "sensitivity",
+              "source",
+              "data"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "Decision"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sensitivity": {
+                "enum": [
+                  "public",
+                  "internal",
+                  "confidential",
+                  "restricted"
+                ]
+              },
+              "source": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "sha256",
+                  "row_sha256",
+                  "occurrence"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  },
+                  "sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "row_sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "occurrence": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              "data": {
+                "type": "object",
+                "required": [
+                  "record",
+                  "body"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "record": {
+                    "$ref": "#/$defs/decision-record"
+                  },
+                  "body": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind",
+              "id",
+              "sensitivity",
+              "source",
+              "data"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "EvidenceArtifact"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sensitivity": {
+                "enum": [
+                  "public",
+                  "internal",
+                  "confidential",
+                  "restricted"
+                ]
+              },
+              "source": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "sha256",
+                  "row_sha256",
+                  "occurrence"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  },
+                  "sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "row_sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "occurrence": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              "data": {
+                "type": "object",
+                "required": [
+                  "evidence_id",
+                  "source_version",
+                  "recorded_at",
+                  "size_bytes"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "evidence_id": {
+                    "type": "string",
+                    "pattern": "^E-[0-9]{3,}(?![\\s\\S])"
+                  },
+                  "source_version": {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])"
+                  },
+                  "recorded_at": {
+                    "type": "string"
+                  },
+                  "size_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8388608
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind",
+              "id",
+              "sensitivity",
+              "source",
+              "data"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "ReviewEvent"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sensitivity": {
+                "enum": [
+                  "public",
+                  "internal",
+                  "confidential",
+                  "restricted"
+                ]
+              },
+              "source": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "sha256",
+                  "row_sha256",
+                  "occurrence"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  },
+                  "sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "row_sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "occurrence": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              "data": {
+                "$ref": "#/$defs/review-event"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind",
+              "id",
+              "sensitivity",
+              "source",
+              "data"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "Outcome"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sensitivity": {
+                "enum": [
+                  "public",
+                  "internal",
+                  "confidential",
+                  "restricted"
+                ]
+              },
+              "source": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "sha256",
+                  "row_sha256",
+                  "occurrence"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  },
+                  "sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "row_sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "occurrence": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              "data": {
+                "type": "object",
+                "required": [
+                  "record",
+                  "payload"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "record": {
+                    "type": "object",
+                    "required": [
+                      "title",
+                      "type",
+                      "status",
+                      "owner",
+                      "created",
+                      "last_updated",
+                      "source_of_truth",
+                      "sensitivity",
+                      "outcome_id",
+                      "decision_ref"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "title": {
+                        "type": "string"
+                      },
+                      "owner": {
+                        "type": "string"
+                      },
+                      "created": {
+                        "type": "string"
+                      },
+                      "last_updated": {
+                        "type": "string"
+                      },
+                      "outcome_id": {
+                        "type": "string"
+                      },
+                      "decision_ref": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "const": "outcome"
+                      },
+                      "status": {
+                        "const": "draft"
+                      },
+                      "source_of_truth": {
+                        "const": false
+                      },
+                      "sensitivity": {
+                        "const": "restricted"
+                      }
+                    }
+                  },
+                  "payload": {
+                    "$ref": "#/$defs/outcome-record"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "git_history_transferred": {
+      "const": false
+    },
+    "semantics_checked": {
+      "const": false
+    },
+    "execution_authorized": {
+      "const": false
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/knowledge-v2.schema.json",
+  "title": "WhyKit additive knowledge v2",
+  "description": "Five typed projections of legacy/native sources. Artifact data is metadata only. Filtered review source hashes are row-local; no mixed log fingerprint. Original bytes are authoritative for lossless migration; this view grants no authority.",
+  "$defs": {
+    "claim-record": {
+      "title": "WhyKit canonical Markdown claim front matter",
+      "description": "Additive record at 00-context/claims/c-NNN.md. The body contains exactly one whykit-claim fenced JSON payload using claim-provenance.schema.json. Runtime validates payload identity, source_ids, real ordered dates and bounded size. Status draft and restricted classification confer no approval or authenticated human assessment.",
+      "type": "object",
+      "required": [
+        "title",
+        "type",
+        "status",
+        "owner",
+        "created",
+        "last_updated",
+        "source_of_truth",
+        "sensitivity",
+        "claim_id",
+        "source_ids"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "type": {
+          "const": "claim"
+        },
+        "status": {
+          "const": "draft"
+        },
+        "owner": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "created": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(?![\\s\\S])"
+        },
+        "last_updated": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(?![\\s\\S])"
+        },
+        "source_of_truth": {
+          "const": false
+        },
+        "sensitivity": {
+          "const": "restricted"
+        },
+        "claim_id": {
+          "type": "string",
+          "maxLength": 18,
+          "pattern": "^C-(?:00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})(?![\\s\\S])"
+        },
+        "source_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^E-[0-9]{3,}(?![\\s\\S])"
+          }
+        },
+        "valid_from": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(?![\\s\\S])"
+        },
+        "valid_until": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(?![\\s\\S])"
+        }
+      },
+      "additionalProperties": false
+    },
+    "claim-provenance": {
+      "title": "WhyKit optional claim provenance payload",
+      "description": "Producer-owned payload, not vault front matter or a CLI report. Structural schema only: validate_claim also checks ordered byte offsets, UTF-8 encoding and quote byte length. verify_anchor checks supplied source bytes. Neither establishes truth, identity or authorization.",
+      "type": "object",
+      "required": [
+        "format",
+        "claim_id",
+        "statement",
+        "links"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "const": "whykit.claim-provenance/v1"
+        },
+        "claim_id": {
+          "type": "string",
+          "pattern": "^C-[0-9]{3,}(?![\\s\\S])"
+        },
+        "statement": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "links": {
+          "type": "array",
+          "description": "An explicit empty list means no evidence link has been supplied, not that the statement is false. Multiple assessments of the same anchor may coexist; no semantic verdict is inferred.",
+          "items": {
+            "$ref": "#/$defs/claim-provenance/$defs/link"
+          }
+        }
+      },
+      "$defs": {
+        "link": {
+          "type": "object",
+          "required": [
+            "evidence_id",
+            "source_version",
+            "location",
+            "assessment"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "evidence_id": {
+              "type": "string",
+              "pattern": "^E-[0-9]{3,}(?![\\s\\S])"
+            },
+            "source_version": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
+              "description": "SHA-256 of the exact original bytes, with no BOM, newline or Unicode normalization. A content digest is not source identity."
+            },
+            "location": {
+              "type": "object",
+              "required": [
+                "start_byte",
+                "end_byte",
+                "quote"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "start_byte": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "end_byte": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "quote": {
+                  "type": "string",
+                  "pattern": "\\S"
+                }
+              },
+              "description": "Zero-based byte offsets, end exclusive; the quote is UTF-8 encoded and must match exactly. validate_claim requires start < end and matching quote byte length."
+            },
+            "assessment": {
+              "type": "object",
+              "required": [
+                "kind",
+                "by",
+                "relation"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "model",
+                    "human"
+                  ]
+                },
+                "by": {
+                  "type": "string",
+                  "pattern": "\\S"
+                },
+                "relation": {
+                  "enum": [
+                    "supports",
+                    "contradicts"
+                  ]
+                }
+              },
+              "description": "Producer-declared semantic assessment and attribution; human is not authenticated review and model cannot become human by matching source bytes."
+            }
+          }
+        }
+      }
+    },
+    "decision-record": {
+      "title": "WhyKit decision record metadata",
+      "type": "object",
+      "required": [
+        "decision_id",
+        "title",
+        "status",
+        "owner",
+        "created",
+        "last_updated",
+        "sensitivity"
+      ],
+      "properties": {
+        "decision_id": {
+          "type": "string",
+          "pattern": "^D-[0-9]{3,}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "in_review",
+            "approved",
+            "superseded",
+            "archived"
+          ]
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "created": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "last_updated": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "sensitivity": {
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ]
+        },
+        "source_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^E-[0-9]{3,}$"
+          }
+        },
+        "review_by": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "supersedes": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^D-[0-9]{3,}$"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        },
+        "superseded_by": {
+          "type": "string",
+          "pattern": "^D-[0-9]{3,}$"
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "approved"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "review_by"
+        ],
+        "properties": {
+          "provenance": {
+            "properties": {
+              "human_reviewed": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "provenance": {
+      "title": "WhyKit provenance block",
+      "description": "Optional front-matter block recording which system produced a note, without WhyKit having to model that system's internal state. Any producer may use it: a decision-support workflow, an agent framework, a migration script. Keys outside this list are allowed and ignored by the linter, so producers can extend it without a format change.",
+      "type": "object",
+      "properties": {
+        "producer": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable identifier of the producing system and its version, e.g. `example.decision-review/v1` or `whykit.adopt/0.2`."
+        },
+        "producer_run": {
+          "type": "string",
+          "description": "Identifier of the specific run, deliberation or import batch that produced this note."
+        },
+        "payload_ref": {
+          "type": "string",
+          "description": "Where the producer's own machine-readable record lives. WhyKit stores the durable human record; it deliberately does not mirror the producer's state machine."
+        },
+        "snapshot_hash": {
+          "type": "string",
+          "description": "Hash of the producer's immutable snapshot at the moment this note was written."
+        },
+        "recorded_at": {
+          "type": "string",
+          "description": "ISO 8601 timestamp at which the producer wrote this note."
+        },
+        "upstream": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Identifiers of upstream artifacts the producer consumed, such as evidence packs."
+        },
+        "human_reviewed": {
+          "type": "boolean",
+          "description": "Whether a person reviewed this note after the producer wrote it. Agent-generated content cannot approve itself."
+        }
+      },
+      "additionalProperties": true
+    },
+    "outcome-record": {
+      "title": "WhyKit canonical outcome payload",
+      "description": "Fenced whykit-outcome JSON in a restricted draft Markdown record. Runtime additionally checks exact canonical ID/path/front matter, real dates, samples no later than creation and decimal precision <= 32 total ASCII digits / scale <= 12. Decimal strings are preserved, not calculated or verified. A target is a plan, not measurement evidence.",
+      "type": "object",
+      "required": [
+        "format",
+        "outcome_id",
+        "decision_id",
+        "metric",
+        "baseline",
+        "target",
+        "observed",
+        "implementation_refs"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "const": "whykit.outcome/v1"
+        },
+        "outcome_id": {
+          "type": "string",
+          "maxLength": 18,
+          "pattern": "^O-(?:00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})(?![\\s\\S])"
+        },
+        "decision_id": {
+          "type": "string",
+          "pattern": "^D-[0-9]{3,}(?![\\s\\S])"
+        },
+        "metric": {
+          "type": "object",
+          "required": [
+            "name",
+            "unit",
+            "definition"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "unit": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "definition": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          }
+        },
+        "baseline": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/outcome-record/$defs/sample"
+            }
+          ]
+        },
+        "observed": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/outcome-record/$defs/sample"
+            }
+          ]
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "value",
+                "by"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "value": {
+                  "$ref": "#/$defs/outcome-record/$defs/decimal"
+                },
+                "by": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/$defs/outcome-record/$defs/date"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "implementation_refs": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        }
+      },
+      "$defs": {
+        "decimal": {
+          "type": "string",
+          "maxLength": 46,
+          "pattern": "^-?(?:0|[1-9][0-9]{0,31})(?:\\.[0-9]{1,12})?(?![\\s\\S])"
+        },
+        "date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(?![\\s\\S])"
+        },
+        "sample": {
+          "type": "object",
+          "required": [
+            "value",
+            "as_of",
+            "claim"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "$ref": "#/$defs/outcome-record/$defs/decimal"
+            },
+            "as_of": {
+              "$ref": "#/$defs/outcome-record/$defs/date"
+            },
+            "claim": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "claim_id",
+                    "sha256"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "claim_id": {
+                      "type": "string",
+                      "maxLength": 18,
+                      "pattern": "^C-(?:00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})(?![\\s\\S])"
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "review-event": {
+      "title": "WhyKit review event",
+      "type": "object",
+      "required": [
+        "date",
+        "target",
+        "reviewer",
+        "outcome"
+      ],
+      "properties": {
+        "date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reviewer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "outcome": {
+          "enum": [
+            "confirmed",
+            "update-required",
+            "supersede-required",
+            "archived",
+            "approved"
+          ]
+        },
+        "previous_review": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "next_review": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/github-import-result.schema.json",
+  "title": "Saved GitHub evidence import result",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "format",
+    "applied",
+    "expected_sha256",
+    "evidence_id",
+    "source_version",
+    "artifact_path",
+    "receipt_path",
+    "already_exists",
+    "observation_added",
+    "sensitivity",
+    "observation_recorded_at",
+    "size_bytes",
+    "metadata",
+    "source_identity_authenticated",
+    "remote_state_checked",
+    "semantics_checked",
+    "execution_authorized"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "format": {
+      "const": "whykit.github-import/v1"
+    },
+    "applied": {
+      "type": "boolean"
+    },
+    "expected_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "evidence_id": {
+      "type": "string",
+      "pattern": "^E-[0-9]{3,15}$"
+    },
+    "source_version": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "artifact_path": {
+      "type": "string",
+      "pattern": "^00-context/artifacts/E-[0-9]{3,}/[0-9a-f]{64}\\.json$"
+    },
+    "receipt_path": {
+      "type": "string",
+      "pattern": "^00-context/imports/github/E-[0-9]{3,}/[0-9a-f]{64}\\.json$"
+    },
+    "already_exists": {
+      "type": "boolean"
+    },
+    "observation_added": {
+      "type": "boolean"
+    },
+    "sensitivity": {
+      "const": "restricted"
+    },
+    "observation_recorded_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+    },
+    "size_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1048576
+    },
+    "metadata": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "number",
+            "url",
+            "state",
+            "created_at",
+            "updated_at",
+            "closed_at"
+          ],
+          "properties": {
+            "id": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "number": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "url": {
+              "type": "string",
+              "pattern": "^https://github\\.com/",
+              "maxLength": 2048
+            },
+            "state": {
+              "enum": [
+                "open",
+                "closed"
+              ]
+            },
+            "created_at": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+            },
+            "updated_at": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+            },
+            "closed_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "number",
+            "url",
+            "state",
+            "created_at",
+            "updated_at",
+            "closed_at",
+            "base_sha",
+            "head_sha",
+            "merge_commit_sha",
+            "merged_at"
+          ],
+          "properties": {
+            "id": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "number": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "url": {
+              "type": "string",
+              "pattern": "^https://github\\.com/",
+              "maxLength": 2048
+            },
+            "state": {
+              "enum": [
+                "open",
+                "closed"
+              ]
+            },
+            "created_at": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+            },
+            "updated_at": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+            },
+            "closed_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "base_sha": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "head_sha": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "merge_commit_sha": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "merged_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "url",
+            "status",
+            "conclusion",
+            "head_sha",
+            "run_attempt",
+            "created_at",
+            "updated_at"
+          ],
+          "properties": {
+            "id": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "url": {
+              "type": "string",
+              "pattern": "^https://github\\.com/",
+              "maxLength": 2048
+            },
+            "status": {
+              "enum": [
+                "queued",
+                "in_progress",
+                "completed",
+                "waiting",
+                "requested",
+                "pending"
+              ]
+            },
+            "conclusion": {
+              "enum": [
+                null,
+                "success",
+                "failure",
+                "neutral",
+                "cancelled",
+                "skipped",
+                "timed_out",
+                "action_required",
+                "stale",
+                "startup_failure"
+              ]
+            },
+            "head_sha": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "run_attempt": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            "created_at": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+            },
+            "updated_at": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "source_identity_authenticated": {
+      "const": false
+    },
+    "remote_state_checked": {
+      "const": false
+    },
+    "semantics_checked": {
+      "const": false
+    },
+    "execution_authorized": {
+      "const": false
+    }
+  },
+  "additionalProperties": false
+}
