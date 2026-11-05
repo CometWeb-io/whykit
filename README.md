@@ -19,6 +19,8 @@ This `main` branch also contains unreleased `0.4.0.dev0` work; some features
 described in the documentation below are not in 0.3.4. For the installed
 release, follow the documentation links on its PyPI page.
 Keep sensitive vaults private; WhyKit's filters are not access controls.
+For this development branch, see the [0.4 feature status](docs/feature-status.md)
+and the [upgrade and recovery guide](docs/migration-0.4.md) before using 0.4 data.
 
 [![CI](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml/badge.svg)](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml)
 
