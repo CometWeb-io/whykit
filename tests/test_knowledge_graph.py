@@ -295,6 +295,24 @@ class TraceTests(VaultCopyTestCase):
         bad = run("trace", "--root", str(self.vault), "--decision", "E-001")
         self.assertEqual(bad.returncode, 2)
 
+    def test_cli_takes_the_decision_id_positionally(self) -> None:
+        # `whykit trace D-035` used to fail with "unrecognized arguments",
+        # although `impact`, `backlinks` and `context` all take the ID that way.
+        flag = run("trace", "--root", str(self.vault), "--today", "2026-09-17", "--decision", "D-002", "--json")
+        positional = run("trace", "D-002", "--root", str(self.vault), "--today", "2026-09-17", "--json")
+        self.assertEqual(positional.returncode, 0, positional.stderr)
+        self.assertEqual(json.loads(positional.stdout), json.loads(flag.stdout))
+        same = run("trace", "D-002", "--decision", "D-002", "--root", str(self.vault), "--today", "2026-09-17")
+        self.assertEqual(same.returncode, 0, same.stderr)
+        self.assertEqual(run("trace", "D-404", "--root", str(self.vault)).returncode, 1)
+        conflict = run("trace", "D-002", "--decision", "D-003", "--root", str(self.vault), "--json")
+        self.assertEqual(conflict.returncode, 2)
+        self.assertEqual(json.loads(conflict.stdout)["error"]["code"], "usage")
+        bad = run("trace", "E-001", "--root", str(self.vault))
+        self.assertEqual(bad.returncode, 2)
+        self.assertIn("D-NNN", bad.stderr)
+        self.assertNotIn("Traceback", bad.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
