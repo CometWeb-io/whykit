@@ -197,6 +197,7 @@ CLI actually prints.
 | `outcome show --json` | `outcome-show.schema.json` |
 | `outcome verify --json` | `outcome-verification.schema.json` |
 | `knowledge view --json` | `knowledge-v2.schema.json` |
+| `knowledge downgrade-check --json` | `downgrade-check.schema.json` |
 | `knowledge bundle --json` | `knowledge-export-result.schema.json` |
 | `knowledge restore --json` | `knowledge-restore-result.schema.json` |
 | `context --json` | `context-pack.schema.json` |
