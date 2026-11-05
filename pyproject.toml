@@ -41,7 +41,7 @@ dependencies = []
 
 [project.optional-dependencies]
 # Security floors also apply to installations from PyPI, which do not use uv.lock.
-mcp = ["mcp>=2.2,<2.4", "opentelemetry-api>=1.45.1", "PyJWT>=2.15.0"]
+mcp = ["mcp>=2.3.0,<2.4", "opentelemetry-api>=1.45.1", "PyJWT>=2.15.0"]
 
 # Contributor tooling only; never installed with the package. Exact pins keep
 # the gates reproducible, and uv.lock adds hashes. CI installs the core package
