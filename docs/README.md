@@ -1,9 +1,8 @@
 # WhyKit documentation
 
-WhyKit is a Git-native evidence and decision ledger: sources, decisions and
-review events in plain Markdown, with a CLI that checks how they link. The
-pages below are grouped by what you are trying to do. Each page has one job,
-and the others link to it instead of repeating it.
+WhyKit helps you record decisions, link their sources and review them later.
+It keeps those records in Markdown and provides a CLI that checks their links.
+Choose a page below for the task you want to do.
 
 Install the published CLI with `uv tool install whykit` (Python 3.11+ and
 uv 0.13.4+). Commands are written as `whykit …`. From a source checkout, run them as
@@ -15,7 +14,7 @@ Learn by doing. Every command in these pages runs in the test suite.
 
 | Page | You will |
 |---|---|
-| [60-second quickstart](../README.md#60-second-quickstart) | Create a vault, cite a source, record a decision |
+| [Quickstart](../README.md#try-it) | Create a vault, cite a source, record a decision |
 | [Import, review and export](tutorials/review-and-export.md) | Import an ADR as a draft, trace changed evidence and export public data with the review warning intact |
 | [Record, check and supersede a decision](tutorials/record-and-supersede.md) | Change your mind with a new decision and watch the history check refuse a rewrite |
 | [Gate pull requests with `whykit check`](tutorials/gate-pull-requests.md) | Add the GitHub Action and see a good and a bad pull request |

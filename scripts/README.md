@@ -29,7 +29,7 @@ uv tool install whykit
 
 This installs the published release, not the code in this checkout. For local
 development use the checkout commands above; for a first vault follow the
-[README quickstart](../README.md#60-second-quickstart).
+[README quickstart](../README.md#try-it).
 
 ## `agent_eval.py`
 
@@ -87,8 +87,12 @@ uploads. See step 3 of [docs/releasing.md](../docs/releasing.md).
 ```bash
 python3 scripts/release_rehearsal.py                  # full rehearsal, offline
 python3 scripts/release_rehearsal.py --online         # first run on a cold uv cache
-python3 scripts/release_rehearsal.py --skip-build     # version, notes and commands only
+python3 scripts/release_rehearsal.py --skip-build     # version and notes only
+python3 scripts/release_rehearsal.py --root /path/to/clean-candidate --commit <full-sha>
 ```
+
+`--root` lets the current tool check a clean candidate checkout at an older
+commit. Local success does not verify GitHub CI, tag rules, or PyPI publishing.
 
 ## `pr_comment.py`
 

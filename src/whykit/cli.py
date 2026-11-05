@@ -255,16 +255,16 @@ def cmd_init(args: argparse.Namespace) -> int:
     else:
         print("Layout: full starter with optional workstreams (--full)")
     print()
-    print("Next, in order:")
-    print("  1. Answer every TODO in AGENTS.md - that file is the contract agents work under.")
-    print("  2. Replace the starter content in 00-context/ before treating anything as canonical.")
-    # Match the README cold-install path (`uv sync` + `uv run whykit` from the
-    # checkout), where bare `whykit` is not on PATH. An installed tool has no
-    # checkout to run from, so it gets the bare command instead.
-    if _is_whykit_package_source_root(SOURCE_ROOT):
-        print(f"  3. From the WhyKit checkout: uv run whykit lint --root {target}")
-    else:
-        print(f"  3. Check it: whykit lint --root {target}")
+    print("This folder keeps decisions and sources together as Markdown files.")
+    root_arg = "'" + str(target).replace("'", "''") + "'" if os.name == "nt" else shlex.quote(str(target))
+    command = "uv run whykit" if _is_whykit_package_source_root(SOURCE_ROOT) else "whykit"
+    if os.name == "nt":
+        print("Run these commands in PowerShell:")
+    print(f'Start: {command} new --root {root_arg} decision "Your first decision"')
+    print("Link a source to your decision using the README quickstart.")
+    print("Before relying on the vault, replace the starter content in 00-context/.")
+    print("Before using agents or CI, answer the TODOs in AGENTS.md.")
+    print(f"Check: {command} lint --root {root_arg}")
     return 0
 
 
@@ -727,7 +727,7 @@ def cmd_outcome(args: argparse.Namespace) -> int:
 
 def cmd_knowledge(args: argparse.Namespace) -> int:
     from .knowledge_v2 import (
-        MAX_BUNDLE_BYTES, UnsupportedMigrationPlatform, export_migration_bundle,
+        MAX_BUNDLE_BYTES, UnsupportedMigrationPlatform, build_migration_bundle, export_migration_bundle,
         project_knowledge_v2, restore_migration_bundle,
     )
 
@@ -739,6 +739,22 @@ def cmd_knowledge(args: argparse.Namespace) -> int:
             root = _resolve_vault(args.root)
             if root is None or not is_vault_root(root):
                 return vault_not_found(args.root, json_mode=True)
+            if args.knowledge_command == "downgrade-check":
+                import base64
+
+                snapshot = build_migration_bundle(root, full_local_scope=True)
+                native = any(row["kind"] in {"Claim", "Outcome", "EvidenceArtifact"}
+                             for row in snapshot["manifest"]["objects"])
+                claim_markers = any(
+                    b"claim_ids" in data or b"claim_versions" in data
+                    for row in snapshot["files"]
+                    if (data := base64.b64decode(row["content_base64"]).lower())
+                )
+                report = {"contract_version": 1, "format": "whykit.downgrade-check/v1",
+                          "target_version": "0.3.4", "verdict": "blocked" if native or claim_markers else "review_required",
+                          "downgrade_authorized": False, "legacy_client_checked": False}
+                emit_machine(json.dumps(report, ensure_ascii=False, sort_keys=True))
+                return 1
             if args.knowledge_command == "view":
                 report = project_knowledge_v2(root, allowed_sensitivities=_workflow_scope(args))
             else:
@@ -1532,7 +1548,7 @@ def _add_leaf_root(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = _TopParser(
         prog="whykit",
-        description="WhyKit - a Git-native evidence and decision ledger.",
+        description="WhyKit keeps decisions and their sources together in Markdown.",
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1813,6 +1829,10 @@ def build_parser() -> argparse.ArgumentParser:
     view.add_argument("--max-sensitivity", choices=SENSITIVITIES, default="public", help="local output classification ceiling (default: %(default)s)")
     view.add_argument("--json", action="store_true", help=JSON_HELP)
     view.set_defaults(func=cmd_knowledge, json=True)
+    downgrade = knowledge_sub.add_parser("downgrade-check", help="assess claim-related downgrade risk for the 0.3.4 client")
+    downgrade.add_argument("--root", help=ROOT_HELP)
+    downgrade.add_argument("--json", action="store_true", help=JSON_HELP)
+    downgrade.set_defaults(func=cmd_knowledge, json=True)
     bundle = knowledge_sub.add_parser("bundle", help="preview or export a full private migration bundle outside its vault")
     bundle.add_argument("--root", help=ROOT_HELP)
     bundle.add_argument("--private", action="store_true", help="explicitly include all local classifications and raw source bytes")

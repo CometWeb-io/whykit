@@ -10,7 +10,7 @@ is what checks the result**, locally and in CI.
 ## Open the vault
 
 1. Create a vault with `whykit init <dir>` (see the
-   [README](../README.md#60-second-quickstart)).
+   [README](../README.md#try-it)).
 2. In Obsidian, choose **Open folder as vault** and pick that directory, the one
    containing `Home.md` and `whykit.toml`. The repository root is the vault root; do not open a
    subfolder.

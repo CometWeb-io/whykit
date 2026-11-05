@@ -78,6 +78,39 @@ flags include `git_history_transferred:false` and `execution_authorized:false`.
 Run the normal lint, preflight and independently trusted history checks relevant
 to the restored environment; migration is not a governance approval.
 
+## Downgrade and recovery
+
+Do not use WhyKit 0.3.4 to validate decisions that depend on claims. It does
+not understand claim pins: its `trace` can report no gaps even after a pinned
+claim has changed. Its `lint` also rejects newer claim and outcome note types.
+
+Before a proposed downgrade, keep the 0.4 client available and run:
+
+```bash
+whykit knowledge downgrade-check --root /path/to/vault --json
+```
+
+This is a conservative local check, not an authorization. `blocked` means the
+inventory contains new knowledge records or claim-related markers;
+`review_required` means none were detected, not that the vault is compatible.
+Both return exit code 1. Errors, unsupported platforms and unreadable or changed
+inputs return exit code 2. The check needs the same POSIX inventory support and
+limits as a private migration bundle; it reads the full local vault, uses a
+private temporary directory and never emits record contents. It does not run
+the old client, detect every possible new feature, or protect against changes
+made after the check. Running 0.3.4 directly bypasses it completely.
+
+For recovery, stop writers and keep the current vault intact. Preserve a
+separate verified backup of the Git repository, its refs and trusted baseline;
+the knowledge bundle is unencrypted, excludes Git history and is not globally
+atomic. Restore a known pre-upgrade vault **and its matching Git backup** into
+a new, private location. Verify the restored bytes, Git history and approval
+policy, then run the applicable 0.3.4 lint and history checks there. Do not
+delete newer claims or rewrite approved records merely to pass an older check;
+retain the original and inspect changes with the 0.4 client. If no verified
+pre-upgrade backup exists, keep using 0.4 and recover or supersede records
+through a reviewed workflow rather than treating 0.3.4 `trace` as claim proof.
+
 ## Limits and platform support
 
 The portable typed view works through the normal Python reader. Safe native

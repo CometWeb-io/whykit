@@ -83,6 +83,14 @@ class BM25Tests(unittest.TestCase):
         self.assertEqual(retrieve_bm25(self.root, "sqlite migration")[0]["path"], "a.md")
         self.assertEqual(query_vault(self.root, text="sqlite migration")["results"], [])
 
+    def test_substring_query_matches_canonical_unicode_in_text_owner_and_tag(self) -> None:
+        write_note(self.root, "a.md", "Straße", title="Łódź", owner="Zoë", tags=["café"])
+        for kwargs in ({"text": "ŁO\u0301DZ\u0301"}, {"text": "STRASSE"},
+                       {"owner": "ZOE\u0308"}, {"tag": "CAFE\u0301"}):
+            with self.subTest(kwargs=kwargs):
+                self.assertEqual(query_vault(self.root, **kwargs)["total"], 1)
+        self.assertEqual(query_vault(self.root, text="Gdańsk")["total"], 0)
+
     def test_empty_missing_and_limits(self) -> None:
         self.assertEqual(retrieve_bm25(self.root, "anything"), [])
         write_note(self.root, "a.md", "needle")

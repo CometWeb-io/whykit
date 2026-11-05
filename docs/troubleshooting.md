@@ -212,7 +212,7 @@ and `uv run whykit-mcp --root /path/to/vault`. See the
 
 Yes: [whykit on PyPI](https://pypi.org/project/whykit/). Install the latest
 published release with `uv tool install whykit`; see the
-[README](../README.md#60-second-quickstart). A source checkout can contain
+[README](../README.md#try-it). A source checkout can contain
 changes that have not been published yet.
 
 ### Does WhyKit send anything over the network?

@@ -83,6 +83,7 @@ From a source checkout, prefix commands with `uv run` (see
 | `outcome show <O-NNN>` | Read one outcome declaration within the granted view | `--root`, `--max-sensitivity`, `--json` | [Outcomes](outcomes.md) |
 | `outcome verify <O-NNN>` | Check historical sample pins and anchors; no numeric or causal validation | `--root`, `--max-sensitivity`, `--today`, `--json` | [Outcomes](outcomes.md) |
 | `knowledge view` | Project five typed object kinds within an explicit sensitivity ceiling | `--root`, `--max-sensitivity`, `--json` | [Knowledge v2](knowledge-v2.md) |
+| `knowledge downgrade-check` | Assess claim-related downgrade risk for the 0.3.4 client | `--root`, `--json` | [Knowledge v2](knowledge-v2.md#downgrade-and-recovery) |
 | `knowledge bundle` | Preview or create a private raw-byte migration bundle outside the vault | `--root`, `--private`, `--output`, `--write`, `--expect-hash`, `--json` | [Knowledge v2](knowledge-v2.md) |
 | `knowledge restore <bundle>` | Preview or restore validated source bytes into a new directory without Git history | `--into`, `--write`, `--expect-hash`, `--json` | [Knowledge v2](knowledge-v2.md) |
 | `context <target>` | Build a bounded context pack for one record; a note over the `--max-chars` budget starts with its body, not its front matter | `--max-chars`, `--no-body`, `--json`, `--root` | [How-to](guide.md#hand-bounded-context-to-an-agent) |

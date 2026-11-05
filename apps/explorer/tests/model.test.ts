@@ -59,6 +59,17 @@ test("search requires every term and ranks title hits first", () => {
   assert.equal(m.searchDocs("pricing", 1).length, 1);
 });
 
+test("search matches canonically equivalent Unicode and casefold expansions", () => {
+  const m = createVaultModel(index([
+    doc("a", { title: "Łódź", body: "Straße ΟΣ" }),
+    doc("b", { title: "Other", body: "unrelated" }),
+  ]));
+  for (const query of ["ŁO\u0301DZ\u0301", "STRASSE", "ος"]) {
+    assert.deepEqual(m.searchDocs(query).map(d => d.id), ["a"], query);
+  }
+  assert.deepEqual(m.searchDocs("Gdańsk"), []);
+});
+
 test("canonical docs must be approved sources of truth", () => {
   const m = createVaultModel(index([
     doc("a", { sourceOfTruth: true }),

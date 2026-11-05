@@ -6,12 +6,17 @@ from .sensitivity import note_sensitivity_label, scoped_report
 
 import argparse
 import json
+import unicodedata
 from pathlib import Path
 
 from .contract import emit_error, vault_not_found
 from .lint import EVIDENCE_ID_RE, find_vault_root, is_vault_root, path_cache
 from .vault_index import VaultIndex
 from .console import emit_machine
+
+
+def _fold_text(value: str) -> str:
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFC", value).casefold())
 
 
 def _as_list(value: object) -> list[str]:
@@ -76,9 +81,9 @@ def query_vault(
         report["query"].update(text=text, ranking=ranking, limit=limit)
         report.update(total=len(ranked), returned=len(ranked[:max(0, limit)]), results=ranked[:max(0, limit)])
         return report
-    needle = (text or "").casefold().strip()
-    owner_needle = (owner or "").casefold().strip()
-    tag_needle = (tag or "").casefold().strip()
+    needle = _fold_text(text or "").strip()
+    owner_needle = _fold_text(owner or "").strip()
+    tag_needle = _fold_text(tag or "").strip()
     matches: list[tuple[int, dict]] = []
     for note in index.notes:
         summary = _summary(index, note)
@@ -100,16 +105,16 @@ def query_vault(
             continue
         if source_id and source_id not in summary["source_ids"]:
             continue
-        if owner_needle and owner_needle not in summary["owner"].casefold():
+        if owner_needle and owner_needle not in _fold_text(summary["owner"]):
             continue
-        if tag_needle and not any(tag_needle == value.casefold() for value in summary["tags"]):
+        if tag_needle and not any(tag_needle == _fold_text(value) for value in summary["tags"]):
             continue
 
         score = 0
         if needle:
-            title = summary["title"].casefold()
-            path_text = summary["path"].casefold()
-            body = note.text.casefold()
+            title = _fold_text(summary["title"])
+            path_text = _fold_text(summary["path"])
+            body = _fold_text(note.text)
             if needle not in title and needle not in path_text and needle not in body:
                 continue
             if needle == title:

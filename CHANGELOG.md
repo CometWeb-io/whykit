@@ -9,6 +9,9 @@ CLI and the lint rule codes.
 
 ### Added
 
+- Add a conservative downgrade check and recovery guidance for the 0.3.4 client;
+  neither authorizes a downgrade nor changes the already-published old client.
+
 - `whykit trace D-NNN` takes the decision ID positionally, like `impact`,
   `backlinks` and `context`; `--decision D-NNN` keeps working.
 
@@ -59,6 +62,9 @@ CLI and the lint rule codes.
 
 ### Changed
 
+- Make the first-run CLI guidance and README example show how to record a
+  decision and trace it to a source. Machine-readable output is unchanged.
+
 - Existing vaults and JSON v1 commands retain their current format. The optional
   `claim` note type lives under `00-context/claims/`; captures use
   `00-context/artifacts/`. Optional `outcome` notes live under
@@ -76,6 +82,11 @@ CLI and the lint rule codes.
   `--today` as a whole UTC calendar-day cutoff, rather than an instant clock.
 
 ### Fixed
+
+- Match canonically equivalent Unicode text in substring search and Explorer,
+  including casefolded search terms and metadata filters.
+- Correct the evaluation and workspace documentation to show their installed
+  development-version CLI commands.
 
 - Accept stable capture and claim files on Windows while retaining file identity
   checks and detecting changes within both path and descriptor metadata.
@@ -105,7 +116,22 @@ CLI and the lint rule codes.
 - Correct JSON Schema test equality for booleans/numbers and numeric, array and
   string upper bounds; align the security documentation with current exports.
 
+## [0.3.4] - 2026-11-03
+
+### Fixed
+
+- Allow the release secret scan to ignore one historical synthetic test marker
+  by its exact fingerprint; other findings remain subject to scanning.
+- Include the previously unpublished 0.3.3 fixes: honor evidence-row grants in
+  scoped reports and packs, and withhold raw global decision and review logs
+  from MCP to prevent restricted metadata from leaking.
+- Fix nested command help and preserve exact Git vault paths in history checks,
+  snapshot comparisons, hooks and CI. Previously generated hooks are not
+  rewritten; regenerate affected hooks with `whykit install-hooks --force`.
+
 ## [0.3.3] - 2026-10-27
+
+Source tag only. The release secret scan blocked publication before upload.
 
 ### Fixed
 

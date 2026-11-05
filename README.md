@@ -1,35 +1,42 @@
 # WhyKit
 
-**The layer that remembers why.**
+**Remember why a decision was made.**
 
-> Git-native evidence and decision ledger for teams and AI agents.
+WhyKit helps you record decisions, link the sources behind them, and see what
+needs review. Your records are Markdown files you can read, edit and keep in Git.
+People can use them directly; AI tools can read the same context.
 
-WhyKit keeps sources, decisions, their reasoning, and review events together in
-plain Markdown and Git. It gives people and tools a shared, inspectable record of
-what is known, what was decided, and what still needs checking.
+For example, your team chooses to ship SSO before audit logs because of support
+tickets. Three months later, someone asks why. WhyKit can show the decision,
+the source it cites and its review status.
 
-![WhyKit links evidence to a decision, then checks its structure and review date.](docs/media/overview.svg)
+![A source, a decision and a review, kept together in WhyKit.](docs/media/overview.svg)
 
 **Python 3.11+ · No runtime dependencies · Apache-2.0**
 
-**Status:** public alpha, available on [PyPI](https://pypi.org/project/whykit/). Source version: `0.4.0.dev0` (unreleased; PyPI: `0.3.2`).
+**Status:** public alpha. The latest [PyPI release is 0.3.4](https://pypi.org/project/whykit/0.3.4/).
+This `main` branch also contains unreleased `0.4.0.dev0` work; some features
+described in the documentation below are not in 0.3.4. For the installed
+release, follow the documentation links on its PyPI page.
+Keep sensitive vaults private; WhyKit's filters are not access controls.
 
 [![CI](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml/badge.svg)](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml)
 
-## 60-second quickstart
+## Try it
 
-You need Python 3.11+ and [`uv` 0.13.4+](https://docs.astral.sh/uv/getting-started/installation/).
-Install the latest published release, then create a vault in your own working
-directory. No source checkout is needed.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) (0.13.4+)
+and use Python 3.11+. This example works with the published 0.3.4 release and
+uses a fictional source. It creates a
+folder called a *vault*: just the Markdown files WhyKit works with.
 
 <!-- quickstart:start -->
 ```bash
 uv tool install whykit
 
-# 1. Create a vault.
+# Create a vault.
 whykit init my-ledger
 
-# 2. Register a source, then a decision that cites it.
+# Record a source, then a draft decision that cites it.
 whykit new --root my-ledger evidence \
   --source "Support ticket export, Q3" --type dataset \
   --location "https://example.com/exports/q3-tickets.csv" \
@@ -37,89 +44,64 @@ whykit new --root my-ledger evidence \
 whykit new --root my-ledger decision "Ship SSO before audit logs" \
   --owner Platform --status draft --source E-001
 
-# 3. Check the vault and see what is due for review.
+# See the connection, then check the vault.
+whykit trace --root my-ledger --decision D-001
 whykit lint --root my-ledger
 whykit review --root my-ledger list --due-days 120
 ```
 <!-- quickstart:end -->
 
+The trace shows the decision and its source:
+
+```text
+D-001  06-decisions/d-001-ship-sso-before-audit-logs.md  (draft)
+    E-001 active
+```
+
+`D-001` is the decision; `E-001` is the source it cites. The decision is
+still a draft: open its Markdown file and replace the prompts with your actual
+context, choice, reasons, alternatives and consequences before
+[approving it](docs/guide.md#approve-a-decision).
+
+The lint check reports five expected warnings: one for the unfinished decision
+and four for unanswered questions in the vault's `AGENTS.md`. Answer those
+questions before letting an agent write to the vault or enabling the strict CI
+gate. Replace the starter content before treating the vault as authoritative.
+This draft is not yet listed for review, so the review list is empty.
+
 If `whykit` is not found, run `uv tool update-shell` and open a new terminal.
 Use `uv tool upgrade whykit` to update an existing installation. For development
 or the optional Explorer, see [running from a checkout](docs/guide.md#run-whykit-from-a-checkout).
 
-What you should see:
+## What would you like to do?
+
+- **Record a decision and revisit it later:** [record, check and supersede a decision](docs/tutorials/record-and-supersede.md).
+- **Bring existing notes or ADRs:** [adopt existing Markdown](docs/guide.md#already-have-a-pile-of-markdown).
+- **Review a changed source and share a filtered export:** [import, review and export](docs/tutorials/review-and-export.md).
+- **Give an AI tool read-only context:** [connect the MCP server](docs/mcp.md).
+- **Check decisions in pull requests:** [set up a GitHub Actions gate](docs/tutorials/gate-pull-requests.md).
+
+## How it works
 
 ```text
-created E-001: 00-context/evidence-register.md
-created D-001: 06-decisions/d-001-ship-sso-before-audit-logs.md
-...
-24 files — 0 error(s), 5 warning(s)
-0 review(s) overdue or due by <date> (120 day(s) from <today>)
+source (E-001) → decision and reasons (D-001) → review
 ```
 
-The vault now holds an evidence row (`E-001`), a decision record that cites it
-(`D-001`), and a matching decision-log entry. The record is a draft until you
-complete and [approve it](docs/guide.md#approve-a-decision). Four of
-the warnings are the questions in the vault's `AGENTS.md` that only you can
-answer (reply language, branching rule, tone-of-voice owner, safety rules).
-The fifth, `decision.placeholder`, says the new record still holds the
-scaffold's prompts: open it and write the real context, decision, rationale,
-alternatives and consequences. Do both before you let an agent write in the
-vault, or before you turn on the strict `ci` gate.
+WhyKit connects the records, checks their structure and reports review dates.
+When a decision changes, you can record a successor instead of overwriting the
+accepted reasoning. An optional Git check can flag edits to accepted records.
 
-`--root` can go before or after the subcommand (`whykit new --root ../my-ledger
-decision ...` and `whykit new decision ... --root ../my-ledger` both work).
-Inside the vault directory you can drop `--root` altogether.
-
-Next: write the real context and rationale into `06-decisions/d-001-*.md`,
-preview and approve the completed record, `git init` the vault, and commit it.
-Choose a complete workflow:
-
-- [Import an ADR, review changed evidence and export public data](docs/tutorials/review-and-export.md): keep source provenance, find the affected decision and retain its review warning in a filtered export.
-- [Record, check and supersede a decision](docs/tutorials/record-and-supersede.md): replace an accepted choice without rewriting its reasoning.
-- [Gate pull requests in GitHub Actions](docs/tutorials/gate-pull-requests.md): check changes against a trusted Git baseline.
-
-## Why WhyKit
-
-Teams can find old documents but rarely tell which evidence supported a
-decision, what replaced an earlier choice, or when anyone last checked that the
-reasoning still holds. WhyKit makes those links explicit and checks them:
-
-```text
-source (E-001) → decision (D-001) → dated review events
-```
-
-Use that record to answer three questions: which decision applies, which
-sources support it, and what needs review when an input changes. Public exports
-keep permitted records and their known warnings while filtering non-public data.
-
-- **Evidence stays traceable.** Each source gets a stable ID and a location a
-  person can inspect.
-- **Accepted reasoning stays intact.** You supersede a decision instead of
-  rewriting it, and CI rejects a diff that edits accepted reasoning.
-- **Reviews have dates.** Every approved decision carries a `review_by` date,
-  and overdue ones fail the strict gate.
-- **The same rules run everywhere.** One `whykit.toml` drives local runs, CI,
-  the pre-commit hook and agents, with a versioned JSON contract and a
-  read-only MCP server for tools.
-
-WhyKit checks structure and traceability, **not whether a source or conclusion
-is true**. It is not an AI memory service, a vector database or an
-access-control boundary; [Positioning](docs/project-positioning.md) says when
-plain ADRs are the better choice.
+WhyKit does **not** determine whether a source is true or a decision is right.
+It does not check external sources for changes on its own. Sensitivity labels
+and filtered outputs are not a substitute for repository access permissions.
+[See when plain ADRs are a better fit](docs/project-positioning.md).
 
 ## Documentation
 
-Start at the [documentation index](docs/README.md). The most used pages:
-
-- [Concepts](docs/concepts.md): evidence, decisions, supersession and the review cycle.
-- [How-to guides](docs/guide.md): adopt existing Markdown, manage evidence, hand context to agents.
-- [CI integration](docs/ci.md) and [troubleshooting](docs/troubleshooting.md).
-- [Command reference](docs/cli.md), [configuration](docs/configuration.md) and [lint rules](docs/rules.md).
-- [Automation (JSON contract)](docs/automation.md) and the [MCP server](docs/mcp.md).
-
-The example vaults show the format at two scales: [tiny](examples/tiny/) and
-the fully linked, fictional [Northline](examples/northline/).
+- [Start here](docs/README.md) · [Concepts](docs/concepts.md) · [How-to guides](docs/guide.md)
+- [Command reference](docs/cli.md) · [Configuration](docs/configuration.md) · [Lint rules](docs/rules.md)
+- [CI integration](docs/ci.md) · [MCP server](docs/mcp.md) · [Troubleshooting](docs/troubleshooting.md)
+- Example vaults: [tiny](examples/tiny/) and [Northline](examples/northline/)
 
 [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) ·
 [Security policy](SECURITY.md) · [Release checklist](.github/RELEASE.md)

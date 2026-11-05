@@ -1,5 +1,6 @@
 import type { DecisionRow, EvidenceRow, Finding, VaultDoc, VaultIndex } from "../types.ts";
 import { extractWikilinks } from "./markdown.ts";
+import { foldText } from "./unicode.ts";
 
 export type VaultModel = ReturnType<typeof createVaultModel>;
 
@@ -68,11 +69,11 @@ export function createVaultModel(vault: VaultIndex) {
   function entries(): Entry[] {
     if (searchIndex) return searchIndex;
     searchIndex = docs.map(doc => {
-      const title = doc.title.toLowerCase();
-      const id = doc.id.toLowerCase();
-      const tags = doc.tags.join(" ").toLowerCase();
-      const summary = doc.summary.toLowerCase();
-      const body = (bodies.get(doc.id) ?? "").toLowerCase();
+      const title = foldText(doc.title);
+      const id = foldText(doc.id);
+      const tags = foldText(doc.tags.join(" "));
+      const summary = foldText(doc.summary);
+      const body = foldText(bodies.get(doc.id) ?? "");
       return { doc, title, id, tags, summary, meta: `${title} ${id} ${tags} ${summary}`, body };
     });
     return searchIndex;
@@ -153,7 +154,7 @@ export function createVaultModel(vault: VaultIndex) {
   const canonical = docs.filter(d => d.sourceOfTruth && d.status === "approved");
 
   function searchDocs(q: string, limit = 30): VaultDoc[] {
-    const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const terms = foldText(q.trim()).split(/\s+/).filter(Boolean);
     if (!terms.length) return [];
     const hits: { doc: VaultDoc; score: number }[] = [];
     for (const item of entries()) {
