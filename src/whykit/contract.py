@@ -106,6 +106,7 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "outcome show": "outcome-show.schema.json",
     "outcome verify": "outcome-verification.schema.json",
     "knowledge view": "knowledge-v2.schema.json",
+    "knowledge downgrade-check": "downgrade-check.schema.json",
     "knowledge bundle": "knowledge-export-result.schema.json",
     "knowledge restore": "knowledge-restore-result.schema.json",
     "context": "context-pack.schema.json",

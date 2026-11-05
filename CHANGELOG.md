@@ -9,6 +9,9 @@ CLI and the lint rule codes.
 
 ### Added
 
+- Add a conservative downgrade check and recovery guidance for the 0.3.4 client;
+  neither authorizes a downgrade nor changes the already-published old client.
+
 - Optional `provenance.whykit_impact` declarations describe typed dependencies
   on evidence, claims, decisions and implementation notes. Declarations use a
   namespaced JSON scalar; existing records require no migration or rewrite.

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/downgrade-check.schema.json",
+  "type": "object",
+  "required": ["contract_version", "format", "target_version", "verdict", "downgrade_authorized", "legacy_client_checked"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {"const": 1},
+    "format": {"const": "whykit.downgrade-check/v1"},
+    "target_version": {"const": "0.3.4"},
+    "verdict": {"enum": ["blocked", "review_required"]},
+    "downgrade_authorized": {"const": false},
+    "legacy_client_checked": {"const": false}
+  }
+}
