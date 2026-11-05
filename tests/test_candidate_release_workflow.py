@@ -27,7 +27,7 @@ class CandidateValidationTests(unittest.TestCase):
         import re
 
         text = WORKFLOW.read_text(encoding='utf-8')
-        candidate = '34c24d0a24a499a1cd16f0e1ad4c9ef0c985751d'
+        candidate = '0f734fac75cabe5874214634090f98a1796eb554'
         self.assertNotIn('inputs.candidate_sha', text)
         self.assertIn(f'CANDIDATE_SHA: {candidate}', text)
         refs = re.findall(r'^\s+ref: ([0-9a-f]{40})\s*$', text, re.MULTILINE)
