@@ -74,6 +74,8 @@ Exact behaviour, checked against the code by the test suite.
 | [Troubleshooting and FAQ](troubleshooting.md) | Error messages, surprising results and quick answers |
 | [Performance](performance.md) | Measured times on large vaults and how to reproduce them |
 | [Migrating to 0.3](migration-0.3.md) | Upgrading a vault, scripts and CI from 0.2.0 or the 0.3.0 preview |
+| [Upgrading from 0.3.4 to 0.4](migration-0.4.md) | Back up a vault, test an upgrade and recover a pre-upgrade copy |
+| [0.4 feature status](feature-status.md) | Core and preview features and the limits of their guarantees |
 | [Releasing](releasing.md) | The package release checklist and reproducible builds |
 | [Security model](security-model.md) | What WhyKit protects, the trust boundaries, and what it does not guarantee |
 | [Security policy](../SECURITY.md) | Reporting a vulnerability and keeping a real vault private |
