@@ -1,6 +1,6 @@
 name: Release candidate check
 
-# Manual pre-tag evidence for the reviewed 0.3.4 commit. Updating the candidate
+# Manual pre-tag evidence for the reviewed 0.4.0 commit. Updating the candidate
 # requires a reviewed workflow change. This workflow cannot publish or tag.
 on:
   workflow_dispatch:
@@ -34,7 +34,7 @@ jobs:
           persist-credentials: false
       - id: candidate
         env:
-          CANDIDATE_SHA: 34c24d0a24a499a1cd16f0e1ad4c9ef0c985751d
+          CANDIDATE_SHA: 0f734fac75cabe5874214634090f98a1796eb554
           EXPECTED_VERSION: ${{ inputs.version }}
           EXPECTED_WHEEL_SHA256: ${{ inputs.wheel_sha256 }}
           EXPECTED_SDIST_SHA256: ${{ inputs.sdist_sha256 }}
@@ -71,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 34c24d0a24a499a1cd16f0e1ad4c9ef0c985751d
+          ref: 0f734fac75cabe5874214634090f98a1796eb554
           fetch-depth: 0
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -98,7 +98,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 34c24d0a24a499a1cd16f0e1ad4c9ef0c985751d
+          ref: 0f734fac75cabe5874214634090f98a1796eb554
           fetch-depth: 0
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -123,7 +123,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 34c24d0a24a499a1cd16f0e1ad4c9ef0c985751d
+          ref: 0f734fac75cabe5874214634090f98a1796eb554
           fetch-depth: 0
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -149,7 +149,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 34c24d0a24a499a1cd16f0e1ad4c9ef0c985751d
+          ref: 0f734fac75cabe5874214634090f98a1796eb554
           fetch-depth: 0
           persist-credentials: false
       - name: Scan full fetched history
@@ -171,7 +171,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 34c24d0a24a499a1cd16f0e1ad4c9ef0c985751d
+          ref: 0f734fac75cabe5874214634090f98a1796eb554
           fetch-depth: 0
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
