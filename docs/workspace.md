@@ -30,13 +30,13 @@ directory. Unknown keys and unsupported manifest versions are rejected.
 
 ## Read the report
 
-With the development version installed, run:
+With version 0.4 installed, run:
 
 ```bash
 whykit workspace status /path/to/workspace.toml --today 2026-10-27 --json
 ```
 
-The command is unreleased in 0.4 development; it is not in 0.3.4. You can also
+The command is available in 0.4; it is not in 0.3.4. You can also
 call the local Python API:
 
 ```python

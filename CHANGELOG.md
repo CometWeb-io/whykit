@@ -5,7 +5,7 @@ All notable changes to WhyKit are documented here. The format follows
 semantic versioning, where the **data contract** is the public API alongside the
 CLI and the lint rule codes.
 
-## [Unreleased]
+## [0.4.0] - 2026-11-05
 
 ### Added
 

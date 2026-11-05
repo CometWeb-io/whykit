@@ -1,8 +1,8 @@
 # Upgrade from 0.3.4 to 0.4 and recover a backup
 
-This guide applies to the **unreleased 0.4 development version**, not the
-0.3.4 package currently published on PyPI. Do not assume an unversioned PyPI
-install gives you 0.4. Test a specific 0.4 build before upgrading a real vault.
+This guide applies to version 0.4, not the 0.3.4 package. Check your installed
+version and do not assume an unversioned PyPI install gives you 0.4. Test a
+specific 0.4 build before upgrading a real vault.
 The examples below use separate executables, `OLD_WHYKIT` and `NEW_WHYKIT`, so
 installing one cannot silently replace the other. Set them to absolute paths.
 
@@ -34,7 +34,7 @@ set -eu
 VAULT=/private/example/vault
 BACKUP=/private/example/pre-upgrade-backup
 OLD_WHYKIT=/private/example/whykit-0.3.4/bin/whykit
-NEW_WHYKIT=/private/example/whykit-0.4-dev/bin/whykit
+NEW_WHYKIT=/private/example/whykit-0.4/bin/whykit
 
 "$OLD_WHYKIT" --version
 "$NEW_WHYKIT" --version

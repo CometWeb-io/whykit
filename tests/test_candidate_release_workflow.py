@@ -30,8 +30,9 @@ class CandidateValidationTests(unittest.TestCase):
         candidate = '34c24d0a24a499a1cd16f0e1ad4c9ef0c985751d'
         self.assertNotIn('inputs.candidate_sha', text)
         self.assertIn(f'CANDIDATE_SHA: {candidate}', text)
-        refs = re.findall(r'^\s+ref: ([0-9a-f]{40})\s*$', text, re.MULTILINE)
-        self.assertEqual(refs, [candidate] * 5)
+        refs = re.findall(r'^\s+ref: (.+?)\s*$', text, re.MULTILINE)
+        self.assertEqual(refs, ['${{ needs.validate.outputs.sha }}'] * 5)
+        self.assertEqual(text.count(f'CANDIDATE_SHA: {candidate}'), 1)
 
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()

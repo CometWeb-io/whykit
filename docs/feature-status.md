@@ -1,9 +1,9 @@
 # What to expect from WhyKit 0.4
 
-This page describes the **unreleased 0.4 development branch**, not the 0.3.4
-package on PyPI. It sets expectations for a proposed public alpha, not a claim
-that 0.4 has passed its release checks. These labels describe support and risk;
-they are not feature flags and do not disable commands.
+This page describes the 0.4 source and its intended public alpha, not the 0.3.4
+package. Check your installed version and the package index before relying on it.
+These labels describe support and risk; they are not feature flags and do not
+disable commands.
 
 | Area | Status | What to rely on and what remains outside the promise |
 |---|---|---|
