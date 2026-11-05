@@ -66,7 +66,7 @@ class MigrationGuideTests(unittest.TestCase):
     def test_guide_upgrade_then_restore_real_034_with_git_history(self) -> None:
         assert OLD is not None
         self.assertEqual(run([OLD, "--version"]).stdout.strip(), "whykit 0.3.4")
-        self.assertIn("0.4.0.dev0", run([str(NEW), "--version"]).stdout)
+        self.assertEqual(run([str(NEW), "--version"]).stdout.strip(), "whykit 0.4.0")
         history = run(["git", "-C", str(self.vault), "rev-parse", "HEAD"]).stdout.strip()
         script = self.block(0, OLD) + self.block(1, OLD)
         script += ('"$NEW_WHYKIT" review record D-001 --root "$RESTORED" '
