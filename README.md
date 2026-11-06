@@ -1,30 +1,30 @@
 # WhyKit
 
-**Remember why a decision was made.**
+**Remember why a decision was made — and know what to revisit.**
 
-WhyKit helps you record decisions, link the sources behind them, and see what
-needs review. Your records are Markdown files you can read, edit and keep in Git.
-People can use them directly; AI tools can read the same context.
+A decision can look sound in a document long after its supporting evidence has changed. WhyKit connects important decisions to named sources and makes their review state inspectable. When you explicitly retire or replace a source in the ledger, you can trace which decisions still cite it.
 
-For example, your team chooses to ship SSO before audit logs because of support
-tickets. Three months later, someone asks why. WhyKit can show the decision,
-the source it cites and its review status.
+WhyKit is a **Git-native, Markdown-based evidence and decision ledger**: readable and editable files, a CLI and checks, with optional read-only access for AI tools through MCP. No hosted account or model is required.
+
+**A concrete scenario:** a small team chooses agencies as its first customer segment, citing interviews and a market analysis. Months later, the team registers new research and marks the earlier source as replaced. WhyKit can identify the decision's reference to the retired source so a person can revisit the rationale. It does **not** collect the research, monitor prices or markets, judge whether the decision was right, or automatically change it.
+
+- **For a first real workflow:** [trace an evidence change through a GTM decision](docs/use-cases/evidence-change.md).
+- **For technical teams:** [record, review and supersede a decision](docs/tutorials/record-and-supersede.md).
+- **For AI tooling:** [expose the records through read-only MCP](docs/mcp.md). Access to the records does not establish that an agent will reason correctly.
 
 ![A source, a decision and a review, kept together in WhyKit.](docs/media/overview.svg)
 
-**Python 3.11+ · No runtime dependencies · Apache-2.0**
+**Python 3.11+ · No core runtime dependencies · Apache-2.0**
 
-**Status:** public alpha. Source version: `0.4.0`. Check
-[PyPI](https://pypi.org/project/whykit/) for the latest published version; it
-may differ from this source. For an installed release, follow the documentation
-links on its PyPI page.
-Keep sensitive vaults private; WhyKit's filters are not access controls.
-For version 0.4, see the [feature status](docs/feature-status.md)
-and the [upgrade and recovery guide](docs/migration-0.4.md) before using 0.4 data.
+**Status:** public alpha. Source version: `0.4.0`. Check [PyPI](https://pypi.org/project/whykit/) for the installed release; the published package may be older than the source. The quickstart below documents a published 0.3.4-compatible workflow. Some 0.4 features remain preview or experimental: [feature status](docs/feature-status.md), [upgrade and recovery](docs/migration-0.4.md).
+
+Keep sensitive vaults private. WhyKit's sensitivity filters are **not** access controls. [See when plain ADRs are sufficient](docs/project-positioning.md).
 
 [![CI](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml/badge.svg)](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml)
 
 ## Try it
+
+This CLI example uses an engineering decision; the [GTM walkthrough](docs/use-cases/evidence-change.md) applies the same evidence and review model to a customer-segment choice.
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) (0.13.4+)
 and use Python 3.11+. This example works with the published 0.3.4 release and
