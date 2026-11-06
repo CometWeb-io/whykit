@@ -24,6 +24,8 @@ Keep sensitive vaults private. WhyKit's sensitivity filters are **not** access c
 
 ## Try it
 
+This CLI example uses an engineering decision; the [GTM walkthrough](docs/use-cases/evidence-change.md) applies the same evidence and review model to a customer-segment choice.
+
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) (0.13.4+)
 and use Python 3.11+. This example works with the published 0.3.4 release and
 uses a fictional source. It creates a
