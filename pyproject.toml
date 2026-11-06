@@ -3,7 +3,7 @@
 # hatchling >= 1.27 is required for PEP 639 License-Expression metadata.
 # hatch-fancy-pypi-readme rewrites the README's relative links for PyPI; it is a
 # build-time plugin only and never reaches the installed package.
-requires = ["hatchling==1.32.4", "hatch-fancy-pypi-readme==25.1.0"]
+requires = ["hatchling==1.33.0", "hatch-fancy-pypi-readme==25.1.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -48,15 +48,15 @@ mcp = ["mcp>=2.2,<2.4", "opentelemetry-api>=1.45.1", "PyJWT>=2.15.0"]
 # with --no-dev, so none of this reaches the runtime dependency graph.
 [dependency-groups]
 dev = [
-  "mypy==2.4.0",
-  "ruff==0.16.10",
-  "zizmor==1.30.1",
+  "mypy==2.4.1",
+  "ruff==0.17.3",
+  "zizmor==1.31.1",
 ]
 # Release-artifact tooling: distribution metadata check (`twine check`) and the
 # CycloneDX SBOM generator (`cyclonedx-py`). Kept out of `dev` so a normal
 # contributor sync stays small; CI's package job opts in with --only-group dist.
 dist = [
-  "cyclonedx-bom==7.5.0",
+  "cyclonedx-bom==7.6.0",
   "twine==7.0.0",
 ]
 
@@ -64,7 +64,7 @@ dist = [
 # .pre-commit-hooks.yaml through `pre-commit try-repo`. Opt in with
 # `uv sync --group hooks`; the test skips when it is absent.
 hooks = [
-  "pre-commit==4.6.2",
+  "pre-commit==4.7.0",
 ]
 
 [project.urls]
