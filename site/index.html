@@ -1,0 +1,3492 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WhyKit — give your agents the why</title>
+    <meta
+      name="description"
+      content="Open-source decision ledger for teams and AI agents. Decisions and their sources live as Markdown in Git; Claude Code, Codex and other MCP clients read them, and CI flags stale reasons."
+    />
+    <link rel="canonical" href="https://cometweb-io.github.io/whykit/" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="WhyKit — give your agents the why" />
+    <meta
+      property="og:description"
+      content="Decisions and the sources behind them, as Markdown in Git. Your agents read them over MCP, your CI checks them. Apache-2.0."
+    />
+    <meta property="og:url" content="https://cometweb-io.github.io/whykit/" />
+    <meta property="og:image" content="https://cometweb-io.github.io/whykit/og.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="preload" href="fonts/nunito-sans-700.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="fonts/nunito-sans-regular.woff2" as="font" type="font/woff2" crossorigin />
+    <style>
+      @font-face {
+        font-family: "Nunito Sans";
+        font-weight: 400;
+        font-display: swap;
+        src: url("fonts/nunito-sans-regular.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Nunito Sans";
+        font-weight: 600;
+        font-display: swap;
+        src: url("fonts/nunito-sans-600.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Nunito Sans";
+        font-weight: 700 900;
+        font-display: swap;
+        src: url("fonts/nunito-sans-700.woff2") format("woff2");
+      }
+
+      :root {
+        --bg: #0f0f0f;
+        --fg: #fff;
+        --soft: #b4b4b4;
+        --muted: #9ca3af;
+        --dim: #6b6b70;
+        --line: #222224;
+        --line-2: #2d2d2d;
+        --panel: #151517;
+        --accent: #05f29b;
+        --accent-ink: #001a10;
+        --ok: #05f29b;
+        --warn: #ffb020;
+        --bad: #ff6b6b;
+        --sans: "Nunito Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+        --r-btn: 14px;
+        --r-panel: 14px;
+        --r-tag: 6px;
+        --r-chip: 4px;
+        --ease: cubic-bezier(0.22, 1, 0.36, 1);
+        color-scheme: dark;
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--sans);
+        font-size: 16px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      code {
+        font-family: var(--mono);
+      }
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+        border-radius: 4px;
+      }
+      .skip {
+        position: absolute;
+        left: -999px;
+        top: 8px;
+        z-index: 100;
+        background: var(--accent);
+        color: var(--accent-ink);
+        padding: 8px 14px;
+        font-weight: 600;
+      }
+      .skip:focus {
+        left: 16px;
+      }
+      .wrap {
+        width: min(1240px, 100% - 48px);
+        margin-inline: auto;
+      }
+
+      /* ---------- top bar ---------- */
+      .announce {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 12px;
+        height: 40px;
+        font-size: 13px;
+        color: var(--soft);
+        border-bottom: 1px solid var(--line);
+      }
+      .announce .label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--accent-ink);
+        background: var(--accent);
+        padding: 3px 8px;
+        border-radius: var(--r-chip);
+      }
+      .announce a {
+        color: var(--fg);
+      }
+      .announce a:hover {
+        color: var(--accent);
+      }
+
+      /* ---------- nav ---------- */
+      .nav {
+        position: sticky;
+        top: 12px;
+        z-index: 40;
+        margin-top: 12px;
+      }
+      .nav .wrap {
+        display: flex;
+        align-items: center;
+        height: 60px;
+        gap: 32px;
+        padding: 0 10px 0 18px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(22, 22, 24, 0.72);
+        backdrop-filter: blur(14px) saturate(140%);
+        -webkit-backdrop-filter: blur(14px) saturate(140%);
+        box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.6);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+        font-size: 16px;
+        letter-spacing: -0.01em;
+      }
+      .brand svg {
+        width: 22px;
+        height: 22px;
+      }
+      .links {
+        display: flex;
+        gap: 4px;
+        margin-inline: auto;
+        font-size: 14px;
+        color: var(--soft);
+      }
+      .links a {
+        padding: 6px 12px;
+        border-radius: var(--r-tag);
+        transition:
+          color 0.15s,
+          background 0.15s;
+      }
+      .links a:hover {
+        color: var(--fg);
+        background: #1a1a1a;
+      }
+      .nav-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .gh {
+        display: inline-flex;
+        align-items: stretch;
+        height: 38px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: var(--r-btn);
+        background: rgba(39, 39, 42, 0.52);
+        font-size: 13px;
+        font-weight: 700;
+        overflow: hidden;
+        transition:
+          border-color 0.2s,
+          background 0.2s;
+      }
+      .gh span {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 10px;
+      }
+      .gh span + span {
+        border-left: 1px solid rgba(255, 255, 255, 0.14);
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .gh svg {
+        width: 15px;
+        height: 15px;
+      }
+      .gh:hover {
+        border-color: rgba(255, 255, 255, 0.26);
+        background: rgba(63, 63, 70, 0.68);
+      }
+      .btn {
+        position: relative;
+        isolation: isolate;
+        overflow: hidden;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        height: 48px;
+        padding: 0 24px;
+        line-height: 1;
+        border-radius: var(--r-btn);
+        font-family: inherit;
+        font-weight: 700;
+        font-size: 15px;
+        letter-spacing: -0.005em;
+        white-space: nowrap;
+        cursor: pointer;
+        border: 1px solid transparent;
+        transition:
+          background 0.3s var(--ease),
+          box-shadow 0.3s var(--ease),
+          transform 0.2s var(--ease),
+          border-color 0.2s var(--ease);
+      }
+      .btn:active {
+        transform: scale(0.97);
+        transition-duration: 80ms;
+      }
+      .btn-accent {
+        background: linear-gradient(to right, #05f29b, #04c27c);
+        color: #18181b;
+        border-color: #05f29b;
+        box-shadow:
+          0 2px 10px rgba(5, 242, 155, 0.2),
+          inset 0 1px 0 rgba(255, 255, 255, 0.35);
+      }
+      .btn-accent:hover {
+        background: linear-gradient(to right, #04c27c, #05f29b);
+        box-shadow:
+          0 6px 18px rgba(5, 242, 155, 0.32),
+          inset 0 1px 0 rgba(255, 255, 255, 0.35);
+        transform: translateY(-1px);
+      }
+      .btn-accent::after {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 36%;
+        z-index: -1;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+        transform: translateX(-160%) skewX(-18deg);
+        pointer-events: none;
+      }
+      .btn-accent:hover::after {
+        animation: sheen 0.8s var(--ease);
+      }
+      @keyframes sheen {
+        to {
+          transform: translateX(420%) skewX(-18deg);
+        }
+      }
+      .btn-light {
+        background: rgba(39, 39, 42, 0.52);
+        color: #fff;
+        border-color: rgba(255, 255, 255, 0.14);
+        box-shadow:
+          0 2px 10px rgba(0, 0, 0, 0.18),
+          inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      }
+      .btn-light:hover {
+        background: rgba(63, 63, 70, 0.68);
+        border-color: rgba(255, 255, 255, 0.26);
+        transform: translateY(-1px);
+      }
+      .btn-sm {
+        height: 38px;
+        padding: 0 16px;
+        font-size: 13px;
+        gap: 6px;
+      }
+
+      /* ---------- hero ---------- */
+      .hero {
+        position: relative;
+        min-height: min(760px, calc(100svh - 104px));
+        display: grid;
+        align-items: center;
+        overflow: clip;
+      }
+      .hero .wrap {
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+        align-items: center;
+        gap: 40px;
+      }
+      .hero-copy {
+        position: relative;
+        z-index: 2;
+        padding: 64px 0;
+      }
+      h1 {
+        font-weight: 800;
+        font-size: clamp(44px, 5.4vw, 74px);
+        line-height: 1.02;
+        letter-spacing: -0.035em;
+        margin: 0 0 24px;
+      }
+      .sub {
+        font-size: clamp(18px, 1.6vw, 21px);
+        line-height: 1.45;
+        color: var(--muted);
+        max-width: 30em;
+        margin: 0 0 40px;
+      }
+      .sub b {
+        color: var(--fg);
+        font-weight: 400;
+      }
+      .ctas {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+      .cmd {
+        display: inline-flex;
+        align-items: center;
+        max-width: 100%;
+        height: 44px;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-btn);
+        overflow: hidden;
+        background: var(--panel);
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--soft);
+      }
+      .cmd .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 2px;
+        background: var(--accent);
+        margin: 0 10px 0 14px;
+        flex: none;
+      }
+      .cmd code {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        padding-right: 14px;
+      }
+      .cmd button {
+        height: 100%;
+        width: 44px;
+        flex: none;
+        display: grid;
+        place-items: center;
+        background: none;
+        border: 0;
+        border-left: 1px solid var(--line-2);
+        color: var(--muted);
+        cursor: pointer;
+      }
+      .cmd button:hover {
+        color: var(--fg);
+      }
+      .cmd button svg {
+        width: 14px;
+        height: 14px;
+      }
+
+      /* ---------- hero ledger (staged) ---------- */
+      .ledger {
+        position: relative;
+        padding: 40px 0 30px;
+      }
+      .ledger::before {
+        content: "";
+        position: absolute;
+        left: 8%;
+        right: 8%;
+        bottom: 0;
+        height: 40%;
+        border-radius: 50%;
+        background: radial-gradient(ellipse at center, rgba(5, 242, 155, 0.12), transparent 68%);
+        filter: blur(10px);
+        pointer-events: none;
+      }
+      .lw {
+        position: relative;
+        border-radius: var(--r-panel);
+        border: 1px solid #2f2f33;
+        background: linear-gradient(180deg, #19191c, #141416);
+        box-shadow: 0 40px 80px -30px rgba(0, 0, 0, 0.9);
+        overflow: hidden;
+      }
+      .lw-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 38px;
+        padding: 0 12px;
+        border-bottom: 1px solid #26262a;
+        background: #1c1c1f;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      .lw-bar .dots {
+        display: flex;
+        gap: 6px;
+      }
+      .lw-bar .dots i {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #3a3a3e;
+      }
+      .lw-body {
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+        gap: 44px;
+        padding: 22px;
+      }
+      .ftitle {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--dim);
+        margin-bottom: 8px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .dcard {
+        position: relative;
+        border-radius: 10px;
+        border: 1px solid #303035;
+        background: #111113;
+        padding: 14px 14px 12px;
+        transition:
+          border-color 0.4s,
+          box-shadow 0.4s;
+      }
+      .dcard.bad {
+        border-color: rgba(255, 176, 32, 0.6);
+        box-shadow: 0 0 0 4px rgba(255, 176, 32, 0.1);
+      }
+      .dc-top {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      .dc-id {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--fg);
+      }
+      .dcard h4 {
+        margin: 0 0 12px;
+        font-size: 15px;
+        line-height: 1.3;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+      .fm {
+        display: grid;
+        grid-template-columns: 82px minmax(0, 1fr);
+        align-items: center;
+        gap: 8px;
+        padding: 5px 0;
+        border-top: 1px solid #222226;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--soft);
+      }
+      .fm > span:first-child {
+        color: var(--dim);
+      }
+      .cite {
+        justify-self: start;
+        padding: 3px 8px;
+        border-radius: 5px;
+        color: #8fdcc0;
+        background: rgba(5, 242, 155, 0.06);
+        border: 1px solid rgba(5, 242, 155, 0.2);
+        transition:
+          background 0.3s,
+          border-color 0.3s,
+          color 0.3s,
+          box-shadow 0.3s;
+      }
+      .ledger.linked .cite {
+        color: #04140d;
+        background: var(--accent);
+        border-color: var(--accent);
+        box-shadow: 0 0 0 4px rgba(5, 242, 155, 0.16);
+      }
+      .ledger.broken .cite {
+        color: #1d1300;
+        background: var(--warn);
+        border-color: var(--warn);
+        box-shadow: 0 0 0 4px rgba(255, 176, 32, 0.16);
+      }
+      .flag {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        padding: 2px 7px;
+        border-radius: 5px;
+        color: var(--warn);
+        background: rgba(255, 176, 32, 0.12);
+        opacity: 0;
+        transform: translateY(-3px);
+        transition:
+          opacity 0.35s,
+          transform 0.35s var(--ease);
+      }
+      .ledger.broken .flag {
+        opacity: 1;
+        transform: none;
+      }
+      .reg {
+        display: grid;
+        gap: 6px;
+        align-content: start;
+      }
+      .reg h5 {
+        margin: 6px 0 0;
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--dim);
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 8px;
+        min-height: 34px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        border: 1px solid #26262a;
+        background: #121214;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--soft);
+        transition:
+          opacity 0.45s var(--ease),
+          transform 0.45s var(--ease),
+          border-color 0.35s,
+          background 0.35s;
+      }
+      .row b {
+        font-weight: 700;
+        color: var(--fg);
+      }
+      .row span {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .row.target.lit {
+        border-color: rgba(5, 242, 155, 0.55);
+        background: rgba(5, 242, 155, 0.06);
+      }
+      .row.slot {
+        border-style: dashed;
+        background: transparent;
+        color: var(--dim);
+      }
+      .row.gone {
+        opacity: 0;
+        transform: translateX(14px);
+      }
+      .row.retired {
+        border-color: rgba(255, 176, 32, 0.5);
+        background: rgba(255, 176, 32, 0.06);
+      }
+      .row.retired span:nth-child(2) {
+        text-decoration: line-through;
+        text-decoration-color: rgba(255, 176, 32, 0.6);
+      }
+      .row.hidden {
+        display: none;
+      }
+      .wire {
+        position: absolute;
+        inset: 0;
+        z-index: 3;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+        pointer-events: none;
+      }
+      .wire path {
+        fill: none;
+        stroke: var(--accent);
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        filter: drop-shadow(0 0 5px rgba(5, 242, 155, 0.7));
+        stroke-dasharray: 400;
+        stroke-dashoffset: 400;
+        opacity: 0;
+        transition:
+          stroke-dashoffset 0.7s var(--ease),
+          opacity 0.3s,
+          stroke 0.3s;
+      }
+      .wire.on path {
+        stroke-dashoffset: 0;
+        opacity: 1;
+      }
+      .wire.warn path {
+        stroke: var(--warn);
+        filter: drop-shadow(0 0 5px rgba(255, 176, 32, 0.6));
+        stroke-dasharray: 5 6;
+        stroke-dashoffset: 0;
+      }
+      .term {
+        position: relative;
+        z-index: 4;
+        width: calc(100% - 48px);
+        margin: -22px 0 0 auto;
+        border-radius: var(--r-panel);
+        border: 1px solid #2f2f33;
+        background: rgba(13, 13, 15, 0.96);
+        box-shadow: 0 30px 60px -24px rgba(0, 0, 0, 0.9);
+        overflow: hidden;
+      }
+      .term-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 9px 14px;
+        border-bottom: 1px solid #26262a;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .gate {
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 5px;
+        color: var(--muted);
+        background: #232327;
+        transition:
+          color 0.3s,
+          background 0.3s;
+      }
+      .gate.pass {
+        color: var(--ok);
+        background: rgba(5, 242, 155, 0.12);
+      }
+      .gate.fail {
+        color: var(--bad);
+        background: rgba(255, 107, 107, 0.13);
+      }
+      .term pre {
+        margin: 0;
+        padding: 12px 14px 14px;
+        height: 178px;
+        overflow: hidden;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        line-height: 1.65;
+        color: var(--soft);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .term .p {
+        color: var(--accent);
+      }
+      .term .c {
+        color: var(--fg);
+      }
+      .term .ok {
+        color: var(--ok);
+      }
+      .term .w {
+        color: var(--warn);
+      }
+      .term .x {
+        color: var(--bad);
+      }
+      .term .caret {
+        display: inline-block;
+        width: 7px;
+        height: 13px;
+        margin-left: 1px;
+        vertical-align: -2px;
+        background: var(--soft);
+        animation: blink 1s steps(1) infinite;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+      .hero-note {
+        margin: 14px 0 0;
+        font-size: 12.5px;
+        color: var(--dim);
+        text-align: right;
+      }
+      .ledger.fade .lw,
+      .ledger.fade .term {
+        opacity: 0;
+        transition: opacity 0.5s;
+      }
+      .lw,
+      .term {
+        transition: opacity 0.5s;
+      }
+
+      /* ---------- hero: agents -> WhyKit -> decision ---------- */
+      .hv {
+        margin: 0;
+      }
+      .hv-svg {
+        display: block;
+        width: 100%;
+        height: auto;
+        overflow: visible;
+        font-family: var(--sans);
+      }
+      .hv-agent rect {
+        fill: var(--panel);
+        stroke: var(--line-2);
+        stroke-width: 1;
+        transition: stroke 0.35s, fill 0.35s;
+      }
+      .hv-agent text {
+        fill: var(--fg);
+        font-size: 16px;
+        font-weight: 700;
+      }
+      .hv-agent.any rect {
+        fill: none;
+        stroke-dasharray: 5 5;
+      }
+      .hv-agent.any text {
+        fill: var(--muted);
+        font-weight: 600;
+        font-size: 15px;
+      }
+      .hv-agent.on rect {
+        stroke: var(--accent);
+        fill: #13201b;
+      }
+      .hv-wire {
+        fill: none;
+        stroke: #34343a;
+        stroke-width: 1.5;
+        transition: stroke 0.35s;
+      }
+      .hv-wire.on {
+        stroke: var(--accent);
+      }
+      .hv-core rect {
+        fill: #121214;
+        stroke: #3a3a3f;
+        stroke-width: 1.5;
+      }
+      .hv-core use {
+        color: var(--accent);
+      }
+      .hv-name {
+        fill: var(--fg);
+        font-size: 17px;
+        font-weight: 800;
+      }
+      .hv-sub {
+        fill: var(--muted);
+        font-size: 12px;
+      }
+      .hv-card rect {
+        fill: var(--panel);
+        stroke: var(--line-2);
+        transition: stroke 0.35s;
+      }
+      .hv-card.on rect {
+        stroke: var(--accent);
+      }
+      .hv-card line {
+        stroke: var(--line-2);
+      }
+      .hv-id {
+        fill: var(--accent);
+        font-family: var(--mono);
+        font-size: 13px;
+        font-weight: 700;
+      }
+      .hv-live.due {
+        fill: var(--warn);
+      }
+      .hv-card .fade {
+        opacity: 0;
+      }
+      .hv-card text {
+        transition: opacity 0.25s;
+      }
+      .hv-live {
+        fill: var(--accent);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .hv-h {
+        fill: var(--fg);
+        font-size: 16px;
+        font-weight: 800;
+      }
+      .hv-because {
+        fill: var(--muted);
+        font-size: 12.5px;
+      }
+      .hv-fact {
+        fill: var(--fg);
+        font-size: 15px;
+        font-weight: 700;
+      }
+      .hv-q {
+        opacity: 0;
+        transition: opacity 0.3s;
+      }
+      .hv-q.on {
+        opacity: 1;
+      }
+      .hv-q rect {
+        fill: var(--accent);
+      }
+      .hv-q text {
+        fill: var(--accent-ink);
+        font-size: 13px;
+        font-weight: 800;
+      }
+      .hv-dot {
+        fill: var(--accent);
+      }
+      .hero-note a {
+        color: var(--soft);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .hv-agent rect,
+        .hv-wire,
+        .hv-card rect,
+        .hv-q {
+          transition: none !important;
+        }
+      }
+
+      /* ---------- connect your agent ---------- */
+      .connect {
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+        border: 1px solid var(--line);
+        border-radius: var(--r-panel);
+        background: var(--panel);
+        overflow: hidden;
+      }
+      .cx-setup {
+        padding: 22px;
+        border-right: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-width: 0;
+      }
+      .cx-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .cx-tabs button {
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        padding: 7px 12px;
+        border-radius: var(--r-btn);
+        border: 1px solid var(--line-2);
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+      }
+      .cx-tabs button[aria-selected="true"] {
+        color: var(--fg);
+        background: #222226;
+        border-color: #3a3a3f;
+      }
+      .cx-pane .code {
+        background: #0c0c0e;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-tag);
+        padding: 14px 16px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        line-height: 1.75;
+        color: var(--soft);
+        white-space: pre;
+        overflow-x: auto;
+        scrollbar-width: thin;
+        scrollbar-color: var(--line-2) transparent;
+      }
+      .cx-pane .code i {
+        font-style: normal;
+        color: var(--dim);
+      }
+      .cx-pane .code b {
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .cx-note {
+        margin: 0;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .cx-note a {
+        color: var(--soft);
+      }
+      .asks {
+        display: flex;
+        flex-direction: column;
+      }
+      .ask {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 4px 14px;
+        padding: 16px 22px;
+        border-bottom: 1px solid var(--line);
+      }
+      .ask:last-child {
+        border-bottom: 0;
+      }
+      .ask .q {
+        font-weight: 800;
+        color: var(--fg);
+      }
+      .ask .a {
+        grid-column: 1;
+        font-size: 14px;
+        color: var(--muted);
+      }
+      .ask code {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+        align-self: center;
+        font-size: 11.5px;
+        color: var(--accent);
+        background: rgba(5, 242, 155, 0.08);
+        padding: 3px 8px;
+        border-radius: var(--r-tag);
+        white-space: nowrap;
+      }
+      .gate-stage {
+        max-width: 760px;
+        margin: 0 auto 56px;
+      }
+      .gate-more {
+        margin: 28px 0 0;
+        color: var(--muted);
+        font-size: 15px;
+      }
+      .gate-more a {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .gate-sub {
+        font-size: 20px;
+        margin: 0 0 18px;
+      }
+      @media (max-width: 760px) {
+        .duo {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      @media (max-width: 860px) {
+        .connect {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .cx-setup {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+      }
+      @media (max-width: 560px) {
+        .ask {
+          grid-template-columns: minmax(0, 1fr);
+          padding: 14px 16px;
+        }
+        .ask code {
+          grid-column: 1;
+          grid-row: auto;
+          justify-self: start;
+        }
+        .cx-setup {
+          padding: 16px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+      }
+
+      /* ---------- facts strip ---------- */
+      .facts {
+        border-block: 1px solid var(--line);
+      }
+      .facts .wrap {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+      .fact {
+        position: relative;
+        padding: 28px 24px 22px;
+        border-left: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+      }
+      .fact:last-child {
+        border-right: 1px solid var(--line);
+      }
+      .fact .n {
+        font-weight: 800;
+        font-size: 44px;
+        line-height: 1;
+        letter-spacing: -0.03em;
+      }
+      .fact .k {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .fact .n small {
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--muted);
+        letter-spacing: 0;
+      }
+      .fact .d {
+        margin: -12px 0 0;
+        font-size: 13.5px;
+        line-height: 1.5;
+        color: var(--dim);
+      }
+      .fact .logos {
+        margin-top: -10px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .fact .logos svg {
+        width: 20px;
+        height: 20px;
+      }
+      .fact .logos {
+        flex-wrap: wrap;
+      }
+      .fact .logos span {
+        white-space: nowrap;
+        font-size: 12.5px;
+        color: var(--dim);
+      }
+      .fico {
+        position: absolute;
+        top: 26px;
+        right: 22px;
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        display: grid;
+        place-items: center;
+        color: var(--accent);
+        background: rgba(5, 242, 155, 0.08);
+        border: 1px solid rgba(5, 242, 155, 0.2);
+      }
+
+      /* ---------- sections ---------- */
+      .sec {
+        padding: 120px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .sec-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+        gap: 24px 64px;
+        align-items: end;
+        margin-bottom: 56px;
+      }
+      h2 {
+        font-weight: 800;
+        font-size: clamp(34px, 4.4vw, 56px);
+        line-height: 1.04;
+        letter-spacing: -0.035em;
+        margin: 0;
+      }
+      .sec-head p {
+        margin: 0;
+        font-size: 18px;
+        color: var(--muted);
+        max-width: 34em;
+      }
+      .sec-head p b,
+      .sec-head p code {
+        color: var(--fg);
+        font-weight: 600;
+      }
+      .sec-head p code {
+        font-size: 0.86em;
+        font-weight: 400;
+      }
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-bottom: 16px;
+      }
+      .eyebrow::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 10px rgba(5, 242, 155, 0.8);
+      }
+      .hero-eyebrow {
+        margin-bottom: 22px;
+      }
+      .sec-head.center {
+        grid-template-columns: minmax(0, 760px);
+        justify-content: center;
+        text-align: center;
+      }
+      .sec-head.center p {
+        margin-inline: auto;
+      }
+      .sub-h {
+        margin: 88px 0 28px;
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+        gap: 16px 64px;
+        align-items: end;
+      }
+      .sub-h h3 {
+        margin: 0;
+        font-size: clamp(24px, 2.6vw, 32px);
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        line-height: 1.1;
+      }
+      .sub-h p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      /* shared bordered grid */
+      .cells {
+        display: grid;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-panel);
+        overflow: hidden;
+        background: var(--line-2);
+        gap: 1px;
+      }
+      .cell {
+        background: var(--bg);
+        padding: 32px 28px;
+      }
+      .cell .num {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--muted);
+        letter-spacing: 0.06em;
+        margin-bottom: 44px;
+      }
+      .cell h3 {
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+        margin: 0 0 12px;
+      }
+      .cell p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 15px;
+      }
+      .cell p code {
+        font-size: 13px;
+        color: var(--soft);
+      }
+
+      /* tags */
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        padding: 3px 9px;
+        border-radius: var(--r-tag);
+        white-space: nowrap;
+      }
+      .tag i {
+        width: 7px;
+        height: 7px;
+        border-radius: 2px;
+        background: currentColor;
+      }
+      .tag.ok {
+        color: var(--ok);
+        background: color-mix(in srgb, var(--ok) 12%, transparent);
+      }
+      .tag.warn {
+        color: var(--warn);
+        background: color-mix(in srgb, var(--warn) 13%, transparent);
+      }
+      .tag.bad {
+        color: var(--bad);
+        background: color-mix(in srgb, var(--bad) 13%, transparent);
+      }
+      .tag.mute {
+        color: #c4c4c4;
+        background: rgba(140, 140, 140, 0.16);
+      }
+      .tag.sm {
+        font-size: 10.5px;
+        padding: 2px 7px;
+      }
+
+      /* ---------- pipeline ---------- */
+      .pipe {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-panel);
+        background: linear-gradient(180deg, #131315, #0f0f10);
+        overflow: hidden;
+      }
+      .pnode {
+        position: relative;
+        padding: 26px 22px 24px;
+        transition: background 0.5s;
+      }
+      .pnode + .pnode {
+        border-left: 1px solid var(--line);
+      }
+      .pnode .step {
+        position: relative;
+        z-index: 2;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 14px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        margin-bottom: 22px;
+        transition: color 0.4s;
+      }
+      .pdot {
+        width: 12px;
+        height: 12px;
+        flex: none;
+        border-radius: 50%;
+        background: #0f0f10;
+        border: 2px solid #3a3a3f;
+        transition:
+          background 0.4s,
+          border-color 0.4s,
+          box-shadow 0.4s;
+      }
+      .rail {
+        position: absolute;
+        top: 32px;
+        height: 2px;
+        z-index: 1;
+        border-radius: 2px;
+        background: #26262a;
+        pointer-events: none;
+      }
+      .rail span {
+        display: block;
+        height: 100%;
+        width: 0;
+        border-radius: 2px;
+        background: linear-gradient(90deg, #04c27c, #05f29b);
+        box-shadow: 0 0 10px rgba(5, 242, 155, 0.55);
+        transition: width 0.9s cubic-bezier(0.65, 0, 0.35, 1);
+      }
+      .pnode .ico,
+      .pnode h4,
+      .pnode p,
+      .pnode code {
+        transition:
+          opacity 0.5s,
+          border-color 0.5s,
+          background 0.5s,
+          color 0.5s;
+      }
+      .pipe.playing .pnode:not(.past):not(.active) .ico,
+      .pipe.playing .pnode:not(.past):not(.active) h4,
+      .pipe.playing .pnode:not(.past):not(.active) p,
+      .pipe.playing .pnode:not(.past):not(.active) code {
+        opacity: 0.45;
+      }
+      .pnode.past .pdot {
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      .pnode.active .pdot {
+        background: var(--accent);
+        border-color: #b9ffe2;
+        box-shadow:
+          0 0 0 5px rgba(5, 242, 155, 0.16),
+          0 0 16px rgba(5, 242, 155, 0.7);
+      }
+      .pnode.active {
+        background: linear-gradient(180deg, rgba(5, 242, 155, 0.06), transparent 70%);
+      }
+      .pnode.active .step {
+        color: var(--accent);
+      }
+      .pnode.active .ico {
+        background: rgba(5, 242, 155, 0.16);
+        border-color: rgba(5, 242, 155, 0.5);
+      }
+      .pnode.active code {
+        color: var(--accent);
+        border-color: rgba(5, 242, 155, 0.35);
+      }
+      .pnode h4 {
+        margin: 14px 0 6px;
+        font-size: 17px;
+        font-weight: 700;
+      }
+      .pnode p {
+        margin: 0;
+        font-size: 13.5px;
+        color: var(--muted);
+      }
+      .pnode code {
+        display: inline-block;
+        margin-top: 12px;
+        font-size: 11.5px;
+        color: var(--soft);
+        padding: 3px 8px;
+        border-radius: var(--r-chip);
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--line-2);
+      }
+      .pnode .ico {
+        margin: 0;
+      }
+
+      /* ---------- supersession chain ---------- */
+      .note {
+        margin-top: 16px;
+        font-size: 13px;
+        color: var(--dim);
+      }
+      .note code {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      /* ---------- browser frame ---------- */
+      .frame {
+        border-radius: var(--r-panel);
+        border: 1px solid var(--line-2);
+        background: #141416;
+        overflow: hidden;
+        box-shadow:
+          0 40px 120px -40px rgba(5, 242, 155, 0.18),
+          0 30px 80px -30px rgba(0, 0, 0, 0.8);
+      }
+      .frame-bar {
+        position: relative;
+        display: flex;
+        align-items: center;
+        height: 40px;
+        padding: 0 14px;
+        border-bottom: 1px solid var(--line-2);
+        background: #19191c;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .frame-bar .dots {
+        display: flex;
+        gap: 7px;
+      }
+      .frame-bar .dots i {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: #3a3a3e;
+      }
+      .frame-bar .dots i:nth-child(1) {
+        background: #ff5f57;
+      }
+      .frame-bar .dots i:nth-child(2) {
+        background: #febc2e;
+      }
+      .frame-bar .dots i:nth-child(3) {
+        background: #28c840;
+      }
+      .frame-bar .url {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 4px 14px;
+        border-radius: var(--r-tag);
+        background: #0f0f10;
+        border: 1px solid var(--line-2);
+        white-space: nowrap;
+      }
+      .frame video,
+      .frame img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .demo-frame {
+        max-width: 1080px;
+        margin: 0 auto;
+      }
+      .caption {
+        margin: 18px auto 0;
+        max-width: 760px;
+        text-align: center;
+        font-size: 14px;
+        color: var(--muted);
+      }
+      .caption b {
+        color: var(--soft);
+        font-weight: 600;
+      }
+      .duo {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 28px;
+        margin: 56px 0 0;
+        align-items: start;
+      }
+      .duo figure {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .duo figcaption {
+        font-size: 15px;
+        color: var(--muted);
+      }
+      .duo figcaption b {
+        display: block;
+        color: var(--fg);
+        font-size: 18px;
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+
+      /* ---------- gate table ---------- */
+      .vtable {
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-panel);
+        overflow: hidden;
+      }
+      .vrow {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.55fr) minmax(0, 1.35fr);
+        border-top: 1px solid var(--line);
+      }
+      .vrow:first-child {
+        border-top: 0;
+      }
+      .vrow > div {
+        padding: 20px 26px;
+      }
+      .vrow > div + div {
+        border-left: 1px solid var(--line);
+      }
+      .vrow.head > div {
+        padding-block: 16px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+        background: var(--panel);
+      }
+      .vrow .case {
+        display: flex;
+        align-items: center;
+        font-size: 16.5px;
+      }
+      .vrow .rule code {
+        font-size: 13px;
+        color: var(--soft);
+      }
+      .verdict {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 6px 12px;
+      }
+      .verdict small {
+        flex-basis: 100%;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: var(--muted);
+        word-break: break-word;
+      }
+      .cico {
+        display: inline-grid;
+        place-items: center;
+        flex: none;
+        width: 30px;
+        height: 30px;
+        margin-right: 12px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--line-2);
+        color: var(--soft);
+      }
+      .cico svg {
+        width: 16px;
+        height: 16px;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 4px;
+        padding: 10px;
+        border-bottom: 1px solid var(--line);
+      }
+      .tabs button {
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--muted);
+        background: none;
+        border: 1px solid transparent;
+        border-radius: var(--r-tag);
+        padding: 6px 12px;
+        cursor: pointer;
+      }
+      .tabs button:hover {
+        color: var(--fg);
+      }
+      .tabs button[aria-selected="true"] {
+        color: var(--fg);
+        background: #1f1f22;
+        border-color: var(--line-2);
+      }
+
+      /* ---------- surfaces ---------- */
+      .surf .shot {
+        aspect-ratio: 16 / 10;
+        margin: -32px -28px 28px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--line);
+        overflow: hidden;
+      }
+      .surf .shot img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: top left;
+        display: block;
+      }
+      .surf .shot pre {
+        margin: 0;
+        padding: 24px 26px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        line-height: 1.75;
+        color: var(--muted);
+        white-space: pre-wrap;
+      }
+      .surf .shot pre b {
+        font-weight: 400;
+        color: var(--accent);
+      }
+      .surf .shot pre em {
+        font-style: normal;
+        color: var(--fg);
+      }
+      .ico {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        display: grid;
+        place-items: center;
+        margin-bottom: 28px;
+        background: rgba(5, 242, 155, 0.09);
+        border: 1px solid rgba(5, 242, 155, 0.22);
+        color: var(--accent);
+      }
+      .ico svg,
+      .fico svg {
+        width: 20px;
+        height: 20px;
+      }
+      .ico.sm {
+        width: 32px;
+        height: 32px;
+        margin: 0;
+        border-radius: 8px;
+      }
+      .ico.sm svg {
+        width: 17px;
+        height: 17px;
+      }
+      .ico.muted {
+        width: 32px;
+        height: 32px;
+        margin: 0;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.04);
+        border-color: var(--line-2);
+        color: var(--soft);
+      }
+      .ico.muted svg {
+        width: 17px;
+        height: 17px;
+      }
+      .num.ihead {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      h3.ih {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      /* ---------- install ---------- */
+      .step .num {
+        margin-bottom: 28px;
+      }
+      .step .code {
+        margin-top: 24px;
+        background: var(--panel);
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-tag);
+        padding: 14px 16px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        line-height: 1.75;
+        color: var(--soft);
+        white-space: pre;
+        overflow-x: auto;
+        scrollbar-width: thin;
+        scrollbar-color: var(--line-2) transparent;
+      }
+      .step .code b {
+        font-weight: 400;
+        color: var(--accent);
+      }
+      .step .code i {
+        font-style: normal;
+        color: var(--muted);
+      }
+      .install-ctas {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 32px;
+      }
+
+      /* ---------- trust ---------- */
+      .trust .cell {
+        transition: background 0.25s;
+      }
+      .trust .cell:hover {
+        background: #121214;
+      }
+      .trust .big {
+        font-size: 40px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        line-height: 1;
+        margin-bottom: 10px;
+      }
+      .trust .big small {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--muted);
+        margin-left: 6px;
+        letter-spacing: 0;
+      }
+      .badges {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 14px;
+        margin-top: 28px;
+        font-size: 14px;
+        color: var(--muted);
+      }
+      .badges img {
+        height: 20px;
+        width: auto;
+      }
+      .badges a:hover {
+        color: var(--fg);
+      }
+      .timeline {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-top: 24px;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-panel);
+        overflow: hidden;
+      }
+      .timeline div {
+        padding: 18px 22px;
+        font-size: 14px;
+        color: var(--muted);
+      }
+      .timeline div + div {
+        border-left: 1px solid var(--line);
+      }
+      .timeline b {
+        display: block;
+        font-size: 18px;
+        color: var(--fg);
+        font-weight: 800;
+      }
+      .timeline .now b {
+        color: var(--accent);
+      }
+
+      /* ---------- final ---------- */
+      .final {
+        padding: 140px 0;
+        text-align: center;
+      }
+      .final h2 {
+        max-width: 820px;
+        margin: 0 auto 20px;
+      }
+      .final p {
+        color: var(--muted);
+        font-size: 18px;
+        max-width: 540px;
+        margin: 0 auto 36px;
+      }
+      .final .ctas {
+        justify-content: center;
+        margin: 0;
+      }
+      footer {
+        padding: 40px 0;
+        font-size: 14px;
+        color: var(--muted);
+      }
+      footer .wrap {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px 32px;
+        align-items: center;
+      }
+      footer nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 24px;
+        margin-left: auto;
+      }
+      footer a:hover {
+        color: var(--fg);
+      }
+
+      /* ---------- surface ---------- */
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        background-image:
+          radial-gradient(1px 1px at 12% 18%, rgba(255, 255, 255, 0.35), transparent 60%),
+          radial-gradient(1px 1px at 68% 9%, rgba(255, 255, 255, 0.28), transparent 60%),
+          radial-gradient(1px 1px at 84% 42%, rgba(255, 255, 255, 0.22), transparent 60%),
+          radial-gradient(1px 1px at 32% 64%, rgba(255, 255, 255, 0.2), transparent 60%),
+          radial-gradient(1px 1px at 52% 31%, rgba(5, 242, 155, 0.45), transparent 60%),
+          radial-gradient(1px 1px at 91% 77%, rgba(255, 255, 255, 0.24), transparent 60%),
+          radial-gradient(1px 1px at 6% 86%, rgba(255, 255, 255, 0.2), transparent 60%),
+          radial-gradient(1.5px 1.5px at 44% 92%, rgba(5, 242, 155, 0.35), transparent 60%);
+        background-size: 520px 520px;
+        opacity: 0.8;
+      }
+      .hero::before {
+        content: "";
+        position: absolute;
+        inset: -120px 0 auto;
+        height: 520px;
+        z-index: 0;
+        pointer-events: none;
+        background: radial-gradient(ellipse 55% 60% at 50% 0%, rgba(5, 242, 155, 0.13), transparent 70%);
+      }
+
+      .reveal {
+        opacity: 0;
+        transform: translateY(16px);
+        transition:
+          opacity 0.7s var(--ease),
+          transform 0.7s var(--ease);
+      }
+      .reveal.in {
+        opacity: 1;
+        transform: none;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .reveal {
+          opacity: 1;
+          transform: none;
+          transition: none;
+        }
+        .btn,
+        .btn::after {
+          transition: none;
+          animation: none !important;
+        }
+        .term .caret {
+          animation: none;
+        }
+        .row,
+        .wire path,
+        .flag,
+        .cite,
+        .dcard {
+          transition: none !important;
+        }
+      }
+
+      @media (max-width: 960px) {
+        .links {
+          display: none;
+        }
+        .nav-right {
+          margin-left: auto;
+        }
+        .hero .wrap {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 0;
+        }
+        .hero-copy {
+          padding: 48px 0 0;
+        }
+        .facts .wrap {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .fact:nth-child(2) {
+          border-right: 1px solid var(--line);
+        }
+        .fact:nth-child(n + 3) {
+          border-top: 1px solid var(--line);
+        }
+        .fico {
+          top: 20px;
+          right: 16px;
+          width: 30px;
+          height: 30px;
+        }
+        .fico svg {
+          width: 16px;
+          height: 16px;
+        }
+        .sec {
+          padding: 88px 0;
+        }
+        .sec-head,
+        .sub-h {
+          grid-template-columns: minmax(0, 1fr);
+          margin-bottom: 40px;
+        }
+        .sub-h {
+          margin-top: 64px;
+          margin-bottom: 24px;
+        }
+        .grid-3,
+        .grid-4 {
+          grid-template-columns: minmax(0, 1fr) !important;
+        }
+        .pipe {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .pnode + .pnode {
+          border-left: 0;
+          border-top: 1px solid var(--line);
+        }
+        .rail {
+          display: none;
+        }
+        .vrow {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .vrow > div + div {
+          border-left: 0;
+          padding-top: 0;
+        }
+        .vrow.head {
+          display: none;
+        }
+        .duo {
+          margin-top: 48px;
+        }
+        .duo figure {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 16px;
+        }
+        .duo figcaption {
+          order: 0;
+          padding-top: 0;
+        }
+        .timeline {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .timeline div:nth-child(3) {
+          border-left: 0;
+        }
+        .timeline div:nth-child(n + 3) {
+          border-top: 1px solid var(--line);
+        }
+        .frame-bar .url {
+          display: none;
+        }
+      }
+      @media (max-width: 640px) {
+        .lw-body {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 30px;
+          padding: 16px;
+        }
+        .term {
+          width: 100%;
+          margin-top: 12px;
+        }
+        .term pre {
+          height: 214px;
+          font-size: 11px;
+        }
+        .hero-note {
+          text-align: left;
+        }
+      }
+      @media (max-width: 560px) {
+        .wrap {
+          width: calc(100% - 32px);
+        }
+        .announce .more {
+          display: none;
+        }
+        .announce {
+          font-size: 12px;
+          padding-inline: 16px;
+        }
+        .gh span + span {
+          display: none;
+        }
+        .ctas .btn {
+          flex: 1 1 auto;
+          justify-content: center;
+        }
+        .cmd {
+          width: 100%;
+        }
+        .fact .n {
+          font-size: 34px;
+        }
+        .cell {
+          padding: 28px 22px;
+        }
+        .surf .shot {
+          margin: -28px -22px 24px;
+        }
+        .vrow > div {
+          padding-inline: 20px;
+        }
+        .tabs button {
+          padding: 6px 9px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <g id="s" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></g>
+      </defs>
+      <symbol id="i-gh" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.1c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5Z"
+        />
+      </symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8">
+          <rect x="8" y="8" width="12" height="12" />
+          <path d="M16 8V4H4v12h4" />
+        </g>
+      </symbol>
+      <symbol id="i-logo" viewBox="0 0 32 32">
+        <rect x="4.5" y="3.5" width="16" height="22" rx="3.2" fill="none" stroke="#fff" stroke-width="2.4" />
+        <path d="M9 10h7M9 14.6h5" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" />
+        <path d="M20.5 20h2.6a3.4 3.4 0 0 1 3.4 3.4v.6" fill="none" stroke="#05F29B" stroke-width="2.2" stroke-linecap="round" />
+        <circle cx="26.5" cy="26.6" r="2.7" fill="#05F29B" />
+      </symbol>
+      <symbol id="i-archive" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="5" rx="1.5" />
+          <path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4" />
+        </g>
+      </symbol>
+      <symbol id="i-file-text" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 3H6v18h12V7z" />
+          <path d="M14 3v4h4M9 12h6M9 16h4" />
+        </g>
+      </symbol>
+      <symbol id="i-git-pr" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="6" cy="6" r="2.5" />
+          <circle cx="6" cy="18" r="2.5" />
+          <circle cx="18" cy="18" r="2.5" />
+          <path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4m2-2.5L10.5 6 13 8.5" />
+        </g>
+      </symbol>
+      <symbol id="i-calendar" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="5" width="18" height="16" rx="2" />
+          <path d="M3 10h18M8 3v4M16 3v4M12 14v3l2 1" />
+        </g>
+      </symbol>
+      <symbol id="i-package" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z" />
+          <path d="m4 7.5 8 4.5 8-4.5M12 12v9" />
+        </g>
+      </symbol>
+      <symbol id="i-list" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"
+        />
+      </symbol>
+      <symbol id="i-plug" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"
+        />
+      </symbol>
+      <symbol id="i-wifi-off" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M3 3l18 18M8.5 16.4a5 5 0 0 1 7 0M5 12.9a10 10 0 0 1 4.2-2.4M19 12.9a10 10 0 0 0-2.2-1.6M2 9a15 15 0 0 1 4.3-2.6M22 9a15 15 0 0 0-11-3.9M12 20h.01"
+        />
+      </symbol>
+      <symbol id="i-unlink" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 17H7a5 5 0 0 1 0-10h2M15 7h2a5 5 0 0 1 4 8" />
+          <path d="M3 3l18 18M8 12h3" />
+        </g>
+      </symbol>
+      <symbol id="i-hash" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          d="M5 9h15M4 15h15M10 3 8 21M16 3l-2 18"
+        />
+      </symbol>
+      <symbol id="i-pen-off" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 6l4 4M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z" />
+          <path d="M3 3l18 18" />
+        </g>
+      </symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </g>
+      </symbol>
+      <symbol id="i-link-2" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+          <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+        </g>
+      </symbol>
+      <symbol id="i-key" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="7.5" cy="15.5" r="4" />
+          <path d="m10.5 12.5 9-9M16 7l2.5 2.5M18.5 4.5 21 7" />
+        </g>
+      </symbol>
+      <symbol id="i-edit" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 20h4L19 9l-4-4L4 16z" />
+          <path d="M13.5 6.5l4 4" />
+        </g>
+      </symbol>
+      <symbol id="i-monitor" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="12" rx="2" />
+          <path d="M8 20h8M12 16v4" />
+        </g>
+      </symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="m7 9 3 3-3 3M12 15h5" />
+        </g>
+      </symbol>
+      <symbol id="i-download" viewBox="0 0 24 24">
+        <path
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 17v3h16v-3"
+        />
+      </symbol>
+      <symbol id="i-check-circle" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="m8 12.5 2.8 2.8L16.5 9.5" />
+        </g>
+      </symbol>
+      <symbol id="i-eye-off" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path
+            d="M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c5 0 9 6 9 6a16 16 0 0 1-2.6 3.2M6.6 6.6C4.3 8.1 3 12 3 12s4 6 9 6c1.6 0 3-.5 4.3-1.2"
+          />
+          <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+        </g>
+      </symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 11a8 8 0 0 0-14.6-4.5L3 9M4 13a8 8 0 0 0 14.6 4.5L21 15" />
+          <path d="M3 4v5h5M21 20v-5h-5" />
+        </g>
+      </symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="10" width="14" height="10" rx="2" />
+          <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+        </g>
+      </symbol>
+      <symbol id="i-flask" viewBox="0 0 24 24">
+        <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3" />
+          <path d="M7 15h10" />
+        </g>
+      </symbol>
+    </svg>
+
+    <div class="announce">
+      <span class="label">Release</span>
+      <span>WhyKit 0.4.0 is on PyPI</span>
+      <a class="more" href="https://github.com/CometWeb-io/whykit/blob/main/CHANGELOG.md">Changelog ↗</a>
+    </div>
+
+    <header class="nav">
+      <div class="wrap">
+        <a class="brand" href="#top"><svg aria-hidden="true"><use href="#i-logo" /></svg>WhyKit</a>
+        <nav class="links" aria-label="Sections">
+          <a href="#agents">Agents</a>
+          <a href="#demo">Explorer</a>
+          <a href="#how">How it works</a>
+          <a href="#gate">CI check</a>
+          <a href="#trust">Trust</a>
+          <a href="https://github.com/CometWeb-io/whykit/blob/main/docs/README.md">Docs ↗</a>
+        </nav>
+        <div class="nav-right">
+          <a class="gh" href="https://github.com/CometWeb-io/whykit" aria-label="WhyKit on GitHub">
+            <span><svg aria-hidden="true"><use href="#i-gh" /></svg>GitHub</span><span>Apache-2.0</span>
+          </a>
+          <a class="btn btn-accent btn-sm" href="#agents">Get started</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="hero" id="top">
+        <div class="wrap">
+          <div class="hero-copy">
+            <div class="eyebrow hero-eyebrow">Open source · Apache-2.0 · v0.4.0</div>
+            <h1>Give your agents the why</h1>
+            <p class="sub">
+              <b>WhyKit keeps every decision next to the sources behind it</b>, as plain Markdown in your repo.
+              Claude Code, Codex, Cursor and other MCP clients look it up before they act, and your CI flags a decision as
+              soon as its evidence goes out of date.
+            </p>
+            <div class="ctas">
+              <a class="btn btn-accent" href="#agents">Connect your agent</a>
+              <a class="btn btn-light" href="https://github.com/CometWeb-io/whykit/blob/main/docs/README.md"
+                >Read the docs</a
+              >
+            </div>
+            <div class="cmd">
+              <span class="dot" aria-hidden="true"></span>
+              <code id="cmd-text">uv tool install 'whykit[mcp]'</code>
+              <button type="button" id="copy-cmd" aria-label="Copy install command">
+                <svg aria-hidden="true"><use href="#i-copy" /></svg>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <figure class="hv" id="hv">
+              <svg class="hv-svg" viewBox="0 0 600 380" role="img" aria-labelledby="hv-t">
+                <title id="hv-t">Claude Code, Codex, Cursor and any other MCP client ask WhyKit about a decision and get the decision with the source behind it.</title>
+                <path class="hv-wire" data-wire="claude" d="M192 70 C 216 70, 216 190, 240 190" />
+                <path class="hv-wire" data-wire="codex" d="M192 150 C 216 150, 216 190, 240 190" />
+                <path class="hv-wire" data-wire="cursor" d="M192 230 C 216 230, 216 190, 240 190" />
+                <path class="hv-wire" d="M192 310 C 216 310, 216 190, 240 190" stroke-dasharray="4 5" />
+                <path class="hv-wire" data-wire="out" d="M360 190 L 392 190" />
+                <g class="hv-agent" data-agent="claude">
+                  <rect x="16" y="42" width="176" height="56" rx="14" />
+                  <svg x="34" y="58" width="24" height="24" viewBox="0 0 24 24"><path fill="#D97757" d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>
+                  <text x="72" y="75">Claude Code</text>
+                </g>
+                <g class="hv-agent" data-agent="codex">
+                  <rect x="16" y="122" width="176" height="56" rx="14" />
+                  <svg x="34" y="138" width="24" height="24" viewBox="0 0 24 24"><path fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 7l5 5-5 5M12 18h7"/></svg>
+                  <text x="72" y="155">Codex</text>
+                </g>
+                <g class="hv-agent" data-agent="cursor">
+                  <rect x="16" y="202" width="176" height="56" rx="14" />
+                  <svg x="34" y="218" width="24" height="24" viewBox="0 0 24 24"><path fill="#fff" d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></svg>
+                  <text x="72" y="235">Cursor</text>
+                </g>
+                <g class="hv-agent any">
+                  <rect x="16" y="282" width="176" height="56" rx="14" />
+                  <text x="34" y="315">+ any MCP client</text>
+                </g>
+                <g class="hv-core">
+                  <rect x="240" y="130" width="120" height="120" rx="20" />
+                  <use href="#i-logo" x="284" y="152" width="32" height="32" />
+                  <text x="300" y="210" text-anchor="middle" class="hv-name">WhyKit</text>
+                  <text x="300" y="230" text-anchor="middle" class="hv-sub">your decisions</text>
+                </g>
+                <g class="hv-card" id="hv-card">
+                  <rect x="392" y="110" width="192" height="160" rx="14" />
+                  <text x="410" y="140" class="hv-id" id="hv-id">D-011</text>
+                  <text x="458" y="140" class="hv-live" id="hv-state">● live</text>
+                  <text x="410" y="166" class="hv-h" id="hv-h1">Sell direct, not</text>
+                  <text x="410" y="186" class="hv-h" id="hv-h2">through partners</text>
+                  <line x1="410" y1="204" x2="566" y2="204" />
+                  <text x="410" y="226" class="hv-because" id="hv-because">because E-013</text>
+                  <text x="410" y="250" class="hv-fact" id="hv-fact">3 meetings, 0 leads</text>
+                </g>
+                <g class="hv-q" id="hv-q">
+                  <rect x="0" y="84" width="150" height="30" rx="15" />
+                  <text x="300" y="104" text-anchor="middle" id="hv-qt">Why not partners?</text>
+                </g>
+                <circle class="hv-dot" id="hv-dot" r="4" cx="0" cy="0" style="opacity: 0" />
+              </svg>
+            </figure>
+            <p class="hero-note">
+              Three real questions, each answered through the WhyKit MCP server by the agent shown, on 7 Nov 2026,
+              using the Northline example vault.
+              <a href="https://github.com/CometWeb-io/whykit/blob/main/site/media/agent-sessions.md">Transcripts</a>.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="facts">
+        <div class="wrap">
+          <div class="fact">
+            <div class="fico"><svg aria-hidden="true"><use href="#i-check-circle" /></svg></div>
+            <div class="n">5<small>/5</small></div>
+            <div class="k">Agent answers that found the right decision</div>
+            <p class="d">Five questions on 7 Nov 2026. Every answer cited the decision and its source.</p>
+          </div>
+          <div class="fact">
+            <div class="fico"><svg aria-hidden="true"><use href="#i-clock" /></svg></div>
+            <div class="n">17<small> s</small></div>
+            <div class="k">From question to cited answer</div>
+            <p class="d">Average of the three timed runs: 15.6, 16.2 and 18.9 seconds.</p>
+          </div>
+          <div class="fact">
+            <div class="fico"><svg aria-hidden="true"><use href="#i-plug" /></svg></div>
+            <div class="n">3</div>
+            <div class="k">Agents tested over MCP</div>
+            <div class="logos" aria-label="Claude Code, Codex, Cursor">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#D97757" d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 7l5 5-5 5M12 18h7"/></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></svg>
+              <span>+ any MCP client</span>
+            </div>
+          </div>
+          <div class="fact">
+            <div class="fico"><svg aria-hidden="true"><use href="#i-lock" /></svg></div>
+            <div class="n">0</div>
+            <div class="k">Files an agent can change</div>
+            <p class="d">The server is read-only. The test suite runs it and checks the vault bytes did not change.</p>
+          </div>
+        </div>
+      </div>
+
+      <section class="sec" id="agents">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <div>
+              <div class="eyebrow">Works with your agent</div>
+              <h2>One command, and your agent can ask why</h2>
+            </div>
+            <p>
+              WhyKit ships a read-only MCP server. Add it to Claude Code, Codex, Cursor or any other MCP client, point it
+              at your vault, and the agent can look up decisions and their sources instead of guessing from the
+              code. It cannot change a single file.
+            </p>
+          </div>
+          <div class="connect reveal">
+            <div class="cx-setup">
+              <div class="cx-tabs" role="tablist" aria-label="Agent">
+                <button type="button" role="tab" aria-selected="true" data-cx="claude">Claude Code</button>
+                <button type="button" role="tab" aria-selected="false" data-cx="codex">Codex</button>
+                <button type="button" role="tab" aria-selected="false" data-cx="cursor">Cursor</button>
+                <button type="button" role="tab" aria-selected="false" data-cx="other">Other MCP clients</button>
+              </div>
+              <div class="cx-pane" data-pane="claude">
+                <div class="code"><b>$</b> uv tool install 'whykit[mcp]'
+<b>$</b> claude mcp add whykit -- whykit-mcp --root /path/to/my-ledger</div>
+              </div>
+              <div class="cx-pane" data-pane="codex" hidden>
+                <div class="code"><b>$</b> uv tool install 'whykit[mcp]'
+<b>$</b> codex mcp add whykit -- whykit-mcp --root /path/to/my-ledger</div>
+              </div>
+              <div class="cx-pane" data-pane="cursor" hidden>
+                <div class="code"><i># .cursor/mcp.json in your project</i>
+{
+  "mcpServers": {
+    "whykit": {
+      "command": "whykit-mcp",
+      "args": ["--root", "/path/to/my-ledger"]
+    }
+  }
+}</div>
+              </div>
+              <div class="cx-pane" data-pane="other" hidden>
+                <div class="code">{
+  "mcpServers": {
+    "whykit": {
+      "command": "/absolute/path/to/whykit-mcp",
+      "args": ["--root", "/absolute/path/to/my-ledger"]
+    }
+  }
+}</div>
+              </div>
+              <p class="cx-note">
+                Each setup was run on 7 Nov 2026. By default the server only returns records labelled
+                <code>internal</code> or lower; <code>--max-sensitivity</code> changes that.
+                <a href="https://github.com/CometWeb-io/whykit/blob/main/docs/mcp.md">MCP guide</a>.
+              </p>
+            </div>
+            <div class="asks">
+              <div class="ask">
+                <span class="q">“Why did we decide this?”</span>
+                <span class="a">Reads the decision, the sources it cites and the record it replaced.</span>
+                <code>context · trace</code>
+              </div>
+              <div class="ask">
+                <span class="q">“What depends on this source?”</span>
+                <span class="a">Lists every decision and note that would be affected if it changed.</span>
+                <code>impact · backlinks</code>
+              </div>
+              <div class="ask">
+                <span class="q">“Give me what I need for this task.”</span>
+                <span class="a">Packs the relevant records into one size-limited bundle, with a preamble written for Claude, Codex or Cursor.</span>
+                <code>query · pack</code>
+              </div>
+              <div class="ask">
+                <span class="q">“Is anything out of date?”</span>
+                <span class="a">Reports overdue reviews, retired sources and lint findings for the whole vault.</span>
+                <code>status</code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sec" id="demo">
+        <div class="wrap">
+          <div class="sec-head center reveal">
+            <div>
+              <div class="eyebrow">A real recording, not a mockup</div>
+              <h2>See the whole ledger in your browser</h2>
+            </div>
+            <p>
+              Explorer is an optional, read-only viewer built from the same Markdown files. This is the Northline
+              example: its decisions, which record replaced which, the sources and what is due for review.
+            </p>
+          </div>
+          <div class="frame demo-frame reveal">
+            <div class="frame-bar">
+              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="url">localhost · WhyKit Explorer</span>
+            </div>
+            <video
+              id="demo-video"
+              src="media/explorer-demo.mp4"
+              poster="media/explorer-demo-poster.jpg"
+              width="1280"
+              height="800"
+              muted
+              loop
+              playsinline
+              preload="metadata"
+              aria-label="Screen recording of WhyKit Explorer browsing the Northline example vault"
+            ></video>
+          </div>
+          <p class="caption reveal" id="demo-caption">
+            <b>Recorded on 7 Nov 2026</b> in real time from a local build of Explorer for
+            <code>examples/northline</code> at commit 73d6833. Nothing is sped up.
+          </p>
+
+          <div class="duo">
+            <figure class="reveal">
+              <div class="frame">
+                <div class="frame-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+                <img
+                  src="media/explorer-chain.jpg"
+                  alt="Explorer showing decision D-011 with its supersession chain D-009, D-010, D-011 and its registered evidence E-013"
+                  width="1600"
+                  height="1000"
+                  loading="lazy"
+                  id="img-chain"
+                />
+              </div>
+              <figcaption>
+                <b>Every decision shows where it came from</b>The sources it cites and the earlier decisions it
+                replaced, in order.
+              </figcaption>
+            </figure>
+            <figure class="reveal">
+              <div class="frame">
+                <div class="frame-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+                <img
+                  src="media/explorer-timeline.jpg"
+                  alt="Explorer timeline showing how long each Northline decision stayed in force"
+                  width="1600"
+                  height="1000"
+                  loading="lazy"
+                  id="img-timeline"
+                />
+              </div>
+              <figcaption>
+                <b>How long each decision held</b>Each bar runs from the day a decision was made to the day a newer
+                one replaced it.
+              </figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section class="sec" id="how">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <div>
+              <div class="eyebrow">How it works</div>
+              <h2>A source, a decision and a date to check again</h2>
+            </div>
+            <p>
+              List your sources, such as an interview, a report or a dashboard, and give each a short ID. A decision is
+              a Markdown note that says what you chose and which sources back it. Nobody edits an approved decision:
+              you write a new one that replaces it, so the history stays readable.
+            </p>
+          </div>
+          <div class="pipe reveal" aria-label="The WhyKit workflow">
+            <div class="rail" aria-hidden="true"><span></span></div>
+            <div class="pnode">
+              <div class="step"><span class="pdot"></span>01 · RECORD</div>
+              <div class="ico"><svg aria-hidden="true"><use href="#i-archive" /></svg></div>
+              <h4>Register a source</h4>
+              <p>Say what it is and where someone can check it.</p>
+              <code>whykit new evidence</code>
+            </div>
+            <div class="pnode">
+              <div class="step"><span class="pdot"></span>02 · DECIDE</div>
+              <div class="ico"><svg aria-hidden="true"><use href="#i-file-text" /></svg></div>
+              <h4>Write the decision</h4>
+              <p>What you chose, why, and what you turned down, with the sources it rests on.</p>
+              <code>whykit new decision</code>
+            </div>
+            <div class="pnode">
+              <div class="step"><span class="pdot"></span>03 · GATE</div>
+              <div class="ico"><svg aria-hidden="true"><use href="#i-git-pr" /></svg></div>
+              <h4>Check every change</h4>
+              <p>The same check runs on your laptop and in every pull request.</p>
+              <code>whykit check --profile ci</code>
+            </div>
+            <div class="pnode">
+              <div class="step"><span class="pdot"></span>04 · REVIEW</div>
+              <div class="ico"><svg aria-hidden="true"><use href="#i-calendar" /></svg></div>
+              <h4>Look again on a date</h4>
+              <p>Every decision has a review date, and WhyKit lists the ones that are due.</p>
+              <code>whykit review list</code>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sec" id="gate">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <div>
+              <div class="eyebrow">When a reason goes stale</div>
+              <h2>Your CI notices before your agent repeats it</h2>
+            </div>
+            <p>
+              Sources get retired and decisions pass their review date. <code>whykit check</code> runs in every pull
+              request and fails when a decision still in force rests on something that no longer holds. Below, a
+              source is retired and the next check fails.
+            </p>
+          </div>
+          <div class="gate-stage reveal">
+            <div class="ledger" id="ledger" aria-hidden="true">
+              <div class="lw">
+                <div class="lw-bar">
+                  <span class="dots"><i></i><i></i><i></i></span>
+                  <span>examples/northline</span>
+                </div>
+                <div class="lw-body" id="lw-body">
+                  <div>
+                    <div class="ftitle">06-decisions/d-011-direct-with-evidence.md</div>
+                    <article class="dcard" id="dcard">
+                      <div class="dc-top">
+                        <span class="dc-id">D-011</span><span class="tag ok sm">approved</span
+                        ><span class="flag">retired evidence</span>
+                      </div>
+                      <h4>Direct to ops directors, evidence recorded</h4>
+                      <div class="fm"><span>supersedes</span><span>D-010</span></div>
+                      <div class="fm"><span>review_by</span><span>2027-02-01</span></div>
+                      <div class="fm"><span>source_ids</span><span class="cite" id="cite">E-013</span></div>
+                    </article>
+                  </div>
+                  <div class="reg">
+                    <div class="ftitle">00-context/evidence-register.md</div>
+                    <div class="row"><b>E-008</b><span>Interview, ops director, Swedish packaging OEM</span><span class="tag ok sm">active</span></div>
+                    <div class="row"><b>E-011</b><span>Delivery capacity review</span><span class="tag ok sm">active</span></div>
+                    <div class="row target" id="row-active">
+                      <b>E-013</b><span>Partner channel review, March–August 2026</span><span class="tag ok sm">active</span>
+                    </div>
+                    <h5>Retired sources</h5>
+                    <div class="row"><b>E-000</b><span>Early HubSpot dashboard (pre-definition)</span><span class="tag mute sm">retired</span></div>
+                    <div class="row slot" id="row-slot"><b></b><span>&nbsp;</span><span></span></div>
+                    <div class="row target retired hidden" id="row-retired">
+                      <b>E-013</b><span>Partner channel review, March–August 2026</span><span class="tag warn sm">retired</span>
+                    </div>
+                  </div>
+                  <svg class="wire" id="wire"><path d="" /></svg>
+                </div>
+              </div>
+              <div class="term">
+                <div class="term-head"><span>terminal · whykit 0.4.0</span><span class="gate" id="gate-badge">ci gate</span></div>
+                <pre id="term"></pre>
+              </div>
+            </div>
+            <p class="hero-note">
+              Staged animation. Records and messages are real WhyKit 0.4.0 output on the Northline example vault.
+            </p>
+          </div>
+
+          <h3 class="gate-sub reveal">Everything the check reports</h3>
+          <div class="vtable reveal" role="table" aria-label="What the gate reports for each kind of change">
+            <div class="vrow head" role="row">
+              <div role="columnheader">What changed</div>
+              <div role="columnheader">Rule</div>
+              <div role="columnheader">What WhyKit says</div>
+            </div>
+            <div class="vrow" role="row">
+              <div class="case" role="cell">
+                <span class="cico"><svg aria-hidden="true"><use href="#i-archive" /></svg></span>A live decision
+                cites a source that was retired
+              </div>
+              <div class="rule" role="cell"><code>evidence.retired</code></div>
+              <div class="verdict" role="cell">
+                <span class="tag warn"><i></i>warning</span
+                ><small>source_ids cites retired evidence E-013; preserve historical records but review current claims</small>
+              </div>
+            </div>
+            <div class="vrow" role="row">
+              <div class="case" role="cell">
+                <span class="cico"><svg aria-hidden="true"><use href="#i-hash" /></svg></span>A decision cites an
+                E-ID the register does not have
+              </div>
+              <div class="rule" role="cell"><code>evidence.missing</code></div>
+              <div class="verdict" role="cell">
+                <span class="tag bad"><i></i>error</span
+                ><small>source_ids cites E-099, but the register has no populated active or retired row for it</small>
+              </div>
+            </div>
+            <div class="vrow" role="row">
+              <div class="case" role="cell">
+                <span class="cico"><svg aria-hidden="true"><use href="#i-pen-off" /></svg></span>Accepted reasoning was
+                edited in a commit
+              </div>
+              <div class="rule" role="cell"><code>whykit history</code></div>
+              <div class="verdict" role="cell">
+                <span class="tag bad"><i></i>fails</span
+                ><small>Historical decision reasoning is append-only. Supersede; do not rewrite</small>
+              </div>
+            </div>
+            <div class="vrow" role="row">
+              <div class="case" role="cell">
+                <span class="cico"><svg aria-hidden="true"><use href="#i-clock" /></svg></span>An approved decision is
+                past its review date
+              </div>
+              <div class="rule" role="cell"><code>review_by.overdue</code></div>
+              <div class="verdict" role="cell">
+                <span class="tag warn"><i></i>warning</span><small>approved document review was due 2026-10-06</small>
+              </div>
+            </div>
+            <div class="vrow" role="row">
+              <div class="case" role="cell">
+                <span class="cico"><svg aria-hidden="true"><use href="#i-unlink" /></svg></span>A wikilink points at a
+                note that does not exist
+              </div>
+              <div class="rule" role="cell"><code>wikilink.missing</code></div>
+              <div class="verdict" role="cell">
+                <span class="tag bad"><i></i>error</span><small>wikilink does not resolve: [[does-not-exist]]</small>
+              </div>
+            </div>
+            <div class="vrow" role="row">
+              <div class="case" role="cell">
+                <span class="cico"><svg aria-hidden="true"><use href="#i-key" /></svg></span>A note contains something
+                shaped like a token
+              </div>
+              <div class="rule" role="cell"><code>secret.detected</code></div>
+              <div class="verdict" role="cell">
+                <span class="tag bad"><i></i>error</span
+                ><small>looks like a GitHub token — keep locations, never secret values</small>
+              </div>
+            </div>
+            <div class="vrow" role="row">
+              <div class="case" role="cell">
+                <span class="cico"><svg aria-hidden="true"><use href="#i-edit" /></svg></span>A decision still holds
+                the template's prompts
+              </div>
+              <div class="rule" role="cell"><code>decision.placeholder</code></div>
+              <div class="verdict" role="cell">
+                <span class="tag warn"><i></i>warning</span
+                ><small>draft decision still has template text or nothing in `## Context`, `## Decision`, … — write the real content</small>
+              </div>
+            </div>
+          </div>
+          <p class="note reveal">
+            The first six were produced by changing a copy of <code>examples/northline</code>; the last by the README
+            quickstart. The full rule list is in
+            <a href="https://github.com/CometWeb-io/whykit/blob/main/docs/rules.md" style="color: var(--soft)"
+              >docs/rules.md ↗</a
+            >.
+          </p>
+
+          <p class="gate-more reveal">
+            The same check runs as a GitHub Action on every pull request.
+            <a href="https://github.com/CometWeb-io/whykit/blob/main/docs/ci.md">Set it up in your repository ↗</a>
+          </p>
+        </div>
+      </section>
+
+      <section class="sec" id="surfaces">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <div>
+              <div class="eyebrow">One vault, several readers</div>
+              <h2>One set of files, three ways to read it</h2>
+            </div>
+            <p>
+              Everything lives in Markdown files in your repository. Explorer, the command line and the MCP server
+              only read them, so there is no second copy to keep in sync. The folder also opens in Obsidian.
+            </p>
+          </div>
+          <div class="cells grid-3 reveal" style="grid-template-columns: repeat(3, minmax(0, 1fr))">
+            <article class="cell surf">
+              <div class="shot">
+                <img
+                  src="media/explorer-home.jpg"
+                  alt="WhyKit Explorer home view for the Northline example vault"
+                  width="1600"
+                  height="1000"
+                  loading="lazy"
+                />
+              </div>
+              <h3 class="ih">
+                <div class="ico sm"><svg aria-hidden="true"><use href="#i-monitor" /></svg></div>
+                Explorer
+              </h3>
+              <p>
+                A static site with no server code. It can also be built as one HTML file that opens from disk.
+              </p>
+            </article>
+            <article class="cell surf">
+              <div class="shot">
+                <pre><b>$</b> <em>whykit status --today 2026-09-17</em>
+documents       57
+decisions       11
+evidence        14 active / 1 retired
+lint            0 error(s), 0 warning(s)
+review queue    1 due within 30 day(s)
+<b>--json</b> on every vault command</pre>
+              </div>
+              <h3 class="ih">
+                <div class="ico sm"><svg aria-hidden="true"><use href="#i-terminal" /></svg></div>
+                CLI
+              </h3>
+              <p>Query, trace, impact and context commands, with versioned JSON output for scripts and CI.</p>
+            </article>
+            <article class="cell surf">
+              <div class="shot">
+                <pre><b>$</b> <em>whykit-mcp --root ./vault</em>
+tools      query · context · impact
+           status · pack · trace
+           backlinks
+resource   whykit://decisions
+ceiling    --max-sensitivity internal
+writes     none</pre>
+              </div>
+              <h3 class="ih">
+                <div class="ico sm"><svg aria-hidden="true"><use href="#i-plug" /></svg></div>
+                MCP server
+              </h3>
+              <p>Gives an agent read-only access to the vault over stdio or loopback HTTP, filtered by a sensitivity ceiling.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="sec" id="install">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <div>
+              <div class="eyebrow">Get started</div>
+              <h2>Start your own ledger</h2>
+            </div>
+            <p>
+              Python 3.11 or newer and <b>uv</b>. These are the README's commands; they were run against WhyKit 0.4.0
+              from PyPI on 7 Nov 2026.
+            </p>
+          </div>
+          <div class="cells grid-3 reveal" style="grid-template-columns: repeat(3, minmax(0, 1fr))">
+            <div class="cell step">
+              <div class="ico"><svg aria-hidden="true"><use href="#i-download" /></svg></div>
+              <div class="num">STEP 1</div>
+              <h3>Install</h3>
+              <p>Install the CLI as a uv tool, then create a vault: a folder of Markdown files.</p>
+              <div class="code"><b>$</b> uv tool install whykit
+<b>$</b> whykit init my-ledger</div>
+            </div>
+            <div class="cell step">
+              <div class="ico"><svg aria-hidden="true"><use href="#i-file-text" /></svg></div>
+              <div class="num">STEP 2</div>
+              <h3>Record</h3>
+              <p>Register a source, then a draft decision that cites it.</p>
+              <div class="code"><b>$</b> whykit new --root my-ledger evidence \
+    --source "Support ticket export, Q3" \
+    --type dataset \
+    --location "https://example.com/exports/q3-tickets.csv" \
+    --claims "Most onboarding tickets mention SSO"
+<b>$</b> whykit new --root my-ledger decision \
+    "Ship SSO before audit logs" \
+    --owner Platform --status draft --source E-001</div>
+            </div>
+            <div class="cell step">
+              <div class="ico"><svg aria-hidden="true"><use href="#i-link-2" /></svg></div>
+              <div class="num">STEP 3</div>
+              <h3>Trace and check</h3>
+              <p>See the link, then lint. Five warnings name the work the template still needs.</p>
+              <div class="code"><b>$</b> whykit trace --root my-ledger --decision D-001
+<i>D-001  06-decisions/d-001-ship-sso-…md  (draft)
+    E-001 active</i>
+<b>$</b> whykit lint --root my-ledger
+<i>24 files — 0 error(s), 5 warning(s)</i></div>
+            </div>
+          </div>
+          <div class="install-ctas reveal">
+            <a class="btn btn-accent" href="https://github.com/CometWeb-io/whykit/blob/main/docs/tutorials/record-and-supersede.md"
+              >First tutorial</a
+            >
+            <a class="btn btn-light" href="https://github.com/CometWeb-io/whykit/blob/main/docs/tutorials/gate-pull-requests.md"
+              >Gate pull requests</a
+            >
+          </div>
+        </div>
+      </section>
+
+      <section class="sec trust" id="trust">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <div>
+              <div class="eyebrow">Built to be checked</div>
+              <h2>Trust it because you can read it</h2>
+            </div>
+            <p>
+              Apache-2.0 code, tests on every push, reproducible builds and a security policy that says what the
+              tool does not protect.
+            </p>
+          </div>
+          <div class="cells grid-3 reveal" style="grid-template-columns: repeat(3, minmax(0, 1fr))">
+            <div class="cell">
+              <div class="ico"><svg aria-hidden="true"><use href="#i-check-circle" /></svg></div>
+              <div class="big" data-count="1791">1791<small>tests</small></div>
+              <h3>Tested on every push</h3>
+              <p>
+                The suite runs on Python 3.11, 3.12, 3.13 and 3.14 and again on Windows, and both example vaults are
+                linted strictly.
+              </p>
+            </div>
+            <div class="cell">
+              <div class="ico"><svg aria-hidden="true"><use href="#i-package" /></svg></div>
+              <div class="big">stdlib<small>only</small></div>
+              <h3>No runtime dependencies</h3>
+              <p>
+                The core package uses the standard library alone. CI builds an SBOM of the installed wheel and fails if
+                anything else appears in it.
+              </p>
+            </div>
+            <div class="cell">
+              <div class="ico"><svg aria-hidden="true"><use href="#i-refresh" /></svg></div>
+              <div class="big">2×<small>same bytes</small></div>
+              <h3>Reproducible builds</h3>
+              <p>CI builds the wheel and source distribution twice from one commit and requires identical bytes.</p>
+            </div>
+            <div class="cell">
+              <div class="ico"><svg aria-hidden="true"><use href="#i-wifi-off" /></svg></div>
+              <div class="big">Offline<small>by test</small></div>
+              <h3>Nothing phones home</h3>
+              <p>
+                A test breaks the socket layer and runs every vault command. There is no telemetry, account or service.
+              </p>
+            </div>
+            <div class="cell">
+              <div class="ico"><svg aria-hidden="true"><use href="#i-lock" /></svg></div>
+              <div class="big">OIDC<small>no stored token</small></div>
+              <h3>Trusted publishing</h3>
+              <p>
+                Releases reach PyPI from a tag-triggered workflow with PEP 740 attestations. No PyPI token is stored in
+                the repository.
+              </p>
+            </div>
+            <div class="cell">
+              <div class="ico"><svg aria-hidden="true"><use href="#i-git-pr" /></svg></div>
+              <div class="big">SHA<small>pinned actions</small></div>
+              <h3>Audited automation</h3>
+              <p>
+                Every workflow action is pinned to a commit, workflows are audited with zizmor and history is scanned
+                for secrets with gitleaks.
+              </p>
+            </div>
+          </div>
+          <div class="timeline reveal" aria-label="Release history">
+            <div><b>0.1.0</b>17 Sep 2026 · first tag</div>
+            <div><b>0.3.1</b>26 Oct 2026 · first on PyPI</div>
+            <div><b>0.3.4</b>3 Nov 2026</div>
+            <div class="now"><b>0.4.0</b>5 Nov 2026 · current</div>
+          </div>
+          <div class="badges reveal">
+            <img
+              src="https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml/badge.svg"
+              alt="CI status"
+              width="90"
+              height="20"
+              loading="lazy"
+            />
+            <span>Live CI status from GitHub</span>
+            <span aria-hidden="true">·</span>
+            <a href="https://github.com/CometWeb-io/whykit/blob/main/SECURITY.md">Security policy ↗</a>
+            <span aria-hidden="true">·</span>
+            <a href="https://github.com/CometWeb-io/whykit/blob/main/docs/security-model.md">Security model ↗</a>
+            <span aria-hidden="true">·</span>
+            <a href="https://github.com/CometWeb-io/whykit/blob/main/CHANGELOG.md">Full changelog ↗</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="sec" id="limits">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <div>
+              <div class="eyebrow">What it won't claim</div>
+              <h2>Honest about its limits</h2>
+            </div>
+            <p>These limits are part of the product contract, not small print.</p>
+          </div>
+          <div class="cells grid-4 reveal" style="grid-template-columns: repeat(4, minmax(0, 1fr))">
+            <div class="cell">
+              <div class="num ihead">
+                <div class="ico muted"><svg aria-hidden="true"><use href="#i-check-circle" /></svg></div>
+                <span>01</span>
+              </div>
+              <h3>It informs, it does not decide</h3>
+              <p>A clean check says a decision cites its sources. It cannot say the source is honest or the decision right, and an agent can still ignore what it reads.</p>
+            </div>
+            <div class="cell">
+              <div class="num ihead">
+                <div class="ico muted"><svg aria-hidden="true"><use href="#i-eye-off" /></svg></div>
+                <span>02</span>
+              </div>
+              <h3>No watching on its own</h3>
+              <p>WhyKit does not check external sources for changes. It reports passed review dates; the re-read is yours.</p>
+            </div>
+            <div class="cell">
+              <div class="num ihead">
+                <div class="ico muted"><svg aria-hidden="true"><use href="#i-lock" /></svg></div>
+                <span>03</span>
+              </div>
+              <h3>Labels are not permissions</h3>
+              <p>
+                Sensitivity labels filter what the MCP server returns. Repository permissions are the only access
+                control, so keep real vaults private.
+              </p>
+            </div>
+            <div class="cell">
+              <div class="num ihead">
+                <div class="ico muted"><svg aria-hidden="true"><use href="#i-flask" /></svg></div>
+                <span>04</span>
+              </div>
+              <h3>Public alpha</h3>
+              <p>
+                Version 0.4 adds optional note types older clients do not understand. Read the feature status and the
+                upgrade guide first.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="final">
+        <div class="wrap reveal">
+          <h2>Give your agents the reasons</h2>
+          <p>Connect it to your agent, ask about a decision in the Northline example, then start a ledger for the decisions you will be asked about later.</p>
+          <div class="ctas">
+            <a class="btn btn-accent" href="#agents">Connect your agent</a>
+            <a class="btn btn-light" href="https://github.com/CometWeb-io/whykit">
+              <svg width="16" height="16" aria-hidden="true"><use href="#i-gh" /></svg>View on GitHub
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <span>WhyKit · Apache-2.0 · © 2026 Maciej Zmitrukiewicz · <a href="https://cometweb.io">CometWeb</a></span>
+        <nav aria-label="Footer">
+          <a href="https://github.com/CometWeb-io/whykit/blob/main/docs/README.md">Docs</a>
+          <a href="https://github.com/CometWeb-io/whykit/blob/main/docs/cli.md">CLI reference</a>
+          <a href="https://pypi.org/project/whykit/">PyPI</a>
+          <a href="https://github.com/CometWeb-io/whykit/blob/main/CHANGELOG.md">Changelog</a>
+          <a href="https://github.com/CometWeb-io/whykit/blob/main/SECURITY.md">Security</a>
+          <a href="https://github.com/CometWeb-io/whykit/blob/main/CONTRIBUTING.md">Contributing</a>
+        </nav>
+      </div>
+    </footer>
+
+    <script>
+      (function () {
+        "use strict";
+        var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        function esc(t) {
+          return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+
+        /* copy install command */
+        var copyBtn = document.getElementById("copy-cmd");
+        copyBtn.addEventListener("click", function () {
+          var text = document.getElementById("cmd-text").textContent.trim();
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(
+              function () {
+                copyBtn.style.color = "var(--accent)";
+                setTimeout(function () {
+                  copyBtn.style.color = "";
+                }, 1200);
+              },
+              function () {}
+            );
+          }
+        });
+
+        /* ---------- hero ledger ----------
+           A staged replay of a real session on examples/northline (WhyKit 0.4.0):
+           the decision's citation resolves, the source is retired, the gate fails.
+           The output lines are copied from that session; see media/cli-session.txt. */
+        var ledger = document.getElementById("ledger");
+        var body = document.getElementById("lw-body");
+        var wire = document.getElementById("wire");
+        var cite = document.getElementById("cite");
+        var dcard = document.getElementById("dcard");
+        var rowActive = document.getElementById("row-active");
+        var rowSlot = document.getElementById("row-slot");
+        var rowRetired = document.getElementById("row-retired");
+        var gate = document.getElementById("gate-badge");
+        var term = document.getElementById("term");
+
+        var SCRIPT = [
+          { cmd: "whykit check --profile ci --today 2026-09-17" },
+          { out: '<span class="ok">WhyKit ci gate — PASS</span>' },
+          { out: "  OK   lint   57 files, 0 errors, 0 warnings", gate: "pass" },
+          { pause: 1300, link: true },
+          { cmd: 'whykit evidence retire E-013 --why "Partner report double-counted meetings"' },
+          { out: "retired E-013; 1 current and 1 historical reference(s)", retire: true },
+          { pause: 1500 },
+          { cmd: "whykit check --profile ci --today 2026-09-17" },
+          { out: '<span class="x">WhyKit ci gate — FAIL</span>', gate: "fail" },
+          { out: '  <span class="x">FAIL</span> lint   57 files, 0 errors, 1 warnings' },
+          {
+            out:
+              '  <span class="w">warning</span> d-011-direct-with-evidence.md:1 [evidence.retired] source_ids cites retired evidence E-013',
+            bad: true,
+          },
+        ];
+
+        var lines = [];
+        function render(typing) {
+          term.innerHTML = lines.slice(-7).join("\n") + (typing !== undefined ? typing : "");
+          term.scrollTop = term.scrollHeight;
+        }
+        function cmdLine(t) {
+          return '<span class="p">$</span> <span class="c">' + esc(t) + "</span>";
+        }
+
+        function drawWire() {
+          var target = rowRetired.classList.contains("hidden") ? rowActive : rowRetired;
+          var base = body.getBoundingClientRect();
+          var a = cite.getBoundingClientRect();
+          var b = target.getBoundingClientRect();
+          // In the one-column layout the register sits under the card and a
+          // wire would cross other rows, so only the highlights carry the link.
+          var stacked = b.top > a.bottom + 4 && b.left < a.right;
+          wire.style.display = stacked ? "none" : "";
+          var d = "";
+          if (!stacked) {
+            var sx = a.right - base.left,
+              sy = a.top + a.height / 2 - base.top;
+            var ex = b.left - base.left,
+              ey = b.top + b.height / 2 - base.top;
+            var mx = (sx + ex) / 2;
+            d = "M" + sx + " " + sy + " C" + mx + " " + sy + " " + mx + " " + ey + " " + ex + " " + ey;
+          }
+          wire.querySelector("path").setAttribute("d", d);
+        }
+
+        function state(s) {
+          if (s === "reset") {
+            ledger.classList.remove("linked", "broken");
+            wire.classList.remove("on", "warn");
+            dcard.classList.remove("bad");
+            rowActive.classList.remove("gone", "lit", "hidden");
+            rowSlot.classList.remove("hidden");
+            rowRetired.classList.add("hidden");
+            rowRetired.classList.remove("lit");
+            gate.className = "gate";
+            gate.textContent = "ci gate";
+            lines = [];
+            render("");
+          }
+          if (s === "link") {
+            drawWire();
+            ledger.classList.add("linked");
+            wire.classList.add("on");
+            rowActive.classList.add("lit");
+          }
+          if (s === "retire") {
+            rowActive.classList.add("gone");
+            ledger.classList.remove("linked");
+          }
+          if (s === "retired") {
+            rowActive.classList.add("hidden");
+            rowSlot.classList.add("hidden");
+            rowRetired.classList.remove("hidden");
+            ledger.classList.add("broken");
+            wire.classList.add("warn");
+            drawWire();
+          }
+          if (s === "pass") {
+            gate.className = "gate pass";
+            gate.textContent = "PASS";
+          }
+          if (s === "fail") {
+            gate.className = "gate fail";
+            gate.textContent = "FAIL";
+          }
+          if (s === "bad") dcard.classList.add("bad");
+        }
+
+        var timers = [];
+        function at(ms, fn) {
+          timers.push(setTimeout(fn, ms));
+        }
+        function play() {
+          state("reset");
+          var t = 500;
+          SCRIPT.forEach(function (step) {
+            if (step.cmd) {
+              var text = step.cmd;
+              var per = Math.max(14, Math.min(34, 1100 / text.length));
+              for (var i = 1; i <= text.length; i++) {
+                (function (n) {
+                  at(t + n * per, function () {
+                    render((lines.length ? "\n" : "") + cmdLine(text.slice(0, n)) + '<span class="caret"></span>');
+                  });
+                })(i);
+              }
+              t += text.length * per + 380;
+              at(t, function () {
+                lines.push(cmdLine(text));
+                render("");
+              });
+              t += 260;
+            } else if (step.out) {
+              at(t, function () {
+                lines.push(step.out);
+                render("");
+                if (step.gate) state(step.gate);
+                if (step.retire) {
+                  state("retire");
+                  at(520, function () {
+                    state("retired");
+                  });
+                }
+                if (step.bad) state("bad");
+              });
+              t += 170;
+            }
+            if (step.pause) {
+              if (step.link)
+                at(t + 200, function () {
+                  state("link");
+                });
+              t += step.pause;
+            }
+          });
+          t += 4200;
+          at(t, function () {
+            ledger.classList.add("fade");
+          });
+          at(t + 600, function () {
+            ledger.classList.remove("fade");
+            play();
+          });
+        }
+        function finalStatic() {
+          state("reset");
+          lines = [];
+          SCRIPT.forEach(function (step) {
+            if (step.cmd) lines.push(cmdLine(step.cmd));
+            if (step.out) lines.push(step.out);
+          });
+          render("");
+          rowActive.classList.add("hidden");
+          rowSlot.classList.add("hidden");
+          rowRetired.classList.remove("hidden");
+          ledger.classList.add("broken");
+          wire.classList.add("on", "warn");
+          state("fail");
+          state("bad");
+          drawWire();
+        }
+        var heroPlaying = false;
+        if (reduce) {
+          finalStatic();
+        } else if ("IntersectionObserver" in window) {
+          new IntersectionObserver(function (entries, obs) {
+            if (entries[0].isIntersecting && !heroPlaying) {
+              heroPlaying = true;
+              obs.disconnect();
+              play();
+            }
+          }).observe(ledger);
+        } else {
+          play();
+        }
+        window.addEventListener("resize", function () {
+          if (wire.classList.contains("on")) drawWire();
+        });
+
+        /* ---------- hero: an agent asks, WhyKit answers ----------
+           The three hosts were each run against examples/northline through
+           whykit-mcp on 7 Nov 2026; see media/agent-sessions.md. */
+        var hv = document.getElementById("hv");
+        var hvQ = document.getElementById("hv-q");
+        var hvDot = document.getElementById("hv-dot");
+        var hvCard = document.getElementById("hv-card");
+        var HOSTS = ["claude", "codex", "cursor"];
+        var ASK = {
+          claude: { q: "Can the headline say AI?", id: "D-006", state: "live", h: ["Keep AI out of", "the headline"], ev: "E-004", fact: "7 of 9 lost to IT tools" },
+          codex: { q: "Can we run paid ads?", id: "D-003", state: "review due", h: ["No paid ads until", "30 organic demos"], ev: "E-010", fact: "Aug: 6 organic demos" },
+          cursor: { q: "Why not partners?", id: "D-011", state: "live", h: ["Sell direct, not", "through partners"], ev: "E-013", fact: "3 meetings, 0 leads" },
+        };
+        function hvSet(id, t) {
+          document.getElementById(id).textContent = t;
+        }
+        function hvAsk(host) {
+          var a = ASK[host];
+          hvSet("hv-qt", a.q);
+          var qt = document.getElementById("hv-qt");
+          var w = Math.ceil(qt.getComputedTextLength()) + 32;
+          var r = hvQ.querySelector("rect");
+          r.setAttribute("width", w);
+          r.setAttribute("x", 300 - w / 2);
+        }
+        function hvAnswer(host) {
+          var a = ASK[host];
+          hvSet("hv-id", a.id);
+          hvSet("hv-state", "● " + a.state);
+          document.getElementById("hv-state").classList.toggle("due", a.state !== "live");
+          hvSet("hv-h1", a.h[0]);
+          hvSet("hv-h2", a.h[1]);
+          hvSet("hv-because", "because " + a.ev);
+          hvSet("hv-fact", a.fact);
+          Array.prototype.forEach.call(hvCard.querySelectorAll("text"), function (t) {
+            t.classList.remove("fade");
+          });
+        }
+        function hvEl(sel) {
+          return hv.querySelector(sel);
+        }
+        function hvClear() {
+          hvQ.classList.remove("on");
+          void hvQ.getBBox();
+          Array.prototype.forEach.call(hv.querySelectorAll(".on"), function (e) {
+            e.classList.remove("on");
+          });
+        }
+        function hvMove(path, ms, done) {
+          var len = path.getTotalLength();
+          var t0 = performance.now();
+          function step(now) {
+            var k = Math.min(1, (now - t0) / ms);
+            var e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+            var pt = path.getPointAtLength(len * e);
+            hvDot.style.opacity = 1;
+            hvDot.setAttribute("cx", pt.x);
+            hvDot.setAttribute("cy", pt.y);
+            if (k < 1) requestAnimationFrame(step);
+            else if (done) done();
+          }
+          requestAnimationFrame(step);
+        }
+        function hvShow(host, animate) {
+          hvClear();
+          var tile = hvEl('[data-agent="' + host + '"]');
+          var wire = hvEl('[data-wire="' + host + '"]');
+          var out = hvEl('[data-wire="out"]');
+          tile.classList.add("on");
+          hvAsk(host);
+          hvQ.classList.add("on");
+          Array.prototype.forEach.call(hvCard.querySelectorAll("text"), function (t) {
+            t.classList.add("fade");
+          });
+          wire.classList.add("on");
+          if (!animate) {
+            hvAnswer(host);
+            out.classList.add("on");
+            hvCard.classList.add("on");
+            return;
+          }
+          hvMove(wire, 900, function () {
+            out.classList.add("on");
+            hvMove(out, 350, function () {
+              hvAnswer(host);
+              hvCard.classList.add("on");
+              hvDot.style.opacity = 0;
+            });
+          });
+        }
+        if (reduce) {
+          hvShow("claude", false);
+        } else {
+          var hvI = 0;
+          hvShow(HOSTS[0], true);
+          setInterval(function () {
+            hvI = (hvI + 1) % HOSTS.length;
+            hvShow(HOSTS[hvI], true);
+          }, 3400);
+        }
+
+        /* ---------- connect tabs ---------- */
+        var cxTabs = document.querySelectorAll(".cx-tabs button");
+        Array.prototype.forEach.call(cxTabs, function (b) {
+          b.addEventListener("click", function () {
+            var k = b.getAttribute("data-cx");
+            Array.prototype.forEach.call(cxTabs, function (o) {
+              o.setAttribute("aria-selected", o === b ? "true" : "false");
+            });
+            Array.prototype.forEach.call(document.querySelectorAll(".cx-pane"), function (p) {
+              p.hidden = p.getAttribute("data-pane") !== k;
+            });
+          });
+        });
+
+        /* ---------- reveal on scroll ---------- */
+        var reveals = document.querySelectorAll(".reveal");
+        if (reduce || !("IntersectionObserver" in window)) {
+          Array.prototype.forEach.call(reveals, function (el) {
+            el.classList.add("in");
+          });
+        } else {
+          var io = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (en) {
+                if (en.isIntersecting) {
+                  en.target.classList.add("in");
+                  io.unobserve(en.target);
+                }
+              });
+            },
+            { rootMargin: "0px 0px -8% 0px" }
+          );
+          Array.prototype.forEach.call(reveals, function (el) {
+            io.observe(el);
+          });
+        }
+
+        /* ---------- demo video plays only while visible ---------- */
+        var vid = document.getElementById("demo-video");
+        if (vid && !reduce && "IntersectionObserver" in window) {
+          new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (en) {
+                if (en.isIntersecting) {
+                  var p = vid.play();
+                  if (p && p.catch) p.catch(function () {});
+                } else {
+                  vid.pause();
+                }
+              });
+            },
+            { threshold: 0.35 }
+          ).observe(vid);
+        } else if (vid) {
+          vid.setAttribute("controls", "");
+        }
+
+        /* ---------- count-up numbers ---------- */
+        var counters = document.querySelectorAll(".fact .n, .trust .big[data-count]");
+        function countUp(el) {
+          var node = el.firstChild;
+          if (!node || node.nodeType !== 3) return;
+          var target = parseInt(node.nodeValue, 10);
+          if (isNaN(target) || target === 0) return;
+          var start = performance.now();
+          (function step(now) {
+            var k = Math.min(1, (now - start) / 900);
+            node.nodeValue = String(Math.round(target * (1 - Math.pow(1 - k, 3))));
+            if (k < 1) requestAnimationFrame(step);
+          })(start);
+        }
+        if (!reduce && "IntersectionObserver" in window) {
+          var co = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (en) {
+                if (en.isIntersecting) {
+                  countUp(en.target);
+                  co.unobserve(en.target);
+                }
+              });
+            },
+            { threshold: 0.6 }
+          );
+          Array.prototype.forEach.call(counters, function (el) {
+            co.observe(el);
+          });
+        }
+
+        /* ---------- pipeline: steps light up in order ---------- */
+        var pipe = document.querySelector(".pipe");
+        var pnodes = pipe ? Array.prototype.slice.call(pipe.querySelectorAll(".pnode")) : [];
+        var rail = pipe ? pipe.querySelector(".rail") : null;
+        function dotX(node) {
+          var d = node.querySelector(".pdot");
+          return d.getBoundingClientRect().left + d.offsetWidth / 2 - pipe.getBoundingClientRect().left;
+        }
+        function placeRail() {
+          if (!rail || !pnodes.length) return;
+          var x0 = dotX(pnodes[0]);
+          var x1 = dotX(pnodes[pnodes.length - 1]);
+          rail.style.left = x0 + "px";
+          rail.style.width = x1 - x0 + "px";
+        }
+        function setStep(i) {
+          pnodes.forEach(function (n, k) {
+            n.classList.toggle("past", k < i);
+            n.classList.toggle("active", k === i);
+          });
+          if (rail && pnodes.length) {
+            var span = dotX(pnodes[pnodes.length - 1]) - dotX(pnodes[0]);
+            var w = i <= 0 ? 0 : dotX(pnodes[i]) - dotX(pnodes[0]);
+            rail.firstElementChild.style.width = span > 0 ? (w / span) * 100 + "%" : "0";
+          }
+        }
+        if (pipe) {
+          placeRail();
+          window.addEventListener("resize", placeRail);
+          if (reduce) {
+            pnodes.forEach(function (n) {
+              n.classList.add("past");
+            });
+          } else {
+            var stepI = -1,
+              stepTimer = null;
+            var tick = function () {
+              stepI = stepI >= pnodes.length - 1 ? 0 : stepI + 1;
+              setStep(stepI);
+              stepTimer = setTimeout(tick, stepI === pnodes.length - 1 ? 2600 : 1300);
+            };
+            new IntersectionObserver(
+              function (entries) {
+                if (entries[0].isIntersecting) {
+                  if (!stepTimer) {
+                    pipe.classList.add("playing");
+                    tick();
+                  }
+                } else if (stepTimer) {
+                  clearTimeout(stepTimer);
+                  stepTimer = null;
+                }
+              },
+              { threshold: 0.4 }
+            ).observe(pipe);
+          }
+        }
+      })();
+    </script>
+  </body>
+</html>
