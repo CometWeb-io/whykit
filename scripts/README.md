@@ -111,6 +111,18 @@ only.
 the repository root. `check_commit_attribution.py` fails CI when a commit
 identity or trailer names a code-generation tool instead of a person.
 
+## `build-site.sh`
+
+Assembles the GitHub Pages landing page from `site/` into one directory
+(default `_site/`, which Git ignores) and adds `.nojekyll`. The `pages.yml`
+workflow runs it on pushes to `main` that touch `site/`. It reads nothing
+outside `site/` and runs no WhyKit code.
+
+```bash
+bash scripts/build-site.sh /tmp/whykit-site
+python3 -m http.server --directory /tmp/whykit-site 8000
+```
+
 ## Git hooks
 
 ```bash
