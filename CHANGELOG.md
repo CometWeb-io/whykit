@@ -5,6 +5,18 @@ All notable changes to WhyKit are documented here. The format follows
 semantic versioning, where the **data contract** is the public API alongside the
 CLI and the lint rule codes.
 
+## [Unreleased]
+
+### Added
+
+- The MCP `query` tool accepts `ranking`: `substring` (default, unchanged),
+  `auto` (exact phrase first, BM25 over any of its words when the phrase
+  matches nothing) or `bm25`. Responses report the ranking used in
+  `query.ranking`, and a multi-word phrase with no exact match carries a
+  `query.hint` suggesting `auto`, because agents tend to send loose keywords
+  that rarely occur as one exact phrase. Sensitivity filtering and cursor
+  binding apply to every ranking.
+
 ## [0.4.0] - 2026-11-05
 
 ### Added
@@ -1134,7 +1146,7 @@ Initial implementation. No package was published under this version.
   rules and common secret leaks.
 - JSON Schemas, a worked example vault, and an optional local Explorer.
 
-[Unreleased]: https://github.com/CometWeb-io/whykit/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/CometWeb-io/whykit/compare/v0.4.0...HEAD
 [0.3.2]: https://github.com/CometWeb-io/whykit/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/CometWeb-io/whykit/tree/v0.3.1
 [0.3.0]: https://github.com/CometWeb-io/whykit/tree/v0.3.0
