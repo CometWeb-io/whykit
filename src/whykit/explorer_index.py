@@ -120,6 +120,13 @@ def _public_payload(payload: dict, index: VaultIndex, *, reasons: dict[str, set[
             continue
         raw = Note(note.path, note.text)
         raw.masked = note.text
+        # Code is scanned for links so a hidden target named in an example
+        # still withholds the note. A link that resolves to nothing is only a
+        # reason to withhold when it is a real link: a syntax example such as
+        # `[[path/to/note]]` points at no record and lint does not treat it as
+        # a link either.
+        live_wikilinks = {target for target, _, _ in note.wikilink_hits}
+        live_markdown_links = {target for _, target, _ in note.markdown_link_hits}
         dependencies: set[str] = set()
         for target, _, _ in raw.wikilink_hits:
             if target.startswith(("https://", "http://")):
@@ -130,7 +137,8 @@ def _public_payload(payload: dict, index: VaultIndex, *, reasons: dict[str, set[
             except (OSError, ValueError, RuntimeError):
                 target_id, ambiguous = None, False
             if ambiguous or target_id is None:
-                withhold(key, "unresolved_or_ambiguous_wikilink")
+                if ambiguous or target in live_wikilinks:
+                    withhold(key, "unresolved_or_ambiguous_wikilink")
             else:
                 dependencies.add(target_id)
         for _, target, _ in raw.markdown_link_hits:
@@ -140,7 +148,8 @@ def _public_payload(payload: dict, index: VaultIndex, *, reasons: dict[str, set[
             except (OSError, ValueError, RuntimeError):
                 target_id = None
             if target_id is None:
-                withhold(key, "unclassified_attachment_or_missing_markdown_link")
+                if target in live_markdown_links:
+                    withhold(key, "unclassified_attachment_or_missing_markdown_link")
             else:
                 dependencies.add(target_id)
         text = "\n".join(value if isinstance(value, str) else "\n".join(map(str, value)) if isinstance(value, list) else str(value) for value in docs[key].values())
