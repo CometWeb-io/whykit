@@ -79,6 +79,21 @@ class PublicExportTests(unittest.TestCase):
         private = json.dumps(build_explorer_index(self.vault, private=True))
         self.assertIn("PRIVATE-BODY-MARKER", private)
 
+    def test_link_syntax_examples_in_code_do_not_withhold_a_public_note(self) -> None:
+        self.note("inline-example", "public", "Write links as `[[path/to/note|Readable label]]`. INLINE-EXAMPLE-CANARY")
+        self.note("fenced-example", "public", "```md\n[[path/to/note]]\n[label](path/to/file.md)\n```\nFENCED-EXAMPLE-CANARY")
+        self.note("hub", "public", "[[07-research/inline-example]] [[07-research/fenced-example]] HUB-CANARY")
+        raw = json.dumps(build_explorer_index(self.vault))
+        for marker in ("INLINE-EXAMPLE-CANARY", "FENCED-EXAMPLE-CANARY", "HUB-CANARY"):
+            self.assertIn(marker, raw)
+
+    def test_northline_example_exports_every_note_publicly(self) -> None:
+        from whykit.explorer_index import build_publication_preview
+
+        preview = build_publication_preview(ROOT / "examples/northline")
+        self.assertEqual(preview["withheld"], [])
+        self.assertEqual(preview["public_docs"], preview["total_docs"])
+
     def test_markdown_links_and_unclassified_attachments_cannot_leak(self) -> None:
         self.note("hidden-url-marker", "confidential", "CONFIDENTIAL-MARKER")
         self.note("markdown-reference", "public", "[read](hidden-url-marker.md)")
