@@ -76,6 +76,7 @@ HTTP_REQUEST_BURST = 60
 HTTP_REQUESTS_PER_SECOND = 2
 HTTP_BODY_TIMEOUT_SECONDS = 30
 
+QUERY_RANKINGS = ("auto", "substring", "bm25")
 TOOL_NAMES = ("query", "context", "impact", "status", "pack", "trace", "backlinks")
 RECORD_TEMPLATE = "whykit://record/{+target}"
 DECISIONS_URI = "whykit://decisions"
@@ -794,8 +795,10 @@ class VaultTools:
         source_id: str | None = None,
         canonical_only: bool = False,
         cursor: str | None = None,
+        ranking: str | None = None,
     ) -> dict:
         from whykit.query import query_vault
+        from whykit.retrieval import _tokens
 
         text = _validate_text(text, "text", max_chars=MAX_TEXT_CHARS)
         limit = _validate_int(limit, "limit", minimum=0, maximum=MAX_MCP_RESULTS)
@@ -808,29 +811,56 @@ class VaultTools:
         if source_id is not None and not _EVIDENCE_RE.fullmatch(source_id):
             raise ToolFailure("invalid_argument", "source_id must be an E-NNN identifier")
         canonical_only = _validate_bool(canonical_only, "canonical_only")
+        requested = _validate_text(ranking, "ranking", max_chars=MAX_FILTER_CHARS) or "substring"
+        if requested not in QUERY_RANKINGS:
+            raise ToolFailure("invalid_argument", f"ranking must be one of {', '.join(QUERY_RANKINGS)}")
         self._check_vault()
-        report = query_vault(
-            self.vault,
-            text=text,
-            doc_type=doc_type,
-            status=status,
-            owner=owner,
-            tag=tag,
-            source_id=source_id,
-            canonical_only=canonical_only,
-            # Rank every visible match; the page is cut below.
-            limit=1_000_000_000,
-            allowed_sensitivities=self.allowed,
-            vault=self.visible_index(),
-        )
-        binding = [text, doc_type, status, owner, tag, source_id, canonical_only, limit]
+        visible = self.visible_index()
+
+        def run(mode: str) -> dict:
+            return query_vault(
+                self.vault,
+                text=text,
+                doc_type=doc_type,
+                status=status,
+                owner=owner,
+                tag=tag,
+                source_id=source_id,
+                canonical_only=canonical_only,
+                # Rank every visible match; the page is cut below.
+                limit=1_000_000_000,
+                allowed_sensitivities=self.allowed,
+                vault=visible,
+                ranking=mode,
+            )
+
+        # BM25 needs at least one word; an empty query keeps listing every
+        # visible document. `auto` keeps the exact-phrase result when it has
+        # one and falls back to BM25 (any word) only when the phrase matched
+        # nothing. The default stays `substring`, so a phrase that matches
+        # nothing still returns nothing unless the caller opts in.
+        has_terms = bool(text and _tokens(text))
+        if requested == "bm25" and has_terms:
+            used = "bm25"
+            report = run(used)
+        else:
+            used = "substring"
+            report = run(used)
+            if requested == "auto" and has_terms and report["total"] == 0:
+                used = "bm25"
+                report = run(used)
+        binding = [text, doc_type, status, owner, tag, source_id, canonical_only, limit, requested]
+        query_meta = {**report["query"], "limit": limit, "ranking": used, "ranking_requested": requested}
+        if used == "substring" and report["total"] == 0 and text and len(set(_tokens(text))) > 1:
+            # Agents often send loose keywords; tell them how to widen the search.
+            query_meta["hint"] = "no document contains this exact phrase; retry with ranking='auto' to match any of its words"
         results, next_cursor, _ = self.cursors.page(
             report["results"], scope="query", binding=binding,
             keys=(item["path"] for item in report["results"]), cursor=cursor, limit=limit,
         )
         return {
             **report,
-            "query": {**report["query"], "limit": limit},
+            "query": query_meta,
             "returned": len(results),
             "results": results,
             "next_cursor": next_cursor,
@@ -1812,6 +1842,14 @@ def build_server(
         source_id: Annotated[str, Field(description="Only documents citing this E-NNN.", max_length=MAX_FILTER_CHARS)] = "",
         canonical_only: Annotated[bool, Field(description="Only `source_of_truth: true` documents.")] = False,
         cursor: Cursor = "",
+        ranking: Annotated[str, Field(
+            description=(
+                "substring (default): the exact phrase only. auto: the exact phrase first; if it "
+                "matches nothing, rank documents containing any of its words (BM25) — use this "
+                "for keyword searches. bm25: any word, ranked."
+            ),
+            max_length=MAX_FILTER_CHARS,
+        )] = "substring",
     ):
         """Ranked metadata and text search over documents within the sensitivity ceiling.
 
@@ -1821,7 +1859,7 @@ def build_server(
         return respond(
             "query", text=text, limit=limit, doc_type=type or None, status=status or None,
             owner=owner or None, tag=tag or None, source_id=source_id or None,
-            canonical_only=canonical_only, cursor=cursor or None,
+            canonical_only=canonical_only, cursor=cursor or None, ranking=ranking or None,
         )
 
     @mcp.tool(title="Read one record with its evidence", annotations=read_only)

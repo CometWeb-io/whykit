@@ -184,6 +184,7 @@ accepted and reduced to the cap; "minimum" values below the bound are rejected.
 | | `source_id` | string | `""` | must be `E-NNN` when set |
 | | `canonical_only` | boolean | `false` | |
 | | `cursor` | string | `""` (first page) | `next_cursor` of the previous page; ≤ 128 chars |
+| | `ranking` | string | `"substring"` | `substring` (exact phrase), `auto` (exact phrase, else BM25 over any word) or `bm25` |
 | `context` | `target` | string | required | target rules below |
 | | `max_chars` | integer | `4000` | minimum 0; clamped to 50,000 |
 | `impact` | `target` | string | required | target rules below |
@@ -210,7 +211,7 @@ Unknown extra arguments are ignored.
 
 | Tool | Returns |
 | --- | --- |
-| `query` | Ranked document summaries (path, title, status, owner, evidence IDs), no bodies; `total` counts every match, `results` holds one page of at most `limit`, `next_cursor` continues it |
+| `query` | Ranked document summaries (path, title, status, owner, evidence IDs), no bodies; `total` counts every match, `results` holds one page of at most `limit`, `next_cursor` continues it; `query.ranking` names the ranking actually used, and `query.hint` suggests `ranking='auto'` when a multi-word phrase matched nothing |
 | `context` | One record: body (marked `content_trust: "untrusted_data"`), cited evidence, backlinks, supersession, lint findings. A body over `max_chars` drops its front matter first (`front_matter_omitted: true`) |
 | `impact` | Reverse dependencies of an E-NNN, D-NNN or document |
 | `status` | Lint counts, review queue and document states; never the host path of the vault |
