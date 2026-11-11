@@ -153,12 +153,31 @@ class PinnedAndLeastPrivilegeTests(unittest.TestCase):
         self.assertEqual(triggers.strip(), 'push:\n    tags: ["v*"]')
         self.assertNotIn("enable-cache: true", text)
         # No other workflow may hold the OIDC permission PyPI trusts.
+        # The one exception is the Pages deploy job, which the deployment API
+        # requires to hold an OIDC token; it is confined to that job below.
         for path in WORKFLOWS:
             if path.name != "release.yml":
                 text = path.read_text(encoding="utf-8")
                 with self.subTest(file=path.name):
-                    self.assertNotRegex(text, r"(?m)^\s*id-token:\s*write")
                     self.assertNotIn("pypi-publish", text)
+                    if path.name == "pages.yml":
+                        self._assert_pages_oidc_is_confined(text)
+                    else:
+                        self.assertNotRegex(text, r"(?m)^\s*id-token:\s*write")
+
+    def _assert_pages_oidc_is_confined(self, text: str) -> None:
+        self.assertNotRegex("\n".join(_block(text, "permissions")), r"id-token")
+        jobs = _children(_block(text, "jobs"), 2)
+        holders = [name for name, lines in jobs.items() if re.search(r"(?m)^\s*id-token:\s*write", "\n".join(lines))]
+        self.assertEqual(holders, ["deploy"])
+        deploy = "\n".join(jobs["deploy"])
+        self.assertIn("name: github-pages", deploy)
+        self.assertNotIn("actions/checkout", deploy)
+        self.assertNotRegex(deploy, r"(?m)^\s*run:")
+        self.assertEqual(
+            [ref.split("@", 1)[0] for ref in re.findall(r"uses:\s*(\S+)", deploy)],
+            ["actions/deploy-pages"],
+        )
 
     def test_release_build_is_shared_with_a_pull_request_dry_run(self) -> None:
         # The build half of the release must run on pull requests, so a broken
