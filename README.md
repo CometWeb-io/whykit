@@ -23,7 +23,7 @@ For version 0.4, see the [feature status](docs/feature-status.md)
 and the [upgrade and recovery guide](docs/migration-0.4.md) before using 0.4 data.
 
 [![CI](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml/badge.svg)](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml)
-[![Website](https://img.shields.io/badge/website-cometweb--io.github.io%2Fwhykit-05F29B)](https://cometweb-io.github.io/whykit/)
+[![Website](https://img.shields.io/badge/website-whykit.cometweb.io-05F29B)](https://whykit.cometweb.io/)
 
 ## Try it
 
