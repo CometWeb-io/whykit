@@ -400,12 +400,20 @@ def cmd_impact(args: argparse.Namespace) -> int:
 
 
 def cmd_trace(args: argparse.Namespace) -> int:
+    from .lint import DECISION_ID_RE
     from .trace import main as trace_main
     argv: list[str] = []
     if args.root:
         argv += ["--root", args.root]
-    if args.decision:
-        argv += ["--decision", args.decision]
+    if args.decision_id and not DECISION_ID_RE.fullmatch(args.decision_id):
+        return emit_error("invalid_argument", f"expected a D-NNN decision identifier, got {args.decision_id!r}", json_mode=args.json)
+    decision = args.decision or args.decision_id
+    if args.decision and args.decision_id and args.decision != args.decision_id:
+        return emit_error(
+            "usage", f"two decisions given: {args.decision_id} and --decision {args.decision}; pass one", json_mode=args.json,
+        )
+    if decision:
+        argv += ["--decision", decision]
     if args.today:
         argv += ["--today", args.today]
     if args.max_age_days is not None:
@@ -1648,6 +1656,8 @@ def build_parser() -> argparse.ArgumentParser:
     impact.set_defaults(func=cmd_impact)
 
     trace = sub.add_parser("trace", help="trace decisions to their evidence and flag missing, retired or stale sources")
+    # Positional like `impact` and `backlinks`; `--decision` stays for scripts.
+    trace.add_argument("decision_id", nargs="?", metavar="D-NNN", help="trace only this decision (same as --decision)")
     trace.add_argument("--root", help=ROOT_HELP)
     trace.add_argument("--decision", metavar="D-NNN", help="trace only this decision")
     trace.add_argument("--today", help="evaluate evidence age as of this YYYY-MM-DD date instead of today")
