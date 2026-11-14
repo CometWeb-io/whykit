@@ -95,6 +95,9 @@ CLI and the lint rule codes.
   `ROADMAP.md` with validation targets and a field-report issue form.
 - A "Connect your AI agents" guide (`docs/agents.md`) and an animated Explorer
   demo in the README.
+- `server.json` describes the MCP server for the official MCP Registry
+  (`io.github.cometweb-io/whykit`, run with `uvx --from 'whykit[mcp]' whykit-mcp`),
+  and a manual `MCP Registry` workflow publishes it once the version is on PyPI.
 
 ### Changed
 

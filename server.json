@@ -1,0 +1,53 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.cometweb-io/whykit",
+  "title": "WhyKit",
+  "description": "Read-only decisions and evidence from a Git vault, and which decisions a code change touches.",
+  "repository": {
+    "url": "https://github.com/CometWeb-io/whykit",
+    "source": "github"
+  },
+  "websiteUrl": "https://whykit.cometweb.io/",
+  "version": "0.5.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "whykit",
+      "version": "0.5.0",
+      "runtimeHint": "uvx",
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--from",
+          "value": "whykit[mcp]==0.5.0"
+        },
+        {
+          "type": "positional",
+          "value": "whykit-mcp",
+          "valueHint": "command"
+        }
+      ],
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--root",
+          "description": "Absolute path to the WhyKit vault",
+          "isRequired": true,
+          "format": "filepath",
+          "valueHint": "vault_path"
+        },
+        {
+          "type": "named",
+          "name": "--max-sensitivity",
+          "description": "Highest sensitivity returned: public, internal, confidential or restricted",
+          "default": "internal",
+          "choices": ["public", "internal", "confidential", "restricted"]
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
