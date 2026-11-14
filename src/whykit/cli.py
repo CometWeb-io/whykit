@@ -34,7 +34,7 @@ from .contract import (
 )
 from .lint import find_vault_root, is_markdown_name, is_vault_root, iter_markdown, lint as run_lint, rel
 from .completion import SHELLS, render_completion
-from .messages import print_no_vault
+from .messages import no_vault, print_no_vault
 from .vault_index import VaultIndex
 from .console import emit_machine, harden_stdio
 
@@ -308,6 +308,10 @@ def cmd_new(args: argparse.Namespace) -> int:
             argv += ["--review-by", args.review_by]
         if args.supersedes:
             argv += ["--supersedes", args.supersedes]
+        for pattern in args.applies_to:
+            argv += ["--applies-to", pattern]
+        for term in args.watch_terms:
+            argv += ["--watch-term", term]
         if args.json:
             argv.append("--json")
     elif args.new_kind == "evidence":
@@ -1065,6 +1069,141 @@ def _render_pre_commit_hook(prefix: str) -> str:
     return PRE_COMMIT_HOOK.replace("# __WHYKIT_VAULT_CD__\n", f"{line}\n" if line else "")
 
 
+def cmd_affected(args: argparse.Namespace) -> int:
+    from .affected import AffectedError, build_affected, changed_files, default_today, render_markdown, render_text, resolve_repo
+    from .agent_preflight import PreflightInputError
+
+    json_mode = bool(args.json)
+    if sum(bool(value) for value in (args.files, args.base, args.diff_file)) > 1:
+        return emit_error("usage", "use one of --files, --base and --diff-file", json_mode=json_mode)
+    if args.adr and args.root:
+        return emit_error("usage", "--adr and --root cannot be used together", json_mode=json_mode)
+    vault = None if args.adr else _resolve_vault(args.root)
+    if vault is None and not args.adr:
+        from .affected import find_adr_dir
+        found = find_adr_dir(Path(args.repo or ".").expanduser().absolute())
+        if found is not None:
+            return emit_error(
+                "vault_not_found", no_vault(args.root).splitlines()[0],
+                hint=f"hint: no vault, but ADRs were found: whykit affected --adr {found.relative_to(Path(args.repo or '.').expanduser().absolute()).as_posix()}",
+                json_mode=json_mode,
+            )
+        return vault_not_found(args.root, json_mode=json_mode)
+    try:
+        today = default_today(args.today)
+        repo = resolve_repo(args.repo)
+        diff: dict[str, list[str]] | None = None
+        truncated = False
+        if args.diff_file:
+            from .affected import diff_paths, parse_unified_diff
+            raw = sys.stdin.read() if args.diff_file == "-" else Path(args.diff_file).read_text(encoding="utf-8", errors="replace")
+            diff, truncated = parse_unified_diff(raw)
+            paths, source = diff_paths(diff, raw), {"kind": "diff", "base": None}
+        else:
+            paths, source = changed_files(repo, files=args.files, base=args.base)
+        if source["kind"] == "git":
+            from .affected import changed_lines
+            diff, truncated = changed_lines(repo, str(source["base"]), paths)
+        if args.adr:
+            from .affected import build_affected_adr
+            adr_dir = Path(args.adr).expanduser()
+            adr_dir = adr_dir if adr_dir.is_absolute() else repo / adr_dir
+            if not adr_dir.is_dir() or adr_dir.is_symlink():
+                return emit_error("invalid_target", f"not an ADR directory: {adr_dir}", json_mode=json_mode)
+            report = build_affected_adr(adr_dir, repo, paths, source, today=today, max_sensitivity=args.max_sensitivity,
+                                        diff=diff, diff_truncated=truncated)
+        else:
+            assert vault is not None
+            report = build_affected(vault, repo, paths, source, today=today, max_sensitivity=args.max_sensitivity,
+                                    diff=diff, diff_truncated=truncated)
+    except AffectedError as exc:
+        return emit_error(exc.code, str(exc), hint=exc.hint, json_mode=json_mode)
+    except PreflightInputError as exc:
+        return emit_error("vault_invalid", f"the vault cannot be assessed: {exc}", json_mode=json_mode)
+    except OSError as exc:
+        return emit_error("io_error", describe_os_error(exc), json_mode=json_mode)
+    if json_mode:
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
+    elif args.format == "markdown":
+        emit_machine(render_markdown(report))
+    else:
+        print(render_text(report))
+    return 1 if args.strict and report["review_required"] else 0
+
+
+def cmd_scope_suggest(args: argparse.Namespace) -> int:
+    from .affected import AffectedError, resolve_repo
+    from .scope import render_text as render_scope, suggest_scopes, write_scopes
+
+    json_mode = bool(args.json)
+    vault = _resolve_vault(args.root)
+    if vault is None:
+        return vault_not_found(args.root, json_mode=json_mode)
+    if args.min_commits < 1:
+        return emit_error("invalid_argument", "--min-commits must be at least 1", json_mode=json_mode)
+    try:
+        repo = resolve_repo(args.repo)
+        if args.max_files < 1:
+            return emit_error("invalid_argument", "--max-files must be at least 1", json_mode=json_mode)
+        report = suggest_scopes(vault, repo, args.decisions or None, include_scoped=args.all, max_files=args.max_files)
+        if args.write:
+            report["written"] = write_scopes(vault.resolve(), report, min_commits=args.min_commits)
+    except AffectedError as exc:
+        return emit_error(exc.code, str(exc), hint=exc.hint, json_mode=json_mode)
+    except OSError as exc:
+        return emit_error("io_error", describe_os_error(exc), json_mode=json_mode)
+    if json_mode:
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(render_scope(report))
+    return 0
+
+
+def cmd_scope_check(args: argparse.Namespace) -> int:
+    from .affected import AffectedError, resolve_repo
+    from .scope import check_scopes, render_check
+
+    json_mode = bool(args.json)
+    vault = _resolve_vault(args.root)
+    if vault is None:
+        return vault_not_found(args.root, json_mode=json_mode)
+    try:
+        report = check_scopes(vault, resolve_repo(args.repo))
+    except AffectedError as exc:
+        return emit_error(exc.code, str(exc), hint=exc.hint, json_mode=json_mode)
+    except OSError as exc:
+        return emit_error("io_error", describe_os_error(exc), json_mode=json_mode)
+    if json_mode:
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(render_check(report))
+    return 1 if args.strict and report["problems"] else 0
+
+
+def cmd_connect(args: argparse.Namespace) -> int:
+    from .connect import ConnectError, apply, plan, render_text
+
+    json_mode = bool(args.json)
+    vault = _resolve_vault(args.root)
+    if vault is None:
+        return vault_not_found(args.root, json_mode=json_mode)
+    try:
+        report = plan(vault, host=args.host, repo=args.repo, max_sensitivity=args.max_sensitivity)
+        if args.write:
+            report = apply(report)
+        else:
+            report.pop("_merged", None)
+    except ConnectError as exc:
+        return emit_error(exc.code, str(exc), hint=exc.hint, json_mode=json_mode)
+    except OSError as exc:
+        return emit_error("io_error", describe_os_error(exc), json_mode=json_mode)
+    if json_mode:
+        emit_machine(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(render_text(report))
+    return 0
+
+
 def cmd_install_hooks(args: argparse.Namespace) -> int:
     vault = _resolve_vault(args.root)
     if vault is None:
@@ -1394,10 +1533,10 @@ Docs: https://github.com/CometWeb-io/whykit#readme"""
 # as five verbs rather than one flat list. Every command belongs to exactly one
 # group; tests/test_cli_consistency.py holds this table to the parser.
 COMMAND_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("author", "create and change records", ("init", "adopt", "new", "review", "evidence", "artifact", "claim", "outcome", "import")),
-    ("check", "gate a vault or a change", ("lint", "check", "status", "trace", "history", "diff", "snapshot", "verify-snapshot", "agent", "verify-context")),
+    ("author", "create and change records", ("init", "adopt", "new", "review", "evidence", "scope", "artifact", "claim", "outcome", "import")),
+    ("check", "gate a vault or a change", ("lint", "check", "affected", "status", "trace", "history", "diff", "snapshot", "verify-snapshot", "agent", "verify-context")),
     ("explore", "find and hand over context", ("query", "retrieve", "context", "pack", "graph", "backlinks", "impact", "compile-context", "deep-impact", "knowledge-at")),
-    ("integrate", "connect hooks, viewers and shells", ("install-hooks", "explorer-index", "serve", "lsp", "completion")),
+    ("integrate", "connect agents, hooks, viewers and shells", ("connect", "install-hooks", "explorer-index", "serve", "lsp", "completion")),
     ("maintain", "inspect policy, rules and setup", ("policy", "rules", "doctor", "recover", "workspace", "knowledge")),
 )
 
@@ -1592,6 +1731,10 @@ def build_parser() -> argparse.ArgumentParser:
     new_decision.add_argument("--source", action="append", default=[], dest="source_ids", metavar="E-NNN", help="supporting evidence ID (repeatable)")
     new_decision.add_argument("--review-by", metavar="YYYY-MM-DD", help="date by which the decision must be re-checked")
     new_decision.add_argument("--supersedes", metavar="D-NNN", help="decision this one replaces")
+    new_decision.add_argument("--applies-to", action="append", default=[], dest="applies_to", metavar="GLOB",
+                              help="code this decision covers, relative to the code repository, e.g. 'src/payments/**' (repeatable); see `whykit affected`")
+    new_decision.add_argument("--watch-term", action="append", default=[], dest="watch_terms", metavar="TERM",
+                              help="a word whose appearance in changed lines makes this decision apply, e.g. moment (repeatable)")
     new_decision.add_argument("--json", action="store_true", help=JSON_HELP)
     _add_leaf_root(new_decision)
     new_decision.set_defaults(func=cmd_new)
@@ -1774,6 +1917,42 @@ def build_parser() -> argparse.ArgumentParser:
     workspace_status.add_argument("--today", help=TODAY_HELP)
     workspace_status.add_argument("--json", action="store_true", help=JSON_HELP)
     workspace_status.set_defaults(func=cmd_workspace, json=True)
+
+    scope = sub.add_parser("scope", help="suggest which code each decision governs")
+    scope_sub = scope.add_subparsers(dest="scope_command", required=True)
+    scope_suggest = scope_sub.add_parser(
+        "suggest",
+        help="suggest applies_to scopes from Git history",
+        description=(
+            "Suggest applies_to patterns for live decisions from the commits that changed the decision "
+            "record or name its D-NNN in the message. A preview unless --write, which only fills in "
+            "decisions that have no scope yet."
+        ),
+    )
+    scope_suggest.add_argument("decisions", nargs="*", metavar="D-NNN", help="decisions to suggest for (default: every live decision without a scope)")
+    scope_suggest.add_argument("--root", help=ROOT_HELP)
+    scope_suggest.add_argument("--repo", help="code repository whose history to read (default: the working directory)")
+    scope_suggest.add_argument("--all", action="store_true", help="also suggest for decisions that already have a scope")
+    scope_suggest.add_argument("--min-commits", type=int, default=1, help="with --write, keep only patterns backed by at least this many commits (default: 1)")
+    scope_suggest.add_argument("--max-files", type=int, default=25, help="ignore commits that change more files than this: imports, sweeps, mass renames (default: 25)")
+    scope_suggest.add_argument("--write", action="store_true", help="add the suggested patterns to decisions without a scope")
+    scope_suggest.add_argument("--json", action="store_true", help=JSON_HELP)
+    scope_suggest.set_defaults(func=cmd_scope_suggest)
+
+    scope_check = scope_sub.add_parser(
+        "check",
+        help="find scopes that point nowhere: dead or broad patterns, unseen terms",
+        description=(
+            "Check live decisions' applies_to patterns against the repository's tracked files and their "
+            "watch_terms against its source files. Reports dead patterns (code moved), broad patterns, "
+            "terms seen nowhere and decisions with no scope. Read-only."
+        ),
+    )
+    scope_check.add_argument("--root", help=ROOT_HELP)
+    scope_check.add_argument("--repo", help="code repository to check against (default: the working directory)")
+    scope_check.add_argument("--strict", action="store_true", help="exit 1 on dead or invalid patterns")
+    scope_check.add_argument("--json", action="store_true", help=JSON_HELP)
+    scope_check.set_defaults(func=cmd_scope_check)
 
     imports = sub.add_parser("import", help="capture saved provider exports without fetching or granting authority")
     import_sub = imports.add_subparsers(dest="import_command", required=True)
@@ -2009,6 +2188,49 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--today", help=TODAY_HELP)
     doctor.add_argument("--json", action="store_true", help=JSON_HELP)
     doctor.set_defaults(func=cmd_doctor)
+
+    affected = sub.add_parser(
+        "affected",
+        help="list the decisions a code change touches and whether they need review",
+        description=(
+            "Map changed or planned files in a code repository to the live decisions whose "
+            "applies_to scope covers them, then check what those decisions rest on: retired, "
+            "missing or stale sources, changed captured sources, overdue or failed reviews. "
+            "Reports files no decision covers. It never judges whether the change is right."
+        ),
+    )
+    affected.add_argument("--root", help=ROOT_HELP)
+    affected.add_argument("--repo", help="code repository the paths are relative to (default: the working directory)")
+    affected.add_argument("--adr", metavar="DIR", help="read a folder of plain ADRs (MADR, Nygard) instead of a vault; no migration needed")
+    affected.add_argument("--files", nargs="+", metavar="PATH", help="files you plan to change, relative to --repo (instead of asking Git)")
+    affected.add_argument("--diff-file", metavar="PATH", help="a unified diff of a planned change (- for stdin): its files, plus its lines for watch_terms")
+    affected.add_argument("--base", help="Git ref to compare against, e.g. a pull request's base SHA (default: HEAD, plus untracked files)")
+    affected.add_argument("--max-sensitivity", choices=("public", "internal", "confidential", "restricted"),
+                          help="report only decisions up to this sensitivity; count the rest")
+    affected.add_argument("--format", choices=("text", "markdown"), default="text", help="text (default) or markdown for a pull request summary")
+    affected.add_argument("--strict", action="store_true", help="exit 1 when an applicable decision needs review")
+    affected.add_argument("--today", help=TODAY_HELP)
+    affected.add_argument("--json", action="store_true", help=JSON_HELP)
+    affected.set_defaults(func=cmd_affected)
+
+    connect = sub.add_parser(
+        "connect",
+        help="connect a code repository's AI agents to this vault",
+        description=(
+            "Print the read-only MCP configuration for an agent host and preview the "
+            "decision-checking instructions for the repository's AGENTS.md or CLAUDE.md. "
+            "With --write, add or refresh that marked block; nothing else is written."
+        ),
+    )
+    connect.add_argument("--root", help=ROOT_HELP)
+    connect.add_argument("--host", default="generic", choices=("claude-code", "cursor", "vscode", "codex", "claude-desktop", "generic"),
+                         help="agent host to configure (default: generic); claude-code writes CLAUDE.md, every other host AGENTS.md")
+    connect.add_argument("--repo", help="code repository whose agent instructions to update (default: the working directory)")
+    connect.add_argument("--max-sensitivity", default="internal", choices=("public", "internal", "confidential", "restricted"),
+                         help="highest sensitivity the MCP server may return (default: internal)")
+    connect.add_argument("--write", action="store_true", help="write the instruction block instead of previewing it")
+    connect.add_argument("--json", action="store_true", help=JSON_HELP)
+    connect.set_defaults(func=cmd_connect)
 
     hooks = sub.add_parser("install-hooks", help="install the pre-commit vault check")
     hooks.add_argument("--root", help=ROOT_HELP)

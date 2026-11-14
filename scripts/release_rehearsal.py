@@ -50,7 +50,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NAME = "whykit"
 REPOSITORY = "CometWeb-io/whykit"
 NORTHLINE_TODAY = "2026-09-17"
-EXPECTED_MCP_TOOLS = {"query", "context", "impact", "status", "pack", "trace", "backlinks"}
+EXPECTED_MCP_TOOLS = {"query", "context", "impact", "status", "pack", "trace", "backlinks", "affected"}
 # Subsections a changelog release section may hold, in the order they are
 # written. Anything else is a typo that would end up in the release notes.
 SECTION_ORDER = (

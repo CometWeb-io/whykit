@@ -115,7 +115,7 @@ class McpRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((server_info.name, server_info.version), ("whykit", __version__))
         self.assertEqual(
             {tool.name for tool in response.tools},
-            {"query", "context", "impact", "status", "pack", "trace", "backlinks"},
+            {"query", "context", "impact", "status", "pack", "trace", "backlinks", "affected"},
         )
         for tool in response.tools:
             with self.subTest(tool=tool.name):
@@ -387,6 +387,7 @@ class McpStdioConformanceTests(unittest.IsolatedAsyncioTestCase):
             ("pack", {"targets": ["D-002"], "query": "visible"}),
             ("trace", {"today": "2026-09-24"}),
             ("backlinks", {"target": "notes/hub"}),
+            ("affected", {"files": ["src/app.py"], "today": "2026-09-24"}),
         ):
             with self.subTest(tool=name):
                 payload, is_error = await self.call(name, arguments)
@@ -547,6 +548,7 @@ class McpStdioConformanceTests(unittest.IsolatedAsyncioTestCase):
             ("pack", {"query": "visible"}),
             ("trace", {"limit": 1}),
             ("backlinks", {"target": "notes/hub", "limit": 1}),
+            ("affected", {"files": ["src/app.py", "README.md"], "today": "2026-09-24"}),
         ):
             with self.subTest(tool=name, arguments=arguments):
                 result = await self.client.call_tool(name, arguments)
@@ -712,7 +714,7 @@ class McpHttpTransportTests(unittest.IsolatedAsyncioTestCase):
                         self.assertNotIn("private-request-sentinel", malformed.text)
                         async with Client(streamable_http_client(url, http_client=authorized)) as client:
                             listed = await client.list_tools()
-                            self.assertEqual(len(listed.tools), 7)
+                            self.assertEqual(len(listed.tools), 8)
                             result = await client.call_tool("status", {})
                             self.assertFalse(result.is_error)
                             self.assertNotIn(tmp, result.content[0].text)

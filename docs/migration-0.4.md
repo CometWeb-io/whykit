@@ -40,8 +40,8 @@ NEW_WHYKIT=/private/example/whykit-0.4/bin/whykit
 "$NEW_WHYKIT" --version
 test "$("$OLD_WHYKIT" --version)" = "whykit 0.3.4"
 case "$("$NEW_WHYKIT" --version)" in
-  "whykit 0.4."*) ;;
-  *) echo "Expected a 0.4 client; stop." >&2; exit 2 ;;
+  "whykit 0.4."*|"whykit 0.5."*) ;;
+  *) echo "Expected a 0.4 or 0.5 client; stop." >&2; exit 2 ;;
 esac
 # Confirm the second executable is the exact 0.4 build you intend to test.
 test -d "$VAULT/.git"

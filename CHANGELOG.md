@@ -5,6 +5,126 @@ All notable changes to WhyKit are documented here. The format follows
 semantic versioning, where the **data contract** is the public API alongside the
 CLI and the lint rule codes.
 
+## [Unreleased]
+
+## [0.5.0] - 2026-11-14
+
+### Added
+
+- `whykit connect` connects a code repository's AI agents to a vault. It prints
+  the read-only MCP configuration for Claude Code, Cursor, VS Code, Codex,
+  Claude Desktop or a generic host, with absolute paths filled in, and previews
+  a marked decision-checking block for the repository's `AGENTS.md` (or
+  `CLAUDE.md` for Claude Code). `--write` adds or refreshes only that block;
+  the vault path in it is always relative, and host configuration files are
+  never written. `--json` follows the new `connect-result.schema.json`.
+- `whykit affected` maps changed or planned files in a code repository to the
+  live decisions that govern them, then runs the agent-preflight checks on each
+  match: retired, missing or stale sources, captured sources that changed since
+  a claim was pinned, overdue or failed reviews and unverifiable approvals. It
+  reports changed files no decision covers, live decisions without a scope and
+  invalid patterns, never judges the change itself (`semantics_checked` is
+  always false), and offers `--format markdown` for pull requests, `--strict`
+  to fail on review signals, `--max-sensitivity` to withhold titles and
+  `--json` following the new `affected-report.schema.json`. A configuration
+  gap (a source type without a maximum age) is reported once as a caveat.
+- `whykit affected --adr DIR` works on a folder of plain ADRs (MADR, Nygard,
+  adr-tools) with no vault and no migration. Proposed, rejected, deprecated and
+  superseded ADRs are skipped; scope comes from `applies_to` front matter or is
+  inferred from repository paths the ADR mentions (reported as a caveat); a
+  mentioned path that no longer exists is a review signal. Without a vault,
+  `affected` points at a conventional ADR folder when it finds one.
+- An eighth MCP tool, `affected`, takes the files an agent plans to change and
+  returns the same report. Decisions above the ceiling are absent, host paths
+  are never returned, and under a public ceiling evidence and claim codes are
+  withheld (`evidence_details: "withheld"`), as in `trace`.
+- The GitHub Action's `affected` input adds the report to the job summary and,
+  with `comment`, to the decision diff comment. It is advisory and shows
+  decision titles only up to `affected-sensitivity` (default `public`).
+- `whykit scope suggest` proposes `applies_to` patterns for live decisions
+  from Git history: the commits that changed the decision record and the
+  commits whose message names its exact ID. Files are grouped into a few
+  patterns, each with the commits and files behind it; lock files and
+  changelogs are ignored. `--write` fills in only decisions without a scope,
+  `--min-commits` drops weak patterns, and `--json` follows the new
+  `scope-suggestions.schema.json`.
+- `whykit affected` reports `cited_source_changed` when a change modifies a
+  file that a live decision cites as evidence (an evidence location without a
+  URL scheme is read as a repository path), even when the decision's scope
+  does not cover the changed code. Matches are listed in `matched_sources`.
+  The MCP tool matches sources only when the register is within its ceiling.
+- `watch_terms` on decisions (vault and ADR front matter, `whykit new decision
+  --watch-term`): whole words whose appearance in added or removed code lines
+  makes a decision apply. Comment-only lines, prose files, lock files and
+  changelogs are skipped. Checked in Git mode, with the new
+  `whykit affected --diff-file` (a planned patch, `-` for stdin) and through
+  the MCP tool's new `diff` argument; reported as unchecked otherwise. Like
+  `applies_to`, it may change on an approved decision.
+- Decisions matched only through a pattern covering a whole top-level folder
+  are marked `broad`, counted separately and listed last.
+- `whykit scope check` compares live decisions' `applies_to` patterns with the
+  repository's tracked files and their `watch_terms` with its source files,
+  reporting dead patterns, broad patterns, unseen terms, invalid entries and
+  unscoped decisions; `--strict` fails on dead or invalid patterns, and
+  `--json` follows the new `scope-check.schema.json`.
+- `whykit scope suggest` also proposes `watch_terms` from a decision's
+  rejected alternatives, limited to code-looking names and never written.
+- `scripts/eval_affected.py` replays a repository's commits through
+  `affected`, and `docs/field-evaluation.md` reports the first run on four
+  public ADR repositories.
+
+- Decisions may declare `applies_to`: repository-relative globs for the code
+  they govern, set with `whykit new decision --applies-to`. Scope is routing,
+  not reasoning: an approved decision may change it without supersession, and
+  it is excluded from the approval hash. Existing approvals are unaffected.
+- `examples/payments`, a synthetic vault in which every note is public, and a
+  live Explorer demo built from it on GitHub Pages (`WHYKIT_SITE_DEMO=1` in
+  `scripts/build-site.sh`).
+- A tested tutorial, [catch decision drift](docs/tutorials/catch-decision-drift.md),
+  a reference page (`docs/affected.md`) with a pull-request workflow, a
+  `ROADMAP.md` with validation targets and a field-report issue form.
+- A "Connect your AI agents" guide (`docs/agents.md`) and an animated Explorer
+  demo in the README.
+
+### Changed
+
+- `whykit agent preflight` and `whykit affected` share one decision
+  assessment; preflight output is unchanged.
+- The `whykit connect` instruction block asks agents to run `whykit affected`
+  on the files they plan to change.
+- The README leads with the agent use case, shows the Explorer, the CI gate
+  and a comparison with ADRs and wikis, and moves the alpha limits into their
+  own section.
+- Tests that need a non-root user or the installed `whykit` entry point now
+  skip with a reason instead of failing in containers and plain checkouts.
+
+### Fixed
+
+Found by the [field evaluation](docs/field-evaluation.md):
+
+- `new decision --from` accepted the adoption report `MIGRATION.md` written by
+  `whykit adopt` as an ADR; it is now refused.
+- MADR "Pros and Cons of the Options" now fill the upside and risk columns of
+  the alternatives table; status badges and images are no longer offered as
+  evidence candidates; `deciders` / `decision-makers` become the owner unless
+  `--owner` is given; an ADR whose source status says superseded, deprecated
+  or rejected is promoted with a warning to supersede or archive it.
+- `scope suggest` reads all decisions' history in two `git log` passes instead
+  of several per decision (22 s → 1.2 s for 15 decisions on a 77,000-commit
+  repository), and the `affected` text report shows five matched files and a
+  count instead of every file.
+- ADR path inference ignored prose such as `dd/mm/yyyy`, `CI/CD` and domain
+  names only by luck; it now reads a path only when its first segment exists
+  at the repository root, so package-relative paths are no longer candidates
+  for "moved code".
+- An ADR marked `[superseded]` (or deprecated, rejected) only in its title was
+  treated as in force.
+- `scope suggest` learned from imports, sweeps and mass renames; it now
+  ignores commits wider than `--max-files` (default 25).
+- `affected --adr` resolves the repository path before comparing it with the
+  ADR folder, so a checkout behind a symlink (macOS `/var` is `/private/var`)
+  keeps its inferred scopes and moved-code signals.
+
 ## [0.4.0] - 2026-11-05
 
 ### Added
@@ -1134,7 +1254,8 @@ Initial implementation. No package was published under this version.
   rules and common secret leaks.
 - JSON Schemas, a worked example vault, and an optional local Explorer.
 
-[Unreleased]: https://github.com/CometWeb-io/whykit/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/CometWeb-io/whykit/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/CometWeb-io/whykit/compare/v0.4.0...v0.5.0
 [0.3.2]: https://github.com/CometWeb-io/whykit/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/CometWeb-io/whykit/tree/v0.3.1
 [0.3.0]: https://github.com/CometWeb-io/whykit/tree/v0.3.0

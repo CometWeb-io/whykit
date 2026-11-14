@@ -5,9 +5,14 @@ package. Check your installed version and the package index before relying on it
 These labels describe support and risk; they are not feature flags and do not
 disable commands.
 
+New to WhyKit? Start with the first three rows: the vault and its checks,
+`whykit affected`, and `whykit connect`. The rest is optional and can wait.
+
 | Area | Status | What to rely on and what remains outside the promise |
 |---|---|---|
 | Markdown vault, evidence, decisions, trace, lint, review, history and recovery | Core | The existing 0.3.4 workflows are the starting point. Back up and test your own vault and automation before upgrading; see [upgrade and recovery](migration-0.4.md). Checks report structure and declared links, not whether evidence or conclusions are true. |
+| `applies_to` scopes and `whykit affected` (CLI, `--adr`, MCP tool, Action input) | Preview | Matches files to decisions by declared path patterns and checks the same premises as preflight. Scopes inferred from plain ADRs are a heuristic and say so. Path matching is not semantic: a change can contradict a decision in a file outside its scope, or comply while inside it. Only changes recorded in the vault are visible. See [affected decisions](affected.md). |
+| `whykit connect` agent setup | Core | Prints host configuration and writes only its own marked block in `AGENTS.md` or `CLAUDE.md`. The block asks an agent to check decisions; it cannot force one to. Pair it with the history gate in CI. See [connect your AI agents](agents.md). |
 | Sensitivity filtering, public export, Explorer and read-only MCP | Core with explicit boundaries | Filters limit returned data; they are not authentication, authorization or an operating-system access control. Incorrectly labelled information may be exposed. Review an export before publishing and protect the source vault. |
 | Captures, claims, source observations, outcomes and knowledge v2 | Preview | These are explicitly created or requested records and views. Matching bytes do not authenticate a source, establish truth or prove currentness. Older clients cannot evaluate the new contracts; see [claims](claims.md), [outcomes](outcomes.md) and [knowledge v2](knowledge-v2.md). |
 | Private knowledge bundle and restore | Preview; supported POSIX hosts only | A bundle contains raw data, is not encrypted, excludes Git history and trusted baselines, and restore is not globally atomic. Unsupported hosts, including native Windows, refuse these operations. Keep a separately verified backup of the vault and its Git history. |
