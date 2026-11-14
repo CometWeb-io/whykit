@@ -7,6 +7,14 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-14
+
+### Fixed
+
+- The MCP Registry name is `io.github.CometWeb-io/whykit`. The registry matches
+  the GitHub organization name case-sensitively, so 0.5.0's lowercase
+  `mcp-name` could not be published. Package behaviour is unchanged.
+
 ## [0.5.0] - 2026-11-14
 
 ### Added
@@ -1257,7 +1265,8 @@ Initial implementation. No package was published under this version.
   rules and common secret leaks.
 - JSON Schemas, a worked example vault, and an optional local Explorer.
 
-[Unreleased]: https://github.com/CometWeb-io/whykit/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/CometWeb-io/whykit/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/CometWeb-io/whykit/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/CometWeb-io/whykit/compare/v0.4.0...v0.5.0
 [0.3.2]: https://github.com/CometWeb-io/whykit/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/CometWeb-io/whykit/tree/v0.3.1
