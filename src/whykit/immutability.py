@@ -7,6 +7,9 @@ remains mutable so the system can be operated without falsifying history:
 - an approved decision may move to ``superseded`` or ``archived`` while only
   lifecycle metadata changes;
 - an approved decision may move its next ``review_by`` date after a re-review;
+- an approved decision may change ``applies_to`` and ``watch_terms``, the code
+  paths and words that route changes to it: code moves, and keeping that
+  routing current must not require rewriting the reasoning;
 - superseded/archived records are fully immutable.
 
 Everything else must be represented by a new D-NNN record.
@@ -137,6 +140,10 @@ def _status(text: str) -> str | None:
     return next(group for group in matches[0].groups() if group).lower()
 
 
+# Envelope keys whose value may be a block list (``applies_to:`` then ``- src/**``).
+LIST_ENVELOPE_KEYS = frozenset({"applies_to", "watch_terms"})
+
+
 def _without_frontmatter_keys(text: str, keys: set[str]) -> str | None:
     """Remove selected *top-level* front-matter lines for semantic comparison."""
     parsed = _front_matter_lines(text)
@@ -145,8 +152,17 @@ def _without_frontmatter_keys(text: str, keys: set[str]) -> str | None:
     lines, end = parsed
     key_re = re.compile(r"^(" + "|".join(re.escape(key) for key in sorted(keys)) + r")\s*:")
     kept = [lines[0]]
+    # Only a list-valued key may own the item lines that follow it. Other keys
+    # are scalars, so an indented line after them is kept and compared rather
+    # than silently dropped with the key.
+    in_list_key = False
     for line in lines[1:end]:
-        if key_re.match(line):
+        if in_list_key and (line.startswith((" ", "-")) or not line.strip()):
+            continue
+        in_list_key = False
+        match = key_re.match(line)
+        if match:
+            in_list_key = match.group(1) in LIST_ENVELOPE_KEYS
             continue
         kept.append(line)
     kept.extend(lines[end:])
@@ -162,8 +178,9 @@ def allowed_lifecycle_change(base_text: str, head_text: str) -> bool:
 
     if head_status == "approved":
         # Re-reviewing an unchanged decision may move only the operational review
-        # date (and last_updated). Its rationale/evidence/ownership remain frozen.
-        allowed = {"review_by", "last_updated"}
+        # date (and last_updated), and its code scope may follow moved files.
+        # Its rationale/evidence/ownership remain frozen.
+        allowed = {"review_by", "last_updated", "applies_to", "watch_terms"}
     else:
         # superseded/archived (the only other values _status returns).
         # Lifecycle transition only. `superseded_by` is an optional convenience;
@@ -224,7 +241,7 @@ def approval_record_hash(text: str) -> str:
     """Bind reasoning and provenance while permitting the lifecycle envelope."""
     normalized = _without_frontmatter_keys(
         text.replace("\r\n", "\n").replace("\r", "\n"),
-        {"status", "review_by", "last_updated", "superseded_by"},
+        {"status", "review_by", "last_updated", "superseded_by", "applies_to", "watch_terms"},
     )
     if normalized is None:
         raise ValueError("approval requires readable front matter")

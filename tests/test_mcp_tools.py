@@ -713,11 +713,12 @@ class ErrorBoundaryTests(VaultToolsTestCase):
             ("pack", {"targets": ["D-001", "notes/public-note"], "query": "needle"}),
             ("trace", {"today": "2026-09-24"}),
             ("backlinks", {"target": "E-001"}),
+            ("affected", {"files": ["src/app.py"], "today": "2026-09-24"}),
         ):
             payload, is_error = self.tools.call(name, arguments)
             self.assertFalse(is_error, (name, payload))
         self.assertEqual(tree_digest(self.vault), before)
-        self.assertEqual(set(TOOL_NAMES), {"query", "context", "impact", "status", "pack", "trace", "backlinks"})
+        self.assertEqual(set(TOOL_NAMES), {"query", "context", "impact", "status", "pack", "trace", "backlinks", "affected"})
 
     def test_call_returns_structured_errors(self) -> None:
         payload, is_error = self.tools.call("context", {"target": "../x"})

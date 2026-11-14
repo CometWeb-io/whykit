@@ -133,10 +133,13 @@ After you complete and approve `D-002`, WhyKit marks `D-001` as `superseded` wit
 stays exactly as written. That is the point: six months later, the record shows
 what was believed at the time *and* what replaced it.
 
-Two edits are allowed on an accepted record. The lifecycle transition changes
+Three edits are allowed on an accepted record. The lifecycle transition changes
 `status` to `superseded` or `archived`, with `last_updated` and optionally
 `superseded_by`. A confirmed review (`whykit review record`) moves only
-`review_by` and `last_updated`. Everything else is rejected by the history check.
+`review_by` and `last_updated`. And `applies_to`, the code the decision
+governs, may follow code that moved; it is routing, not reasoning (see
+[affected decisions](affected.md)). Everything else is rejected by the history
+check.
 
 ## The review cycle
 

@@ -153,12 +153,31 @@ class PinnedAndLeastPrivilegeTests(unittest.TestCase):
         self.assertEqual(triggers.strip(), 'push:\n    tags: ["v*"]')
         self.assertNotIn("enable-cache: true", text)
         # No other workflow may hold the OIDC permission PyPI trusts.
+        # The one exception is the Pages deploy job, which the deployment API
+        # requires to hold an OIDC token; it is confined to that job below.
         for path in WORKFLOWS:
             if path.name != "release.yml":
                 text = path.read_text(encoding="utf-8")
                 with self.subTest(file=path.name):
-                    self.assertNotRegex(text, r"(?m)^\s*id-token:\s*write")
                     self.assertNotIn("pypi-publish", text)
+                    if path.name == "pages.yml":
+                        self._assert_pages_oidc_is_confined(text)
+                    else:
+                        self.assertNotRegex(text, r"(?m)^\s*id-token:\s*write")
+
+    def _assert_pages_oidc_is_confined(self, text: str) -> None:
+        self.assertNotRegex("\n".join(_block(text, "permissions")), r"id-token")
+        jobs = _children(_block(text, "jobs"), 2)
+        holders = [name for name, lines in jobs.items() if re.search(r"(?m)^\s*id-token:\s*write", "\n".join(lines))]
+        self.assertEqual(holders, ["deploy"])
+        deploy = "\n".join(jobs["deploy"])
+        self.assertIn("name: github-pages", deploy)
+        self.assertNotIn("actions/checkout", deploy)
+        self.assertNotRegex(deploy, r"(?m)^\s*run:")
+        self.assertEqual(
+            [ref.split("@", 1)[0] for ref in re.findall(r"uses:\s*(\S+)", deploy)],
+            ["actions/deploy-pages"],
+        )
 
     def test_release_build_is_shared_with_a_pull_request_dry_run(self) -> None:
         # The build half of the release must run on pull requests, so a broken
@@ -205,7 +224,8 @@ class CompositeActionContractTests(unittest.TestCase):
         outputs = _children(_block(self.text, "outputs"), 2)
         self.assertEqual(
             set(inputs),
-            {"root", "profile", "strict", "base", "history", "today", "annotations", "sarif", "comment", "github-token"},
+            {"root", "profile", "strict", "base", "history", "today", "annotations", "sarif", "comment", "github-token",
+             "affected", "affected-sensitivity"},
         )
         self.assertEqual(set(outputs), {"version", "sarif-file"})
         for name, body in [*inputs.items(), *outputs.items()]:
@@ -348,6 +368,83 @@ class CompositeActionContractTests(unittest.TestCase):
             self.assertFalse(record.exists())
 
 
+@unittest.skipIf(shutil.which("git") is None or os.name == "nt" or shutil.which("bash") is None, "needs git and bash")
+class AffectedReportStepTests(unittest.TestCase):
+    """`affected: "true"`: an advisory report in the summary and the PR comment."""
+
+    STEP = "Affected decisions report"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.calls = self.tmp / "argv"
+        self.summary = self.tmp / "summary.md"
+        self.output = self.tmp / "output"
+        self.fake = self.tmp / "whykit"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def run_step(self, exit_code: int = 0, **env: str) -> subprocess.CompletedProcess[str]:
+        self.fake.write_text(
+            f'#!/bin/sh\nprintf "%s\\n" "$@" > "{self.calls}"\nprintf "### WhyKit: decisions this change touches\\n"\nexit {exit_code}\n',
+            encoding="utf-8",
+        )
+        self.fake.chmod(0o755)
+        for path in (self.calls, self.summary, self.output):
+            path.unlink(missing_ok=True)
+        values = {
+            "WHYKIT": str(self.fake), "WHYKIT_ROOT": "decisions", "WHYKIT_AFFECTED": "true",
+            "WHYKIT_AFFECTED_SENSITIVITY": "public", "WHYKIT_BASE": "", "WHYKIT_TODAY": "",
+            "WHYKIT_BASE_SHA": "abc123", "WHYKIT_EVENT": "pull_request", "RUNNER_TEMP": str(self.tmp),
+            "GITHUB_STEP_SUMMARY": str(self.summary), "GITHUB_OUTPUT": str(self.output), **env,
+        }
+        return subprocess.run(
+            ["bash", "-c", _action_step_script(self.STEP)], cwd=ROOT, text=True, encoding="utf-8",
+            errors="replace", capture_output=True, timeout=30, env={**os.environ, **values},
+        )
+
+    def test_step_is_opt_in_runs_before_the_comment_and_never_sees_the_token(self) -> None:
+        text = ACTION.read_text(encoding="utf-8")
+        step = text.split(f"    - name: {self.STEP}\n", 1)[1].split("\n    - name: ", 1)[0]
+        self.assertIn("if: inputs.affected != 'false'", step)
+        self.assertNotIn("TOKEN", step)
+        self.assertLess(text.index(self.STEP), text.index("Decision diff comment"))
+        self.assertLess(text.index(self.STEP), text.index("Repository policy gate"))
+        comment = text.split("    - name: Decision diff comment\n", 1)[1].split("\n    - name: ", 1)[0]
+        self.assertIn("WHYKIT_AFFECTED_FILE: ${{ steps.affected.outputs.file }}", comment)
+
+    def test_runs_the_report_with_the_pr_base_and_ceiling(self) -> None:
+        ok = self.run_step(WHYKIT_TODAY="2026-11-12")
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+        self.assertEqual(
+            self.calls.read_text(encoding="utf-8").split(),
+            ["affected", "--root", "decisions", "--base", "abc123", "--format", "markdown",
+             "--max-sensitivity", "public", "--today", "2026-11-12"],
+        )
+        self.assertIn("decisions this change touches", self.summary.read_text(encoding="utf-8"))
+        report = self.output.read_text(encoding="utf-8").strip().removeprefix("file=")
+        self.assertTrue(Path(report).is_file())
+
+    def test_validation_skips_and_advisory_failure(self) -> None:
+        for env, message in (({"WHYKIT_AFFECTED": "yes"}, "affected must be"),
+                             ({"WHYKIT_AFFECTED_SENSITIVITY": "secret"}, "affected-sensitivity must be"),
+                             ({"WHYKIT_TODAY": "2026-11-12; rm -rf /"}, "today must be")):
+            with self.subTest(env=env):
+                bad = self.run_step(**env)
+                self.assertEqual(bad.returncode, 2)
+                self.assertIn(message, bad.stdout)
+                self.assertFalse(self.calls.exists())
+        push = self.run_step(WHYKIT_BASE_SHA="", WHYKIT_EVENT="push")
+        self.assertEqual(push.returncode, 0)
+        self.assertIn("skipped", push.stdout)
+        self.assertFalse(self.calls.exists())
+        failed = self.run_step(exit_code=2)
+        self.assertEqual(failed.returncode, 0, "the report is advisory")
+        self.assertIn("::warning::", failed.stdout)
+        self.assertFalse(self.output.exists())
+
+
 @unittest.skipIf(shutil.which("git") is None or os.name == "nt", "needs git and symlinks")
 class DecisionDiffCommentTests(unittest.TestCase):
     """`comment: "true"`: one sticky comment, pull_request only, never for forks."""
@@ -448,6 +545,17 @@ class DecisionDiffCommentTests(unittest.TestCase):
             self.assertEqual(push.returncode, 0)
             self.assertFalse(calls.exists())
             self.assertFalse(posted.exists())
+
+            affected = Path(tmp) / "affected.md"
+            affected.write_text("### WhyKit: decisions this change touches\n", encoding="utf-8")
+            body_copy = Path(tmp) / "body-copy"
+            python.write_text(
+                f'#!/bin/sh\nprintf "%s\\n" "$@" > "{posted}"\ncp "$3" "{body_copy}"\n', encoding="utf-8")
+            joined = run(WHYKIT_AFFECTED_FILE=str(affected))
+            self.assertEqual(joined.returncode, 0, joined.stdout + joined.stderr)
+            body = body_copy.read_text(encoding="utf-8")
+            self.assertTrue(body.startswith("<!-- whykit-diff root=vault -->"))
+            self.assertIn("decisions this change touches", body)
 
             target = run(WHYKIT_EVENT="pull_request_target")
             self.assertEqual(target.returncode, 0)

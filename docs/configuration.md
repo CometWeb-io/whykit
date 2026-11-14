@@ -129,6 +129,8 @@ Allowed lifecycle states are `template`, `draft`, `in_review`, `approved`,
 `confidential` and `restricted`.
 
 Optional keys include `review_by`, `decision_id`, `supersedes`, `superseded_by`,
+`applies_to` (decisions only: the code a decision governs; see
+[affected decisions](affected.md)),
 `reviewers`, `delivery_status`, `sent_at`, `workstream` and the open `provenance`
 block. See `schemas/` for machine-readable contracts.
 

@@ -3,8 +3,8 @@
 WhyKit can expose a vault to an MCP-compatible host through a local stdio
 server, or through streamable HTTP on a loopback port (see
 [Streamable HTTP](#streamable-http)). The server
-is read-only: it provides seven tools (`query`, `context`, `impact`, `status`,
-`pack`, `trace` and `backlinks`), one resource (`whykit://decisions`), one
+is read-only: it provides eight tools (`query`, `context`, `impact`, `status`,
+`pack`, `trace`, `backlinks` and `affected`), one resource (`whykit://decisions`), one
 resource template (`whykit://record/{+target}`, listed once per visible
 decision) and two prompts; nothing it
 offers can create or edit vault files. Every tool declares an output schema,
@@ -204,6 +204,9 @@ accepted and reduced to the cap; "minimum" values below the bound are rejected.
 | `backlinks` | `target` | string | required | target rules below |
 | | `limit` | integer | `100` | minimum 0; clamped to 500 |
 | | `cursor` | string | `""` (first page) | `next_cursor` of the previous page; ≤ 128 chars |
+| `affected` | `files` | array of string | required | 1–200 repository-relative paths, each ≤ 512 chars; no globs, absolute paths or `..` |
+| | `today` | string | `""` (today) | ISO date `YYYY-MM-DD` |
+| | `diff` | string | `""` | optional unified diff of the planned change, ≤ 500,000 chars; its changed lines are checked against `watch_terms` |
 
 Unknown extra arguments are ignored.
 
@@ -218,6 +221,8 @@ Unknown extra arguments are ignored.
 | `pack` | A budgeted multi-record bundle (`whykit.context-bundle/v1`); hidden and unknown targets are listed under `missing` with the same reason |
 | `trace` | For each decision: evidence cited directly or inherited `via` a linked note, each item's state (`active`, `retired`, `missing`, stale) and the gaps `no_evidence`, `missing_evidence`, `retired_evidence`, `stale_evidence`. `summary` covers every visible decision; `decisions` holds one page of at most `limit` of the `matched` records, `truncated` says whether more follow and `next_cursor` continues |
 | `backlinks` | Typed inbound edges (`wikilink`, `evidence`, `supersedes`) as `{from, type, to}`; `count` is the full total, `backlinks` one page of at most `limit` of them, `truncated` says whether more follow and `next_cursor` continues |
+
+| `affected` | The live decisions whose `applies_to` scope covers the files, each with `matched_files`, review `problems` and plain-language `reasons`; `uncovered_files`, `unscoped_decisions` and `invalid_scopes` say what was not checked. Paths only, never meaning: `semantics_checked` is always `false` |
 
 `trace` follows `whykit trace`: evidence is never inherited from another
 decision, and only an approved decision nobody has superseded is `live`.
@@ -238,6 +243,7 @@ adds or withholds:
 | `pack` | `context-bundle.schema.json` | adds `max_sensitivity` |
 | `trace` | `trace-report.schema.json` | adds `matched`, `truncated`, `next_cursor`, `max_sensitivity`, and when the register floor exceeds the ceiling `evidence_details: "withheld"` with evidence items reduced to `{id, via, state: "withheld"}` |
 | `backlinks` | `backlinks-report.schema.json` | adds `truncated`, `max_sensitivity` and `next_cursor` |
+| `affected` | `affected-report.schema.json` | no `root` or `repo`; adds `max_sensitivity`; decisions above the ceiling are absent rather than counted; when the register floor exceeds the ceiling, `evidence_details: "withheld"`, evidence and claim codes are removed from `problems` and repository sources are not matched (their locations are register data) |
 
 Error results (`isError: true`) carry the error body described under
 [Errors](#errors) instead; clients validate only successful results against
