@@ -78,6 +78,10 @@ it to `internal`. A note with valid front matter and no `sensitivity` key is
 `internal`. Evidence rows inherit their register label as a minimum and may
 tighten it with an optional final `Sensitivity` column. Filtered views withhold
 the raw per-row table; counts and `E-NNN` completions describe visible rows only.
+
+WhyKit is listed in the official MCP Registry as `io.github.cometweb-io/whykit`
+([`server.json`](../server.json)). Hosts that install from the registry run
+`uvx --from 'whykit[mcp]' whykit-mcp --root <vault>`; the same flags apply.
 Invalid row labels and duplicate IDs are withheld. See
 [data classification](data-classification.md) for replacement inheritance and
 public export behavior.

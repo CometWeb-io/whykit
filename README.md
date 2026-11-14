@@ -2,6 +2,8 @@
 
 # WhyKit
 
+<!-- mcp-name: io.github.cometweb-io/whykit -->
+
 ### Know which decisions a change touches, and which of them need another look.
 
 Your coding agent sees the code, not the reasons behind it, so it "fixes"
