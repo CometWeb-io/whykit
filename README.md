@@ -15,11 +15,11 @@ before merge, and for Claude Code, Cursor or Codex before they edit.
 [![Python](https://img.shields.io/pypi/pyversions/whykit)](https://pypi.org/project/whykit/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://opensource.org/licenses/Apache-2.0)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/CometWeb-io/whykit/badge)](https://securityscorecards.dev/viewer/?uri=github.com/CometWeb-io/whykit)
-[![Website](https://img.shields.io/badge/website-cometweb--io.github.io%2Fwhykit-05F29B)](https://cometweb-io.github.io/whykit/)
+[![Website](https://img.shields.io/badge/website-whykit.cometweb.io-05F29B)](https://whykit.cometweb.io/)
 
 **No runtime dependencies · Offline by design · Your data stays Markdown**
 
-[Live demo](https://cometweb-io.github.io/whykit/demo/) · [Tutorial](docs/tutorials/catch-decision-drift.md) · [Connect agents](docs/agents.md) · [Docs](docs/README.md) · [Roadmap](ROADMAP.md)
+[Live demo](https://whykit.cometweb.io/demo/) · [Tutorial](docs/tutorials/catch-decision-drift.md) · [Connect agents](docs/agents.md) · [Docs](docs/README.md) · [Roadmap](ROADMAP.md)
 
 ![WhyKit Explorer: decisions, their supersession chain and a timeline, from the synthetic Northline example vault.](docs/media/explorer-demo.gif)
 
@@ -190,7 +190,7 @@ PR comments, SARIF and other CI systems.
 
 ## What would you like to do?
 
-- **See it on a real-looking vault:** [live Explorer demo](https://cometweb-io.github.io/whykit/demo/) of the payments example.
+- **See it on a real-looking vault:** [live Explorer demo](https://whykit.cometweb.io/demo/) of the payments example.
 - **Record a decision and change your mind later:** [record, check and supersede](docs/tutorials/record-and-supersede.md).
 - **Bring existing notes or ADRs:** [adopt existing Markdown](docs/guide.md#already-have-a-pile-of-markdown).
 - **Browse the vault in a web UI:** [run the Explorer](docs/guide.md#browse-the-vault-in-the-explorer).
