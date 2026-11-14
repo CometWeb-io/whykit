@@ -81,10 +81,12 @@ directory, for example `root: knowledge`.
 | `annotations` | `"false"` | Print findings as GitHub annotations (`--format github`), so they show up inline on the pull request diff. |
 | `sarif` | `"false"` | Also export every lint finding as SARIF and upload it to code scanning. See [Code scanning](#code-scanning-sarif). |
 | `comment` | `"false"` | On pull requests, post the decision diff as one comment and update it on every push. Needs `pull-requests: write` and `fetch-depth: 0`. See [Decision diff comment](#decision-diff-comment). |
+| `affected` | `"false"` | On pull requests, report which live decisions the change touches and which need review, in the job summary and (with `comment`) the same comment. Advisory: never fails the job. Needs `fetch-depth: 0`. See [Affected decisions](affected.md#run-it-in-pull-requests). |
+| `affected-sensitivity` | `"public"` | Highest label whose decision titles the `affected` report may show; decisions above it are only counted. |
 | `github-token` | the job's `GITHUB_TOKEN` | Token used only by `comment` to write the pull request comment. |
 
-`history`, `strict`, `annotations`, `sarif` and `comment` accept only the strings `"true"`
-and `"false"`, and `today` must be a real `YYYY-MM-DD` date. Anything else exits with code 2 so a
+`history`, `strict`, `annotations`, `sarif`, `comment` and `affected` accept only the strings `"true"`
+and `"false"`, `affected-sensitivity` only a sensitivity label, and `today` must be a real `YYYY-MM-DD` date. Anything else exits with code 2 so a
 typo cannot silently turn a check off.
 
 ### Outputs

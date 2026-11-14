@@ -76,6 +76,10 @@ class TargetNotFound(ValueError):
 # test walks the argument parser to keep this table complete.
 OUTPUT_SCHEMAS: dict[str, str] = {
     "init": "init-result.schema.json",
+    "connect": "connect-result.schema.json",
+    "affected": "affected-report.schema.json",
+    "scope suggest": "scope-suggestions.schema.json",
+    "scope check": "scope-check.schema.json",
     "recover": "recovery-result.schema.json",
     "lint": "lint-report.schema.json",
     "new decision": "record-create.schema.json",

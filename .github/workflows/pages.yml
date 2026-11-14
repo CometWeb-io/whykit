@@ -9,6 +9,9 @@ on:
       - "site/**"
       - "scripts/build-site.sh"
       - ".github/workflows/pages.yml"
+      - "apps/explorer/**"
+      - "examples/payments/**"
+      - "src/whykit/**"
   workflow_dispatch:
 
 permissions:
@@ -29,7 +32,18 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - name: Assemble site
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # No dependency caches on the deploy path: a poisoned cache must not be
+      # able to reach the published site.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - run: npm ci --prefix apps/explorer
+      - name: Assemble site with the Explorer demo
+        env:
+          WHYKIT_SITE_DEMO: "1"
         run: bash scripts/build-site.sh _site
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
       - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
