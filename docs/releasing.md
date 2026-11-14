@@ -130,7 +130,7 @@ which fixes its certifi and Sigstore runtime. These floors follow the
 5. **Check the exact candidate in GitHub Actions.** Run the manual
    `Release candidate check` workflow from the protected default branch after
    verifying that its reviewed fixed SHA is the candidate. The workflow is
-   pinned to the reviewed 0.5.0 candidate; change the pin in a reviewed PR before
+   pinned to the reviewed 0.5.1 candidate; change the pin in a reviewed PR before
    testing a different candidate. Supply the expected version and both archive digests from
    step 3. It verifies main ancestry, runs
    candidate tests and the history scan, and builds candidate-bound archives
