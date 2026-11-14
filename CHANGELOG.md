@@ -7,6 +7,16 @@ CLI and the lint rule codes.
 
 ## [Unreleased]
 
+### Added
+
+- The MCP `query` tool accepts `ranking`: `substring` (default, unchanged),
+  `auto` (exact phrase first, BM25 over any of its words when the phrase
+  matches nothing) or `bm25`. Responses report the ranking used in
+  `query.ranking`, and a multi-word phrase with no exact match carries a
+  `query.hint` suggesting `auto`, because agents tend to send loose keywords
+  that rarely occur as one exact phrase. Sensitivity filtering and cursor
+  binding apply to every ranking.
+
 ## [0.5.0] - 2026-11-14
 
 ### Added

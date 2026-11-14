@@ -33,6 +33,11 @@ class MigrationGuideTests(unittest.TestCase):
         self.old_stub = self.base / "whykit-034-stub"
         self.old_stub.write_text("#!/bin/sh\nprintf 'whykit 0.3.4\\n'\n", encoding="utf-8")
         self.old_stub.chmod(0o700)
+        # The backup block only reads the new client's version; a stub keeps it
+        # testable after the checkout itself moves past 0.4.
+        self.new_version_stub = self.base / "whykit-04-stub"
+        self.new_version_stub.write_text("#!/bin/sh\nprintf 'whykit 0.4.0\\n'\n", encoding="utf-8")
+        self.new_version_stub.chmod(0o700)
         self.vault = self.base / "vault"
         shutil.copytree(ROOT / "examples" / "approval", self.vault,
                         ignore=shutil.ignore_patterns(".git", ".whykit"))
@@ -53,7 +58,7 @@ class MigrationGuideTests(unittest.TestCase):
             "VAULT": self.vault,
             "BACKUP": backup or self.base / "backup",
             "OLD_WHYKIT": old,
-            "NEW_WHYKIT": NEW,
+            "NEW_WHYKIT": self.new_version_stub if number == 0 else NEW,
             "RESTORED": self.base / "trial",
             "RECOVERED": self.base / "recovered",
         }

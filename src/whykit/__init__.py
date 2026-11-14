@@ -10,7 +10,7 @@ shadow the `whykit.lint` submodule for anyone importing it.
 """
 from __future__ import annotations
 
-__version__ = "0.5.0"
+__version__ = "0.6.0.dev0"
 __all__ = ["__version__", "TEMPLATE_DIR", "find_vault_root", "is_vault_root", "lint_vault"]
 
 from pathlib import Path
