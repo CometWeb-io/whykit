@@ -122,6 +122,33 @@
     "superseded_by": {
       "type": "string",
       "pattern": "^D-[0-9]{3,}$"
+    },
+    "applies_to": {
+      "description": "Decisions only: repository-relative globs for the code this decision covers, matched by `whykit affected`. Anchored at the code repository root; `**` spans directories. May change on an approved decision without supersession. A single string is read as a one-item list.",
+      "type": [
+        "string",
+        "array"
+      ],
+      "minLength": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "maxItems": 64
+    },
+    "watch_terms": {
+      "description": "Decisions only: whole words (case-insensitive) whose appearance in added or removed lines of a diff makes `whykit affected` report the decision, e.g. a library the decision chose against. May change on an approved decision without supersession.",
+      "type": [
+        "string",
+        "array"
+      ],
+      "minLength": 2,
+      "items": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 100
+      },
+      "maxItems": 32
     }
   },
   "allOf": [

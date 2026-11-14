@@ -267,7 +267,7 @@ class McpSensitivityTests(unittest.TestCase):
 
         self.assertEqual(server.name, "whykit")
         self.assertIn("untrusted", server.instructions)
-        self.assertEqual(set(registered_tools), {"query", "context", "impact", "status", "pack", "trace", "backlinks"})
+        self.assertEqual(set(registered_tools), {"query", "context", "impact", "status", "pack", "trace", "backlinks", "affected"})
         self.assertEqual(set(registered_resources), {"whykit://decisions", "whykit://record/{+target}"})
         self.assertEqual(set(registered_prompts), {"summarize_decision", "review_evidence_gaps"})
         self.assertEqual(len(registered_completions), 1)

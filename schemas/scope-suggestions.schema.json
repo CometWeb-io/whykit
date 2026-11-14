@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/scope-suggestions.schema.json",
+  "title": "WhyKit scope suggestions",
+  "description": "Output of `whykit scope suggest --json`: applies_to patterns suggested from Git history for live decisions, with the commits and files behind each, and the decisions --write updated.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "root",
+    "repo",
+    "decisions",
+    "summary",
+    "written"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "decision_id",
+          "title",
+          "path",
+          "status",
+          "current_scope",
+          "commits",
+          "suggestions"
+        ],
+        "properties": {
+          "decision_id": {
+            "type": "string",
+            "pattern": "^D-[0-9]{3,}$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "current_scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "commits": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "pattern",
+                "commits",
+                "files",
+                "file_count",
+                "already_covered"
+              ],
+              "properties": {
+                "pattern": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "commits": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "file_count": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "already_covered": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "skipped_wide_commits": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "term_suggestions": {
+            "description": "Code-looking names from the record's rejected alternatives, proposed as watch_terms for a person to confirm; never written.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "term",
+                "from"
+              ],
+              "properties": {
+                "term": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "decisions",
+        "with_suggestions",
+        "without_history"
+      ],
+      "properties": {
+        "decisions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "with_suggestions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "without_history": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "written": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^D-[0-9]{3,}$"
+      }
+    }
+  },
+  "additionalProperties": true
+}

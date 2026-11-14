@@ -111,12 +111,30 @@ only.
 the repository root. `check_commit_attribution.py` fails CI when a commit
 identity or trailer names a code-generation tool instead of a person.
 
+## `eval_affected.py`
+
+Replays a repository's recent non-merge commits through `whykit affected`
+(plain ADRs with `--adr`, or a vault with `--root`) and reports how often
+decisions applied, which patterns fired most, which files no decision covered
+and, with `--diff`, which `watch_terms` matched in which commits, with sample
+commit IDs for checking by hand. Read-only: it runs `git log` and `git show`
+only. See [field evaluation](../docs/field-evaluation.md) for how it was used.
+
+```bash
+python3 scripts/eval_affected.py /path/to/repo --adr docs/decisions --commits 300 --diff
+python3 scripts/eval_affected.py /path/to/repo --root decisions --json
+```
+
 ## `build-site.sh`
 
 Assembles the GitHub Pages landing page from `site/` into one directory
-(default `_site/`, which Git ignores) and adds `.nojekyll`. The `pages.yml`
-workflow runs it on pushes to `main` that touch `site/`. It reads nothing
-outside `site/` and runs no WhyKit code.
+(default `_site/`, which Git ignores) and adds `.nojekyll`. With
+`WHYKIT_SITE_DEMO=1` it also builds the Explorer from `examples/payments`, a
+synthetic vault whose every note is public, into `demo/`; that needs Node.js
+22+ and `npm ci --prefix apps/explorer` first. The Explorer's default build
+refuses any non-public note, so the demo cannot publish a private vault. The
+`pages.yml` workflow runs it with the demo on pushes to `main` that touch the
+site, the Explorer, the example or the package.
 
 ```bash
 bash scripts/build-site.sh /tmp/whykit-site
