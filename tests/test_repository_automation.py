@@ -162,8 +162,32 @@ class PinnedAndLeastPrivilegeTests(unittest.TestCase):
                     self.assertNotIn("pypi-publish", text)
                     if path.name == "pages.yml":
                         self._assert_pages_oidc_is_confined(text)
+                    elif path.name == "mcp-registry.yml":
+                        self._assert_mcp_registry_oidc_is_confined(text)
                     else:
                         self.assertNotRegex(text, r"(?m)^\s*id-token:\s*write")
+
+    def _assert_mcp_registry_oidc_is_confined(self, text: str) -> None:
+        # The MCP Registry needs an OIDC token to prove the org namespace. The
+        # job holding it is manual, main-only, builds nothing and runs only
+        # the signature-verified registry client: PyPI's trusted publisher is
+        # bound to release.yml and the pypi environment, never to this file.
+        self.assertEqual("\n".join(_block(text, "on")).strip(), "workflow_dispatch:")
+        self.assertNotRegex("\n".join(_block(text, "permissions")), r"id-token")
+        jobs = _children(_block(text, "jobs"), 2)
+        self.assertEqual(list(jobs), ["publish"])
+        publish = "\n".join(jobs["publish"])
+        self.assertIn("if: github.ref == 'refs/heads/main'", publish)
+        self.assertNotIn("environment:", publish)
+        for forbidden in ("uv build", "twine", "pip install", "setup-python", "setup-uv", "secrets.", "contents: write"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, publish)
+        self.assertEqual(
+            [ref.split("@", 1)[0] for ref in re.findall(r"uses:\s*(\S+)", publish)],
+            ["actions/checkout", "sigstore/cosign-installer"],
+        )
+        self.assertIn("cosign verify-blob", publish)
+        self.assertIn("./mcp-publisher login github-oidc", publish)
 
     def _assert_pages_oidc_is_confined(self, text: str) -> None:
         self.assertNotRegex("\n".join(_block(text, "permissions")), r"id-token")
