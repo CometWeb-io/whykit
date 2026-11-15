@@ -4,13 +4,14 @@
 
 <!-- mcp-name: io.github.CometWeb-io/whykit -->
 
-### Know which decisions a change touches, and which of them need another look.
+### Know why your code is the way it is.
 
-Your coding agent sees the code, not the reasons behind it, so it "fixes"
-things that were deliberate. WhyKit keeps decisions and their sources as plain
-Markdown in Git, maps every change to the decisions that govern it, and flags
-the ones whose evidence or review has gone out of date: in the pull request,
-before merge, and for Claude Code, Cursor or Codex before they edit.
+Your coding agent can read the code but can't see the reasons behind it, so it
+"fixes" things that were deliberate. WhyKit keeps those reasons as decision
+records in Markdown next to the code, and a check in your pull requests shows
+which of them a change touches. Claude Code, Codex and Cursor can look them up
+before they edit, and WhyKit flags a decision when a source behind it goes out
+of date.
 
 [![CI](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml/badge.svg)](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/whykit?color=05F29B)](https://pypi.org/project/whykit/)
@@ -19,7 +20,7 @@ before merge, and for Claude Code, Cursor or Codex before they edit.
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/CometWeb-io/whykit/badge)](https://securityscorecards.dev/viewer/?uri=github.com/CometWeb-io/whykit)
 [![Website](https://img.shields.io/badge/website-whykit.cometweb.io-05F29B)](https://whykit.cometweb.io/)
 
-**No runtime dependencies · Offline by design · Your data stays Markdown**
+**Open source from CometWeb · Apache-2.0 · No runtime dependencies · Your data stays Markdown**
 
 [Live demo](https://whykit.cometweb.io/demo/) · [Tutorial](docs/tutorials/catch-decision-drift.md) · [Connect agents](docs/agents.md) · [Docs](docs/README.md) · [Roadmap](ROADMAP.md)
 
