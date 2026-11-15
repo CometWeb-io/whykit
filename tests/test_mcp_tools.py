@@ -156,6 +156,58 @@ class QueryToolTests(VaultToolsTestCase):
             with self.subTest(limit=bad):
                 self.assertFailure("invalid_argument", self.tools.query, "", bad)
 
+    def test_default_ranking_is_unchanged_and_hints_at_auto_for_keyword_misses(self) -> None:
+        write_doc(self.vault, "notes/outreach.md", title="No outreach to crawled sites", sensitivity="internal",
+                  body="We never contact owners of crawled sites.")
+        tools = VaultTools(self.vault, max_sensitivity="internal")
+        strict = tools.query("leads growth outreach", 50)
+        self.assertEqual((strict["total"], strict["query"]["ranking"]), (0, "substring"))
+        self.assertIn("ranking='auto'", strict["query"]["hint"])
+        # A one-word or matching query carries no hint.
+        self.assertNotIn("hint", tools.query("nowhere", 50)["query"])
+        self.assertNotIn("hint", tools.query("needle-alpha", 50)["query"])
+
+    def test_auto_ranking_falls_back_to_bm25_when_the_phrase_matches_nothing(self) -> None:
+        write_doc(self.vault, "notes/outreach.md", title="No outreach to crawled sites", sensitivity="internal",
+                  body="We never contact owners of crawled sites.")
+        tools = VaultTools(self.vault, max_sensitivity="internal")
+        report = tools.query("leads growth outreach", 50, ranking="auto")
+        self.assertEqual((report["query"]["ranking"], report["query"]["ranking_requested"]), ("bm25", "auto"))
+        self.assertIn("notes/outreach.md", {item["path"] for item in report["results"]})
+        self.assertNotIn("hint", report["query"])
+        # When the exact phrase matches, auto returns the same page as the default.
+        phrase = tools.query("needle-alpha", 50, ranking="auto")
+        self.assertEqual(phrase["query"]["ranking"], "substring")
+        self.assertEqual(phrase["results"], tools.query("needle-alpha", 50)["results"])
+
+    def test_bm25_rankings_respect_the_ceiling(self) -> None:
+        for ranking in ("auto", "bm25"):
+            with self.subTest(ranking=ranking):
+                report = self.tools.query("restricted-sentinel gamma nowhere", 50, ranking=ranking)
+                paths = {item["path"] for item in report["results"]}
+                self.assertNotIn("notes/restricted-secret.md", paths)
+                self.assertNotIn("06-decisions/d-001-restricted.md", paths)
+                self.assertFalse(any("restricted-sentinel" in json.dumps(item) for item in report["results"]))
+                public = self.public.query("internal-sentinel beta nowhere", 50, ranking=ranking)
+                self.assertNotIn("notes/internal-note.md", {item["path"] for item in public["results"]})
+
+    def test_bm25_with_empty_text_still_lists_every_visible_document(self) -> None:
+        listed = self.tools.query("", 100, ranking="bm25")
+        self.assertEqual(listed["query"]["ranking"], "substring")
+        self.assertEqual(listed["total"], self.tools.query("", 100)["total"])
+        self.assertGreater(listed["total"], 0)
+
+    def test_a_cursor_cannot_be_replayed_under_another_ranking(self) -> None:
+        first = self.tools.query("", 1)
+        self.assertTrue(first["next_cursor"])
+        with self.assertRaises(ToolFailure):
+            self.tools.query("", 1, cursor=first["next_cursor"], ranking="bm25")
+
+    def test_query_rejects_unknown_ranking(self) -> None:
+        for bad in ("hybrid", "BM25 ", 3):
+            with self.subTest(ranking=bad):
+                self.assertFailure("invalid_argument", self.tools.query, "x", 5, ranking=bad)
+
     def test_query_rejects_hostile_text_and_filters(self) -> None:
         self.assertFailure("invalid_argument", self.tools.query, "x" * 1001)
         self.assertFailure("invalid_argument", self.tools.query, "a\x00b")
