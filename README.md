@@ -2,7 +2,7 @@
 
 # WhyKit
 
-<!-- mcp-name: io.github.cometweb-io/whykit -->
+<!-- mcp-name: io.github.CometWeb-io/whykit -->
 
 ### Know which decisions a change touches, and which of them need another look.
 

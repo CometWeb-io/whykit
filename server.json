@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.cometweb-io/whykit",
+  "name": "io.github.CometWeb-io/whykit",
   "title": "WhyKit",
   "description": "Read-only decisions and evidence from a Git vault, and which decisions a code change touches.",
   "repository": {
@@ -8,19 +8,19 @@
     "source": "github"
   },
   "websiteUrl": "https://whykit.cometweb.io/",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "whykit",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {
           "type": "named",
           "name": "--from",
-          "value": "whykit[mcp]==0.5.0"
+          "value": "whykit[mcp]==0.5.1"
         },
         {
           "type": "positional",
