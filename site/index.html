@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>WhyKit: decision records for your code and AI agents</title>
-    <meta name="description" content="Keep decision records next to your code. WhyKit shows which ones a change touches and lets AI coding agents look them up before they edit." />
-    <meta property="og:description" content="Keep decision records next to your code. WhyKit shows which ones a change touches and lets AI coding agents look them up before they edit." />
-    <meta name="twitter:title" content="WhyKit: decision records for your code and AI agents" />
-    <meta name="twitter:description" content="Keep decision records next to your code. WhyKit shows which ones a change touches and lets AI coding agents look them up before they edit." />
+    <title>WhyKit: decision records with their sources, in Git</title>
+    <meta name="description" content="Keep decisions and their sources as Markdown in Git, for code, product or go-to-market. See which ones a change touches; AI agents can look them up." />
+    <meta property="og:description" content="Keep decisions and their sources as Markdown in Git, for code, product or go-to-market. See which ones a change touches; AI agents can look them up." />
+    <meta name="twitter:title" content="WhyKit: decision records with their sources, in Git" />
+    <meta name="twitter:description" content="Keep decisions and their sources as Markdown in Git, for code, product or go-to-market. See which ones a change touches; AI agents can look them up." />
     <link rel="canonical" href="https://whykit.cometweb.io/" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="WhyKit: decision records for your code and AI agents" />
+    <meta property="og:title" content="WhyKit: decision records with their sources, in Git" />
     <meta property="og:url" content="https://whykit.cometweb.io/" />
     <meta property="og:image" content="https://whykit.cometweb.io/og.jpg" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -327,8 +327,8 @@
         padding: 64px 0;
       }
       h1 {
-        font-weight: 800;
-        font-size: clamp(44px, 5.4vw, 74px);
+        font-weight: 700;
+        font-size: clamp(36px, 3.8vw, 54px);
         line-height: 1.02;
         letter-spacing: -0.035em;
         margin: 0 0 24px;
@@ -859,7 +859,7 @@
       .hv-name {
         fill: var(--fg);
         font-size: 17px;
-        font-weight: 800;
+        font-weight: 700;
       }
       .hv-sub {
         fill: var(--muted);
@@ -899,7 +899,7 @@
       .hv-h {
         fill: var(--fg);
         font-size: 16px;
-        font-weight: 800;
+        font-weight: 700;
       }
       .hv-because {
         fill: var(--muted);
@@ -923,7 +923,7 @@
       .hv-q text {
         fill: var(--accent-ink);
         font-size: 13px;
-        font-weight: 800;
+        font-weight: 700;
       }
       .hv-dot {
         fill: var(--accent);
@@ -1023,7 +1023,7 @@
         border-bottom: 0;
       }
       .ask .q {
-        font-weight: 800;
+        font-weight: 700;
         color: var(--fg);
       }
       .ask .a {
@@ -1110,8 +1110,8 @@
         border-right: 1px solid var(--line);
       }
       .fact .n {
-        font-weight: 800;
-        font-size: 44px;
+        font-weight: 700;
+        font-size: 36px;
         line-height: 1;
         letter-spacing: -0.03em;
       }
@@ -1179,8 +1179,8 @@
         margin-bottom: 56px;
       }
       h2 {
-        font-weight: 800;
-        font-size: clamp(34px, 4.4vw, 56px);
+        font-weight: 700;
+        font-size: clamp(28px, 2.8vw, 40px);
         line-height: 1.04;
         letter-spacing: -0.035em;
         margin: 0;
@@ -1240,7 +1240,7 @@
       .sub-h h3 {
         margin: 0;
         font-size: clamp(24px, 2.6vw, 32px);
-        font-weight: 800;
+        font-weight: 700;
         letter-spacing: -0.03em;
         line-height: 1.1;
       }
@@ -1776,8 +1776,8 @@
         background: #121214;
       }
       .trust .big {
-        font-size: 40px;
-        font-weight: 800;
+        font-size: 32px;
+        font-weight: 700;
         letter-spacing: -0.03em;
         line-height: 1;
         margin-bottom: 10px;
@@ -1825,7 +1825,7 @@
         display: block;
         font-size: 18px;
         color: var(--fg);
-        font-weight: 800;
+        font-weight: 700;
       }
       .timeline .now b {
         color: var(--accent);
@@ -2356,10 +2356,11 @@
         <div class="wrap">
           <div class="hero-copy">
             <div class="eyebrow hero-eyebrow">Open source from CometWeb · Apache-2.0</div>
-            <h1>Know why your code is the way it is</h1>
+            <h1>Know why every decision was made</h1>
             <p class="sub">
-              <b>WhyKit keeps decision records and their sources in your repo.</b> Pull requests show which decisions a
-              change touches, and Claude Code, Codex or Cursor can look them up before they edit.
+              <b>WhyKit keeps decisions and their sources as Markdown in Git</b>, for code, product or go-to-market.
+              It flags the ones that need another look, shows which a pull request touches, and lets AI agents look
+              them up before they act.
             </p>
             <div class="ctas">
               <a class="btn btn-accent" href="#install">Try it</a>
@@ -2375,76 +2376,6 @@
           </div>
 
           <div>
-            <figure class="ht">
-              <div class="ht-head"><span>terminal</span><span>whykit affected</span></div>
-              <pre><b>$</b> <em>whykit affected --files src/payments/ledger.py \
-    src/webhooks/refunds.py README.md</em>
-3 changed files · 2 decisions apply · <span class="w">1 needs review</span>
-
-  <span class="id">D-001</span>  <span class="w">review</span>   Store money as integer cents
-      files: src/payments/ledger.py
-      <span class="w">- a cited source was retired</span>
-  <span class="id">D-003</span>  <span class="ok">applies</span>  Make every webhook handler idempotent
-      files: src/webhooks/refunds.py
-  not covered by any decision: README.md</pre>
-            </figure>
-            <p class="hero-note">
-              Output from the synthetic
-              <a href="https://github.com/CometWeb-io/whykit/tree/main/examples/payments">payments example</a>,
-              shortened. WhyKit lists what it did not check and never says a change is safe.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div class="facts">
-        <div class="wrap">
-          <div class="fact">
-            <div class="fico"><svg aria-hidden="true"><use href="#i-check-circle" /></svg></div>
-            <div class="n">5<small>/5</small></div>
-            <div class="k">Agent answers that found the right decision</div>
-            <p class="d">Five questions on 7 Nov 2026. Every answer cited the decision and its source.</p>
-          </div>
-          <div class="fact">
-            <div class="fico"><svg aria-hidden="true"><use href="#i-clock" /></svg></div>
-            <div class="n">17<small> s</small></div>
-            <div class="k">From question to cited answer</div>
-            <p class="d">Average of the three timed runs: 15.6, 16.2 and 18.9 seconds.</p>
-          </div>
-          <div class="fact">
-            <div class="fico"><svg aria-hidden="true"><use href="#i-plug" /></svg></div>
-            <div class="n">3</div>
-            <div class="k">Agents tested over MCP</div>
-            <div class="logos" aria-label="Claude Code, Codex, Cursor">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#D97757" d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 7l5 5-5 5M12 18h7"/></svg>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></svg>
-              <span>+ any MCP client</span>
-            </div>
-          </div>
-          <div class="fact">
-            <div class="fico"><svg aria-hidden="true"><use href="#i-lock" /></svg></div>
-            <div class="n">0</div>
-            <div class="k">Files an agent can change</div>
-            <p class="d">The server is read-only. The test suite runs it and checks the vault bytes did not change.</p>
-          </div>
-        </div>
-      </div>
-
-      <section class="sec" id="agents">
-        <div class="wrap">
-          <div class="sec-head reveal">
-            <div>
-              <div class="eyebrow">Works with your agent</div>
-              <h2>One command, and your agent can ask why</h2>
-            </div>
-            <p>
-              WhyKit ships a read-only MCP server. Add it to Claude Code, Codex, Cursor or any other MCP client, point it
-              at your vault, and the agent can look up decisions and their sources instead of guessing from the
-              code. It cannot change a single file.
-            </p>
-          </div>
-          <div class="agents-vis reveal">
             <figure class="hv" id="hv">
               <svg class="hv-svg" viewBox="0 0 600 380" role="img" aria-labelledby="hv-t">
                 <title id="hv-t">Claude Code, Codex, Cursor and any other MCP client ask WhyKit about a decision and get the decision with the source behind it.</title>
@@ -2499,6 +2430,76 @@
               Three real questions, each answered through the WhyKit MCP server by the agent shown, on 7 Nov 2026,
               using the Northline example vault.
               <a href="https://github.com/CometWeb-io/whykit/blob/main/site/media/agent-sessions.md">Transcripts</a>.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="facts">
+        <div class="wrap">
+          <div class="fact">
+            <div class="fico"><svg aria-hidden="true"><use href="#i-check-circle" /></svg></div>
+            <div class="n">5<small>/5</small></div>
+            <div class="k">Agent answers that found the right decision</div>
+            <p class="d">Five questions on 7 Nov 2026. Every answer cited the decision and its source.</p>
+          </div>
+          <div class="fact">
+            <div class="fico"><svg aria-hidden="true"><use href="#i-clock" /></svg></div>
+            <div class="n">17<small> s</small></div>
+            <div class="k">From question to cited answer</div>
+            <p class="d">Average of the three timed runs: 15.6, 16.2 and 18.9 seconds.</p>
+          </div>
+          <div class="fact">
+            <div class="fico"><svg aria-hidden="true"><use href="#i-plug" /></svg></div>
+            <div class="n">3</div>
+            <div class="k">Agents tested over MCP</div>
+            <div class="logos" aria-label="Claude Code, Codex, Cursor">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#D97757" d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 7l5 5-5 5M12 18h7"/></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></svg>
+              <span>+ any MCP client</span>
+            </div>
+          </div>
+          <div class="fact">
+            <div class="fico"><svg aria-hidden="true"><use href="#i-lock" /></svg></div>
+            <div class="n">0</div>
+            <div class="k">Files an agent can change</div>
+            <p class="d">The server is read-only. The test suite runs it and checks the vault bytes did not change.</p>
+          </div>
+        </div>
+      </div>
+
+      <section class="sec" id="agents">
+        <div class="wrap">
+          <div class="sec-head reveal">
+            <div>
+              <div class="eyebrow">Works with your agent</div>
+              <h2>One command, and your agent can ask why</h2>
+            </div>
+            <p>
+              WhyKit ships a read-only MCP server. Add it to Claude Code, Codex, Cursor or any other MCP client, point it
+              at your vault, and the agent can look up decisions and their sources instead of guessing from the
+              code. It cannot change a single file.
+            </p>
+          </div>
+          <div class="agents-vis reveal">
+            <figure class="ht">
+              <div class="ht-head"><span>terminal</span><span>whykit affected</span></div>
+              <pre><b>$</b> <em>whykit affected --files src/payments/ledger.py \
+    src/webhooks/refunds.py README.md</em>
+3 changed files · 2 decisions apply · <span class="w">1 needs review</span>
+
+  <span class="id">D-001</span>  <span class="w">review</span>   Store money as integer cents
+      files: src/payments/ledger.py
+      <span class="w">- a cited source was retired</span>
+  <span class="id">D-003</span>  <span class="ok">applies</span>  Make every webhook handler idempotent
+      files: src/webhooks/refunds.py
+  not covered by any decision: README.md</pre>
+            </figure>
+            <p class="hero-note">
+              Output from the synthetic
+              <a href="https://github.com/CometWeb-io/whykit/tree/main/examples/payments">payments example</a>,
+              shortened. The same check runs in the terminal, in CI and as the <code>affected</code> MCP tool. It lists what it did not check and never says a change is safe.
             </p>
           </div>
           <div class="connect reveal">

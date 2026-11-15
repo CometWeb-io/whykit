@@ -4,14 +4,14 @@
 
 <!-- mcp-name: io.github.CometWeb-io/whykit -->
 
-### Know why your code is the way it is.
+### Know why every decision was made.
 
-Your coding agent can read the code but can't see the reasons behind it, so it
-"fixes" things that were deliberate. WhyKit keeps those reasons as decision
-records in Markdown next to the code, and a check in your pull requests shows
-which of them a change touches. Claude Code, Codex and Cursor can look them up
-before they edit, and WhyKit flags a decision when a source behind it goes out
-of date.
+Decisions about code, product or go-to-market get made for reasons that end up
+in someone's head or an old thread. WhyKit keeps those decisions and the sources
+behind them as Markdown in Git. It flags a decision when a source changes or a
+review is due, shows which decisions a pull request touches, and lets Claude
+Code, Codex or Cursor look them up before they act, so an agent doesn't "fix"
+something that was deliberate.
 
 [![CI](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml/badge.svg)](https://github.com/CometWeb-io/whykit/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/whykit?color=05F29B)](https://pypi.org/project/whykit/)
