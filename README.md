@@ -18,6 +18,7 @@ something that was deliberate.
 [![Python](https://img.shields.io/pypi/pyversions/whykit)](https://pypi.org/project/whykit/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://opensource.org/licenses/Apache-2.0)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/CometWeb-io/whykit/badge)](https://securityscorecards.dev/viewer/?uri=github.com/CometWeb-io/whykit)
+[![CometWeb-io/whykit MCP server](https://glama.ai/mcp/servers/CometWeb-io/whykit/badges/score.svg)](https://glama.ai/mcp/servers/CometWeb-io/whykit)
 [![Website](https://img.shields.io/badge/website-whykit.cometweb.io-05F29B)](https://whykit.cometweb.io/)
 
 **Open source from CometWeb · Apache-2.0 · No runtime dependencies · Your data stays Markdown**
