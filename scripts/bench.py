@@ -58,6 +58,7 @@ COMMANDS: tuple[tuple[str, list[str]], ...] = (
     ("graph", ["graph", "--json"]),
     ("impact", ["impact", "E-010", "--json"]),
     ("backlinks", ["backlinks", "D-010", "--json"]),
+    ("affected", ["affected", "--files", "src/app.py", "README.md", "--today", TODAY, "--json"]),
     ("review-list", ["review", "list", "--today", TODAY, "--json"]),
 )
 
@@ -71,6 +72,7 @@ MCP_CALLS: tuple[tuple[str, dict], ...] = (
     ("pack", {"targets": ["D-010"], "query": "pipeline"}),
     ("trace", {"today": TODAY}),
     ("backlinks", {"target": "D-010"}),
+    ("affected", {"files": ["src/app.py", "README.md"], "today": TODAY}),
 )
 
 # A fresh server per tool for the cold call, then repeated calls on it.

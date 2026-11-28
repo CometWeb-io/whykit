@@ -4,6 +4,11 @@ Inspect the decisions an agent explicitly names as dependencies of a proposed
 action, using current vault bytes. This read-only check runs offline, requires
 only the standard library and does not execute the proposal or run Git.
 
+Preflight trusts the list it is given: a decision the agent did not name is not
+checked. To find the decisions from the files a change touches instead, use
+[`whykit affected`](affected.md), which matches decision `applies_to` scopes
+and runs these same checks on every match.
+
 From a source checkout:
 
 ```bash

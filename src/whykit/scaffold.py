@@ -207,6 +207,8 @@ def create_decision(
     supersedes: str | None = None,
     today: dt.date | None = None,
     promotion: Promotion | None = None,
+    applies_to: list[str] | None = None,
+    watch_terms: list[str] | None = None,
 ) -> tuple[str, Path]:
     today = today or dt.date.today()
     if promotion is not None and status not in {"draft", "in_review"}:
@@ -246,6 +248,22 @@ def create_decision(
             predecessor_note = load_note(predecessor_path)
             if predecessor_note.front.get("status") != "approved":
                 raise ValueError(f"{supersedes} must be approved before it can be superseded")
+        applies_to = applies_to or []
+        from .affected import MAX_PATTERNS, pattern_problem
+        if len(applies_to) > MAX_PATTERNS:
+            raise ValueError(f"--applies-to accepts at most {MAX_PATTERNS} patterns")
+        for pattern in applies_to:
+            problem = pattern_problem(pattern)
+            if problem:
+                raise ValueError(f"--applies-to {pattern!r} {problem}")
+        watch_terms = list(dict.fromkeys(watch_terms or []))
+        from .affected import MAX_TERMS, term_problem
+        if len(watch_terms) > MAX_TERMS:
+            raise ValueError(f"--watch-term accepts at most {MAX_TERMS} terms")
+        for term in watch_terms:
+            problem = term_problem(term)
+            if problem:
+                raise ValueError(f"--watch-term {term!r} {problem}")
         source_ids = source_ids or []
         invalid = [value for value in source_ids if not EVIDENCE_ID_RE.fullmatch(value)]
         if invalid:
@@ -261,6 +279,10 @@ def create_decision(
             optional += f"review_by: {review_by}\n"
         if supersedes:
             optional += f"supersedes: {supersedes}\n"
+        if applies_to:
+            optional += "applies_to: [" + ", ".join(_yaml_string(value) for value in applies_to) + "]\n"
+        if watch_terms:
+            optional += "watch_terms: [" + ", ".join(_yaml_string(value) for value in watch_terms) + "]\n"
         prose = dict(SCAFFOLD_SECTION_PROMPTS)
         evidence_lines = [f"- {sid}" for sid in source_ids] or [SCAFFOLD_EVIDENCE_TODO]
         alternative_rows = [ALTERNATIVES_EMPTY_ROW]
@@ -277,7 +299,14 @@ def create_decision(
                 for url in promotion.evidence_candidates
             ]
             if promotion.alternatives:
-                alternative_rows = [f"| {_table_cell(name)} |  |  | Not chosen; see the original record |" for name in promotion.alternatives]
+                from .promote import _fold
+
+                def _row(name: str) -> str:
+                    good, bad = promotion.option_details.get(_fold(name), ([], []))
+                    return (f"| {_table_cell(name)} | {_table_cell('; '.join(good[:2]))} | "
+                            f"{_table_cell('; '.join(bad[:2]))} | Not chosen; see the original record |")
+
+                alternative_rows = [_row(name) for name in promotion.alternatives]
             general = sections["Consequences"]
             positive = "\n".join(f"- {item}" for item in promotion.positive) or "-"
             negative = "\n".join(f"- {item}" for item in promotion.negative) or "-"
@@ -598,6 +627,9 @@ def _promote(vault: Path, args: argparse.Namespace, *, owner: str, sensitivity: 
         return emit_error("io_error", describe_os_error(exc), json_mode=args.json)
     if args.status not in {"draft", "in_review"}:
         return emit_error("operation_rejected", "imported decisions must start as draft or in_review; review the imported record before approval", json_mode=args.json)
+    if not getattr(args, "owner", None) and promotion.source_owner:
+        # The ADR's own deciders, unless --owner says otherwise.
+        owner = promotion.source_owner
     earlier = promoted_from(vault, promotion.sha256)
     if earlier and not args.write:
         return emit_error(
@@ -610,7 +642,7 @@ def _promote(vault: Path, args: argparse.Namespace, *, owner: str, sensitivity: 
             decision_id, path = create_decision(
                 vault, args.title or "", owner=owner, status=args.status, sensitivity=sensitivity,
                 source_ids=args.source_ids, review_by=review_by, supersedes=args.supersedes,
-                promotion=promotion,
+                promotion=promotion, applies_to=args.applies_to, watch_terms=args.watch_terms,
             )
         except FileExistsError as exc:
             return emit_error("target_exists", str(exc), json_mode=args.json)
@@ -690,6 +722,8 @@ def main(argv: list[str] | None = None) -> int:
     decision.add_argument("--source", action="append", default=[], dest="source_ids", help="supporting E-NNN (repeatable)")
     decision.add_argument("--review-by")
     decision.add_argument("--supersedes")
+    decision.add_argument("--applies-to", action="append", default=[], dest="applies_to")
+    decision.add_argument("--watch-term", action="append", default=[], dest="watch_terms")
     decision.add_argument("--json", action="store_true")
 
     evidence = sub.add_parser("evidence", help="append a source to the evidence register")
@@ -737,6 +771,7 @@ def main(argv: list[str] | None = None) -> int:
             decision_id, path = create_decision(
                 vault, args.title, owner=owner, status=args.status, sensitivity=sensitivity,
                 source_ids=args.source_ids, review_by=review_by, supersedes=args.supersedes,
+                applies_to=args.applies_to, watch_terms=args.watch_terms,
             )
             payload = {"contract_version": 1, "kind": "decision", "id": decision_id, "path": path.relative_to(vault).as_posix()}
             if args.json:

@@ -128,6 +128,8 @@ class SecretScanFailClosedTests(unittest.TestCase):
     def test_unreadable_text_asset_is_error(self) -> None:
         if os.name == "nt":
             self.skipTest("chmod semantics differ on Windows")
+        if os.geteuid() == 0:
+            self.skipTest("root reads files whatever their mode, so nothing is unreadable")
         with tempfile.TemporaryDirectory() as td:
             vault = Path(td) / "vault"
             self.assertEqual(run("init", "--minimal", str(vault)).returncode, 0)

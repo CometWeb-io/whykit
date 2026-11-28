@@ -27,7 +27,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 VAULT = ROOT / "examples" / "tiny"
-TOOLS = {"query", "context", "impact", "status", "pack", "trace", "backlinks"}
+TOOLS = {"query", "context", "impact", "status", "pack", "trace", "backlinks", "affected"}
 MODERN = "2026-07-28"
 UNSUPPORTED_PROTOCOL_VERSION = -32022
 

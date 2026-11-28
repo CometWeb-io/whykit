@@ -1,0 +1,55 @@
+# whykit 0.4.0, examples/northline copied from CometWeb-io/whykit@73d6833, 2026-11-07T02:31Z
+
+$ whykit trace --decision D-011 --today 2026-09-17
+Decision traceability — 2026-09-17
+  D-011  06-decisions/d-011-direct-with-evidence.md  (live)
+      E-013 active
+
+1 decision(s), 1 live, 0 live with gaps
+[exit 0]
+
+$ whykit check --profile ci --today 2026-09-17
+WhyKit ci gate — PASS
+  config  whykit.toml
+  OK   lint                  57 files, 0 errors, 0 warnings
+  OK   git_repository        detected
+  OK   clean_tree            not required
+  OK   policy_configuration  repository policy is configured
+  SKIP history               optional; pass --base to enforce
+[exit 0]
+
+$ whykit evidence retire E-013 --why Partner\ report\ double-counted\ meetings
+retired E-013; 1 current and 1 historical reference(s)
+next: `whykit impact E-013` lists what still cites it
+[exit 0]
+
+$ whykit trace --decision D-011 --today 2026-09-17
+Decision traceability — 2026-09-17
+  D-011  06-decisions/d-011-direct-with-evidence.md  (live)  [retired evidence]
+      E-013 retired
+
+1 decision(s), 1 live, 1 live with gaps
+[exit 0]
+
+$ whykit check --profile ci --today 2026-09-17
+WhyKit ci gate — FAIL
+  config  whykit.toml
+  FAIL lint                  57 files, 0 errors, 1 warnings
+  OK   git_repository        detected
+  OK   clean_tree            not required
+  OK   policy_configuration  repository policy is configured
+  SKIP history               optional; pass --base to enforce
+  lint findings  0 error(s), 1 warning(s)
+
+  findings that fail this gate:
+    warning 06-decisions/d-011-direct-with-evidence.md:1  [evidence.retired] source_ids cites retired evidence E-013; preserve historical records but review current claims
+  this profile is strict: warnings fail it (see `whykit policy`)
+[exit 1]
+
+# reset; now rewrite approved reasoning in D-011 and commit it
+
+$ whykit history --base HEAD~1
+Historical decision reasoning is append-only. Supersede; do not rewrite:
+  M	06-decisions/d-011-direct-with-evidence.md
+[exit 1]
+

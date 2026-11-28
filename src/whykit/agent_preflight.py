@@ -229,10 +229,14 @@ def _problems(root: Path, note: Note, row: dict, log_text: str, duplicates: set[
     return problems
 
 
-def check_proposal(root: Path, proposal_path: Path, *, today: dt.date | None = None) -> dict:
-    """Check current vault bytes under one advisory read lock, without Git or writes."""
-    today = today or dt.date.today()
-    proposal, digest = read_proposal(proposal_path)
+def assess_decisions(root: Path, decision_ids: list[str], *, today: dt.date) -> list[dict]:
+    """Review signals for the named decisions, read under one advisory lock.
+
+    This is the evaluation behind ``agent preflight``, shared with
+    ``whykit affected``, which finds the decisions from the files a change
+    touches instead of trusting a list an agent declared. Each finding is
+    ``{"decision_id", "problems"}``; problem codes are the preflight codes.
+    """
     root = root.resolve(strict=True)
     with vault_read_lock(root), path_cache(), reuse_notes(NoteCache()):
         for relative in ("Home.md", "00-context", "06-decisions", "whykit.toml",
@@ -261,7 +265,7 @@ def check_proposal(root: Path, proposal_path: Path, *, today: dt.date | None = N
         for row in trace["decisions"]:
             by_id.setdefault(row["decision_id"], []).append(row)
         findings = []
-        for did in sorted(proposal["decision_ids"]):
+        for did in sorted(decision_ids):
             rows = by_id.get(did, [])
             if len(rows) != 1:
                 problems = {"unknown_or_ambiguous_decision"}
@@ -275,16 +279,24 @@ def check_proposal(root: Path, proposal_path: Path, *, today: dt.date | None = N
                     problems = _problems(root, note, row, log.text if log else "", duplicates, today, state_of,
                                          latest["cells"][3] if latest else None)
             findings.append({"decision_id": did, "problems": sorted(problems)})
-        codes = {code for finding in findings for code in finding["problems"]}
-        verdict = "blocked" if codes - REVIEW_CODES else "needs_review" if codes else "pass"
-        return {
-            "contract_version": 1,
-            "format": FORMAT, "proposal_id": proposal["proposal_id"], "proposal_sha256": digest,
-            "as_of": today.isoformat(), "review_scope": "explicit_decision_ids_only",
-            "verdict": verdict, "review_required": True, "execution_authorized": False,
-            "semantics_checked": False, "trusted_history_checked": False,
-            "referenced_decisions": len(findings), "findings": findings,
-        }
+        return findings
+
+
+def check_proposal(root: Path, proposal_path: Path, *, today: dt.date | None = None) -> dict:
+    """Check current vault bytes under one advisory read lock, without Git or writes."""
+    today = today or dt.date.today()
+    proposal, digest = read_proposal(proposal_path)
+    findings = assess_decisions(root, list(proposal["decision_ids"]), today=today)
+    codes = {code for finding in findings for code in finding["problems"]}
+    verdict = "blocked" if codes - REVIEW_CODES else "needs_review" if codes else "pass"
+    return {
+        "contract_version": 1,
+        "format": FORMAT, "proposal_id": proposal["proposal_id"], "proposal_sha256": digest,
+        "as_of": today.isoformat(), "review_scope": "explicit_decision_ids_only",
+        "verdict": verdict, "review_required": True, "execution_authorized": False,
+        "semantics_checked": False, "trusted_history_checked": False,
+        "referenced_decisions": len(findings), "findings": findings,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:

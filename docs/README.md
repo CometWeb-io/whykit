@@ -15,6 +15,8 @@ Learn by doing. Every command in these pages runs in the test suite.
 | Page | You will |
 |---|---|
 | [Quickstart](../README.md#try-it) | Create a vault, cite a source, record a decision |
+| [Connect your AI agents](agents.md) | Give Claude Code, Cursor, Codex or VS Code read-only access to your decisions and tell them to check before changing code |
+| [Catch decision drift](tutorials/catch-decision-drift.md) | Map a code change to the decisions it touches and see a decision flagged when its source is replaced |
 | [Import, review and export](tutorials/review-and-export.md) | Import an ADR as a draft, trace changed evidence and export public data with the review warning intact |
 | [Record, check and supersede a decision](tutorials/record-and-supersede.md) | Change your mind with a new decision and watch the history check refuse a rewrite |
 | [Gate pull requests with `whykit check`](tutorials/gate-pull-requests.md) | Add the GitHub Action and see a good and a bad pull request |
@@ -47,6 +49,8 @@ Recipes for a specific job.
 | [Claims and captured sources](claims.md) | Exact byte anchors, immutable local captures and content-bound draft claims |
 | [Declared outcomes](outcomes.md) | Record measurements separately from targets and causal conclusions |
 | [Knowledge v2 migration](knowledge-v2.md) | Inspect five typed objects and preserve raw bytes through a private bundle and restore |
+| [Field evaluation](field-evaluation.md) | What replaying four real ADR repositories showed, what changed because of it and what is still unknown |
+| [Affected decisions](affected.md) | `applies_to` scopes, which decisions a change touches, their review signals and a pull-request recipe |
 | [Compiled context](compiled-context.md) | A total output byte budget, scoped manifest and current-input verification |
 | [Dependency graph](dependency-graph.md) | Bounded multi-level reverse dependency paths and explicit review signals |
 | [Temporal graph](temporal-graph.md) | Pinned Git snapshots and separately declared validity intervals |
@@ -74,6 +78,8 @@ Exact behaviour, checked against the code by the test suite.
 | [Troubleshooting and FAQ](troubleshooting.md) | Error messages, surprising results and quick answers |
 | [Performance](performance.md) | Measured times on large vaults and how to reproduce them |
 | [Migrating to 0.3](migration-0.3.md) | Upgrading a vault, scripts and CI from 0.2.0 or the 0.3.0 preview |
+| [Upgrading from 0.3.4 to 0.4](migration-0.4.md) | Back up a vault, test an upgrade and recover a pre-upgrade copy |
+| [0.4 feature status](feature-status.md) | Core and preview features and the limits of their guarantees |
 | [Releasing](releasing.md) | The package release checklist and reproducible builds |
 | [Security model](security-model.md) | What WhyKit protects, the trust boundaries, and what it does not guarantee |
 | [Security policy](../SECURITY.md) | Reporting a vulnerability and keeping a real vault private |

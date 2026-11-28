@@ -170,6 +170,10 @@ CLI actually prints.
 | Command | Schema |
 |---|---|
 | `init --json` | `init-result.schema.json` |
+| `connect --json` | `connect-result.schema.json` |
+| `affected --json` | `affected-report.schema.json` |
+| `scope suggest --json` | `scope-suggestions.schema.json` |
+| `scope check --json` | `scope-check.schema.json` |
 | `recover --json` | `recovery-result.schema.json` |
 | `lint --json` | `lint-report.schema.json` |
 | `new decision\|evidence\|note --json` | `record-create.schema.json` |

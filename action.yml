@@ -67,6 +67,21 @@ inputs:
       summary only.
     required: false
     default: "false"
+  affected:
+    description: >
+      On a pull request, report which live decisions the change touches and
+      which of them need review (`whykit affected --format markdown`). The
+      report goes to the job summary and, with `comment`, into the same pull
+      request comment. Advisory: it never fails the job. Needs `fetch-depth: 0`.
+    required: false
+    default: "false"
+  affected-sensitivity:
+    description: >
+      Highest sensitivity label whose decision titles the `affected` report may
+      show; decisions above it are only counted. Everyone who can read the job
+      summary or the pull request sees the report, so the default is `public`.
+    required: false
+    default: "public"
   github-token:
     description: >
       Token used only by `comment` to create or update the pull request
@@ -135,6 +150,64 @@ runs:
           echo "version=$version"
         } >> "$GITHUB_OUTPUT"
 
+    - name: Affected decisions report
+      id: affected
+      if: inputs.affected != 'false'
+      shell: bash
+      env:
+        WHYKIT_ROOT: ${{ inputs.root }}
+        WHYKIT_AFFECTED: ${{ inputs.affected }}
+        WHYKIT_AFFECTED_SENSITIVITY: ${{ inputs.affected-sensitivity }}
+        WHYKIT_BASE: ${{ inputs.base }}
+        WHYKIT_TODAY: ${{ inputs.today }}
+        WHYKIT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        WHYKIT_EVENT: ${{ github.event_name }}
+        WHYKIT: ${{ steps.install.outputs.whykit }}
+      run: |
+        set -euo pipefail
+        if [ "$WHYKIT_AFFECTED" != "true" ]; then
+          echo "::error::affected must be 'true' or 'false'"
+          exit 2
+        fi
+        case "$WHYKIT_AFFECTED_SENSITIVITY" in
+          public|internal|confidential|restricted) ;;
+          *)
+            echo "::error::affected-sensitivity must be public, internal, confidential or restricted"
+            exit 2
+            ;;
+        esac
+        base="$WHYKIT_BASE"
+        if [ -z "$base" ]; then
+          base="$WHYKIT_BASE_SHA"
+        fi
+        if [ -z "$base" ]; then
+          echo "WhyKit affected: no base to compare against (not a pull request and no base input); skipped"
+          exit 0
+        fi
+        args=("$WHYKIT" affected --root "$WHYKIT_ROOT" --base "$base" --format markdown
+              --max-sensitivity "$WHYKIT_AFFECTED_SENSITIVITY")
+        if [ -n "$WHYKIT_TODAY" ]; then
+          if ! [[ "$WHYKIT_TODAY" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "::error::today must be an ISO date (YYYY-MM-DD)"
+            exit 2
+          fi
+          args+=(--today "$WHYKIT_TODAY")
+        fi
+        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+          echo "::error::The affected report requires actions/checkout with fetch-depth: 0"
+          exit 2
+        fi
+        report="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/whykit-affected.XXXXXX")"
+        # Advisory: a report that cannot be produced is a warning, not a failure.
+        if ! "${args[@]}" > "$report"; then
+          echo "::warning::WhyKit affected could not produce a report; see the log above"
+          exit 0
+        fi
+        if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        echo "file=$report" >> "$GITHUB_OUTPUT"
+
     - name: Decision diff comment
       if: inputs.comment != 'false'
       shell: bash
@@ -152,6 +225,7 @@ runs:
         WHYKIT_PYTHON: ${{ steps.install.outputs.python }}
         WHYKIT: ${{ steps.install.outputs.whykit }}
         WHYKIT_GITHUB_TOKEN: ${{ inputs.github-token }}
+        WHYKIT_AFFECTED_FILE: ${{ steps.affected.outputs.file }}
       run: |
         set -euo pipefail
         if [ "$WHYKIT_COMMENT" != "true" ]; then
@@ -186,6 +260,11 @@ runs:
         env -u WHYKIT_GITHUB_TOKEN "${args[@]}" > "$report"
         if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        # The affected report (already in the summary) joins the same comment.
+        if [ -n "${WHYKIT_AFFECTED_FILE:-}" ] && [ -f "$WHYKIT_AFFECTED_FILE" ]; then
+          printf '\n' >> "$report"
+          cat "$WHYKIT_AFFECTED_FILE" >> "$report"
         fi
         if [ "$WHYKIT_HEAD_REPO" != "$WHYKIT_REPOSITORY" ]; then
           echo "WhyKit decision diff: pull request from a fork; written to the job summary, no comment"

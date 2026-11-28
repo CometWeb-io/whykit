@@ -1,0 +1,45 @@
+name: Field report for whykit affected
+description: Tell us what `whykit affected` reported on a real change, what it missed and what was noise
+title: "[field report] "
+labels: [field-report]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Labelled real-world cases decide the roadmap. Do not paste private decision text,
+        source URLs or code: describe them, or use synthetic names.
+  - type: textarea
+    id: change
+    attributes:
+      label: The change
+      description: What kind of change was it (files or areas touched, size), and how did you run `whykit affected`?
+    validations:
+      required: true
+  - type: textarea
+    id: correct
+    attributes:
+      label: Correct results
+      description: Decisions it reported that really applied, and review signals that were useful.
+    validations:
+      required: false
+  - type: textarea
+    id: missed
+    attributes:
+      label: Missed
+      description: Decisions that applied but were not reported. Did they have an applies_to scope?
+    validations:
+      required: false
+  - type: textarea
+    id: noise
+    attributes:
+      label: Noise
+      description: Decisions or signals that were reported but did not matter for this change.
+    validations:
+      required: false
+  - type: input
+    id: time
+    attributes:
+      label: Time to a first useful result
+      description: From install to the first report that helped, roughly.
+    validations:
+      required: false

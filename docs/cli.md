@@ -12,9 +12,9 @@ From a source checkout, prefix commands with `uv run` (see
 
 - `whykit --version` (or `-V`) prints the version; `whykit --help` lists the
   commands grouped by job: **author** (`init`, `adopt`, `new`, `review`,
-  `evidence`), **check** (`lint`, `check`, `status`, `trace`, `history`,
+  `evidence`, `scope`), **check** (`lint`, `check`, `affected`, `status`, `trace`, `history`,
   `diff`, `snapshot`, `verify-snapshot`), **explore** (`query`, `retrieve`, `context`,
-  `pack`, `graph`, `backlinks`, `impact`), **integrate** (`install-hooks`,
+  `pack`, `graph`, `backlinks`, `impact`), **integrate** (`connect`, `install-hooks`,
   `explorer-index`, `serve`, `completion`) and **maintain** (`policy`, `rules`,
   `doctor`, `recover`). The table below follows the same order.
 - `--root DIR` selects the vault. Every command that reads a vault accepts it
@@ -47,7 +47,7 @@ From a source checkout, prefix commands with `uv run` (see
 |---|---|---|---|
 | `init <dir>` | Create a vault from the bundled template | `--force`, `--full`, `--minimal`, `--json` | [How-to](guide.md#create-a-vault) |
 | `adopt <source>` | Inventory existing Markdown; stage it with `--write`, or compare a normalized tree read-only with `--compare DIR` | `--into` (or `--root`), `--profile`, `--owner`, `--write`, `--compare`, `--json` | [How-to](guide.md#already-have-a-pile-of-markdown) |
-| `new decision <title>` | Create a decision record and its decision-log row; with `--from FILE`, promote an existing ADR into one (a dry run that prints the mapping until `--write`) | `--from`, `--write`, `--owner`, `--status`, `--source`, `--supersedes`, `--review-by`, `--sensitivity`, `--json`, `--root` | [How-to](guide.md#promote-an-adopted-adr) |
+| `new decision <title>` | Create a decision record and its decision-log row; with `--from FILE`, promote an existing ADR into one (a dry run that prints the mapping until `--write`) | `--from`, `--write`, `--owner`, `--status`, `--source`, `--supersedes`, `--review-by`, `--applies-to`, `--watch-term`, `--sensitivity`, `--json`, `--root` | [How-to](guide.md#promote-an-adopted-adr) |
 | `new evidence` | Append a source to the evidence register | `--source`, `--type`, `--location`, `--claims`, `--date`, `--accessed`, `--sensitivity`, `--json`, `--root` | [Classification](data-classification.md#evidence-rows) |
 | `new note <title>` | Create a draft note in a workstream | `--workstream`, `--type`, `--owner`, `--sensitivity`, `--link-from`, `--json`, `--root` | [How-to](guide.md#create-records) |
 | `review list` | Show upcoming and overdue reviews | `--due-days`, `--overdue-only`, `--owner`, `--today`, `--json`, `--root` | [How-to](guide.md#record-a-review) |
@@ -55,8 +55,11 @@ From a source checkout, prefix commands with `uv run` (see
 | `review record <target>` | Append a review event; `confirmed` moves `review_by` forward | `--reviewer`, `--outcome`, `--next-review`, `--note`, `--today`, `--json`, `--root` | [Concepts](concepts.md#the-review-cycle) |
 | `evidence list` | List active and retired evidence | `--state`, `--json`, `--root` | [How-to](guide.md#retire-evidence) |
 | `evidence retire <E-NNN>` | Retire a source without deleting its ID | `--why`, `--replaced-by`, `--today`, `--json`, `--root` | [How-to](guide.md#retire-evidence) |
+| `scope suggest [D-NNN…]` | Suggest `applies_to` patterns from the commits that changed a decision record or name its ID; `--write` fills in only decisions without a scope | `--repo`, `--all`, `--min-commits`, `--max-files`, `--write`, `--json`, `--root` | [Affected decisions](affected.md#let-git-suggest-the-scope) |
+| `scope check` | Check live decisions' `applies_to` patterns against tracked files and their `watch_terms` against source files: dead patterns, broad patterns, unseen terms, unscoped decisions | `--repo`, `--strict`, `--json`, `--root` | [Affected decisions](affected.md#keep-scopes-honest) |
 | `lint [paths…]` | Check the vault, or some files in it; `--format` picks `text`, `json`, `sarif` (SARIF 2.1.0 for code scanning) or `github` (workflow annotations) | `--strict`, `--quiet`, `--json`, `--format`, `--no-orphans`, `--no-secrets`, `--today`, `--root` | [Rules](rules.md), [CI](ci.md) |
 | `check` | Run a named policy gate (`local`, `ci`, `release` or your own; default `ci`); `--format` picks `text`, `json` or `github` | `--profile`, `--base`, `--head`, `--today`, `--json`, `--format`, `--root` | [CI](ci.md) |
+| `affected` | List the live decisions whose `applies_to` scope covers changed or planned files, with their review signals (retired, missing or stale sources, changed captured sources, overdue or failed reviews), the files no decision covers and the decisions without a scope; `--adr DIR` reads plain ADR files without a vault; never judges the change itself | `--repo`, `--adr`, `--files`, `--diff-file`, `--base`, `--max-sensitivity`, `--format`, `--strict`, `--today`, `--json`, `--root` | [Affected decisions](affected.md) |
 | `status` | Summarize vault health and the review queue | `--due-days`, `--strict`, `--today`, `--json`, `--root` | [Concepts](concepts.md#the-review-cycle) |
 | `trace` | Trace each decision to its evidence; flag missing, retired or stale sources | `--decision`, `--gaps-only`, `--max-age-days`, `--strict`, `--today`, `--json`, `--root` | [How-to](guide.md#trace-decisions-to-their-evidence) |
 | `history` | Verify that accepted reasoning and earlier review events were not rewritten between two commits, or (`--staged`) in the staged changes, for pre-commit | `--base`, `--head`, `--staged`, `--json`, `--root` | [Concepts](concepts.md#lifecycle) |
@@ -91,6 +94,7 @@ From a source checkout, prefix commands with `uv run` (see
 | `graph` | Export typed relations as JSON, DOT, Mermaid or Obsidian-style JSON | `--format`, `--canonical-only`, `--output`, `--json`, `--root` | [How-to](guide.md#hand-bounded-context-to-an-agent) |
 | `backlinks <target>` | List what links to a note, decision or evidence ID | `--json`, `--root` | [Obsidian](obsidian.md#graph-view-and-whykits-graph) |
 | `impact <target>` | Show what depends on evidence, a decision or a document | `--json`, `--root` | [How-to](guide.md#retire-evidence) |
+| `connect` | Print the read-only MCP configuration for an agent host and preview the decision-checking block for a code repository's `AGENTS.md` or `CLAUDE.md`; `--write` adds or refreshes only that marked block | `--host`, `--repo`, `--max-sensitivity`, `--write`, `--json`, `--root` | [Agents](agents.md) |
 | `install-hooks` | Install a pre-commit hook that runs the `local` profile | `--force`, `--root` | [CI](ci.md#local-hooks) |
 | `explorer-index` | Export a public Explorer index, or explicit private diagnostics/index (always JSON) | `--today`, `--private`, `--publication-preview`, `--json`, `--root` | [Classification](data-classification.md#public-exports) |
 | `serve [vault]` | Run the optional Explorer from a source checkout; an installed copy names the checkout it came from, or the source to clone | `--root`, `--host`, `--port`, `--allow-sensitive-network` | [How-to](guide.md#browse-the-vault-in-the-explorer) |

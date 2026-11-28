@@ -1,0 +1,308 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/affected-report.schema.json",
+  "title": "WhyKit affected report",
+  "description": "Output of `whykit affected --json`: the live decisions whose applies_to scope covers changed or planned files, their review signals, and what was not covered. It never judges whether the change is consistent with a decision (semantics_checked is always false). With --adr, decisions are plain ADR files identified as adr:<path>, mode is \"adr\" and evidence and review checks do not apply.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "as_of",
+    "root",
+    "repo",
+    "source",
+    "changed_files",
+    "decisions",
+    "uncovered_files",
+    "unscoped_decisions",
+    "invalid_scopes",
+    "withheld_decisions",
+    "caveats",
+    "summary",
+    "review_required",
+    "semantics_checked",
+    "mode"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "as_of": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "kind",
+        "base"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "files",
+            "git",
+            "diff"
+          ]
+        },
+        "base": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "decision_id",
+          "title",
+          "path",
+          "owner",
+          "matched_files",
+          "matched_patterns",
+          "problems",
+          "review_signal",
+          "reasons"
+        ],
+        "properties": {
+          "decision_id": {
+            "type": "string",
+            "pattern": "^(D-[0-9]{3,}|adr:.+)$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "matched_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "matched_patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 0
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z_]+$"
+            }
+          },
+          "review_signal": {
+            "type": "boolean"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "matched_sources": {
+            "description": "Cited evidence whose repository location this change modifies (vault mode).",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "evidence_id",
+                "files"
+              ],
+              "properties": {
+                "evidence_id": {
+                  "type": "string",
+                  "pattern": "^E-[0-9]{3,}$"
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "broad": {
+            "description": "Matched only through patterns that cover a whole top-level folder; such decisions apply to most changes.",
+            "type": "boolean"
+          },
+          "matched_terms": {
+            "description": "Declared watch_terms found in added or removed lines, per file (Git mode only).",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "term",
+                "files"
+              ],
+              "properties": {
+                "term": {
+                  "type": "string"
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "uncovered_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unscoped_decisions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(D-[0-9]{3,}|adr:.+)$"
+      }
+    },
+    "invalid_scopes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "decision_id",
+          "pattern",
+          "problem"
+        ],
+        "properties": {
+          "decision_id": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "problem": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "withheld_decisions": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "caveats": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z_]+$"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "changed_files",
+        "applicable_decisions",
+        "needing_review",
+        "uncovered_files",
+        "unscoped_decisions"
+      ],
+      "properties": {
+        "changed_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "applicable_decisions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "needing_review": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uncovered_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unscoped_decisions": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "review_required": {
+      "type": "boolean"
+    },
+    "semantics_checked": {
+      "const": false
+    },
+    "mode": {
+      "enum": [
+        "vault",
+        "adr"
+      ]
+    },
+    "adr": {
+      "type": "object",
+      "required": [
+        "files",
+        "live",
+        "status_unknown",
+        "unreadable"
+      ],
+      "properties": {
+        "files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "live": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status_unknown": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unreadable": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

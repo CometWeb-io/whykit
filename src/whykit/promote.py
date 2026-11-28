@@ -99,7 +99,7 @@ SECTION_LABELS = {
 HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t#]*$")
 FENCE_OPEN_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 META_LINE_RE = re.compile(
-    r"^\s*(?:[-*+]\s+)?\**(status|date|data|stan|deciders|decyzja podjęta przez|decydenci)\**\s*:\s*\**\s*(.+?)\s*$",
+    r"^\s*(?:[-*+]\s+)?\**(status|date|data|stan|deciders|decision-makers|decyzja podjęta przez|decydenci)\**\s*:\s*\**\s*(.+?)\s*$",
     re.I,
 )
 # ADR numbering in a title: "7. Use queues", "0007 - Use queues", "ADR-0007: Use
@@ -190,6 +190,9 @@ class Promotion:
     batch: str | None = None
     batch_path: str | None = None
     in_vault: bool = False
+    # Field data (MADR, log4brains): who decided, and each option's pros and cons.
+    source_owner: str | None = None
+    option_details: dict[str, tuple[list[str], list[str]]] = field(default_factory=dict)
 
     def provenance(self, today: str) -> dict[str, object]:
         """The front-matter ``provenance`` block (see schemas/provenance.schema.json)."""
@@ -221,6 +224,7 @@ class Promotion:
             "status": self.source_status,
             "date": self.source_date,
             "original_id": self.source_id,
+            "owner": self.source_owner,
             "batch": self.batch,
         }
 
@@ -377,10 +381,63 @@ def _sentence(value: str) -> str:
     return (value[:1].upper() + value[1:] + ".") if value else ""
 
 
+# Status badges and images are decoration, not sources (field data: MADR uses
+# shields.io badges; offering them as evidence was noise).
+BADGE_URL_RE = re.compile(
+    r"^https?://(?:[^/]*\.)?(?:shields\.io|badgen\.net|badge\.fury\.io|travis-ci\.(?:org|com)|codecov\.io)/"
+    r"|\.(?:png|jpe?g|gif|svg|webp)(?:[?#].*)?$",
+    re.I,
+)
+MIGRATION_REPORT_RE = re.compile(r"MIGRATION(?:-\d+)?\.md", re.I)
+_NOT_IN_FORCE = ("superseded", "deprecated", "rejected", "obsolete", "withdrawn", "replaced",
+                 "zastąpion", "odrzuc", "wycofan")
+
+
+def _people(value: object) -> str | None:
+    """A ``deciders`` / ``decision-makers`` value as one owner string."""
+    if isinstance(value, list):
+        names = [str(item).strip() for item in value if str(item).strip()]
+        return ", ".join(names) or None
+    text = str(value or "").strip().strip("[]")
+    if not text or "{" in text or text.casefold().startswith(("list ", "todo")):
+        return None
+    return text
+
+
+def _option_details(sections: list[Section], level: int) -> dict[str, tuple[list[str], list[str]]]:
+    """MADR "Pros and Cons of the Options": each option's Good and Bad bullets."""
+    details: dict[str, tuple[list[str], list[str]]] = {}
+    inside = False
+    for section in sections:
+        folded = _fold(section.heading)
+        if section.level <= level:
+            inside = folded in {"pros and cons of the options", "zalety i wady opcji"}
+            continue
+        if not inside or section.level != level + 1:
+            continue
+        good: list[str] = []
+        bad: list[str] = []
+        for item in _list_items(section.text):
+            tone = GOOD_BAD_RE.match(item)
+            if not tone:
+                continue
+            text = _capital(_plain(GOOD_BAD_RE.sub("", item)))
+            if tone.group(1).casefold() in {"good", "dobrze"}:
+                good.append(text)
+            elif tone.group(1).casefold() in {"bad", "źle", "zle"}:
+                bad.append(text)
+        if good or bad:
+            details[_fold(_plain(section.heading))] = (good, bad)
+    return details
+
+
 def build_promotion(vault: Path, path: Path, *, title: str | None = None) -> Promotion:
     """Read *path* and work out the decision record it would become."""
     if not is_markdown_name(path.name):
         raise PromotionError(f"not a Markdown file: {path.name}")
+    parts = path.resolve().parts
+    if MIGRATION_REPORT_RE.fullmatch(path.name) and STAGING_DIR in parts and parts.index(STAGING_DIR) == len(parts) - 3:
+        raise PromotionError(f"{path.name} is the report `whykit adopt` wrote for this batch, not a decision record")
     if path.is_symlink() or not path.is_file():
         raise PromotionError(f"not a regular Markdown file: {path}")
     data = path.read_bytes()
@@ -547,7 +604,7 @@ def build_promotion(vault: Path, path: Path, *, title: str | None = None) -> Pro
 
     candidates: list[str] = []
     for url in URL_RE.findall(body):
-        if url not in candidates:
+        if url not in candidates and not BADGE_URL_RE.search(url):
             candidates.append(url)
     if len(candidates) > MAX_EVIDENCE_CANDIDATES:
         warnings.append(f"{len(candidates)} links found; the first {MAX_EVIDENCE_CANDIDATES} are listed as evidence candidates")
@@ -563,6 +620,20 @@ def build_promotion(vault: Path, path: Path, *, title: str | None = None) -> Pro
         warnings.append(
             "no ADR shape recognised (MADR, Nygard, Y-statement or Polish headings); "
             "every WhyKit section keeps its prompt and the text is kept only under Original record"
+        )
+    owner = _people(front.get("decision-makers")) or _people(front.get("deciders")) or _people(
+        meta.get("deciders") or meta.get("decision-makers") or meta.get("decydenci") or meta.get("decyzja podjęta przez"))
+    details = {
+        name: (good, bad) for name, (good, bad) in _option_details(headings, level).items()
+        if any(_fold(alternative) == name for alternative in alternatives)
+    }
+    title_marker = re.search(r"\[(superseded|deprecated|rejected|obsolete)\]", chosen_title, re.I)
+    if title_marker and not status:
+        status = title_marker.group(1).lower()
+    if status and _fold(status).startswith(_NOT_IN_FORCE):
+        warnings.append(
+            f"the original record's status is '{_plain(status)}': promote it to keep its history, then "
+            "supersede or archive it instead of approving it"
         )
     for target in ("context", "decision", "rationale"):
         if shape != "unstructured" and not cleaned.get(target):
@@ -588,6 +659,9 @@ def build_promotion(vault: Path, path: Path, *, title: str | None = None) -> Pro
         batch=batch,
         batch_path=batch_path,
         in_vault=_within(vault.resolve(), path.resolve()),
+        source_owner=_neutralise(owner, warnings) if owner else None,
+        option_details={name: ([_neutralise(x, warnings) for x in good], [_neutralise(x, warnings) for x in bad])
+                        for name, (good, bad) in details.items()},
     )
 
 

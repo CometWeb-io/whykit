@@ -53,6 +53,8 @@ MAX_MCP_PACK_DOCS = 20
 MAX_TARGET_CHARS = 512
 MAX_TEXT_CHARS = 1_000
 MAX_FILTER_CHARS = 200
+MAX_MCP_AFFECTED_FILES = 200
+MAX_MCP_DIFF_CHARS = 500_000
 MAX_DUE_DAYS = 3_650
 DEFAULT_MAX_SENSITIVITY = "internal"
 
@@ -76,7 +78,8 @@ HTTP_REQUEST_BURST = 60
 HTTP_REQUESTS_PER_SECOND = 2
 HTTP_BODY_TIMEOUT_SECONDS = 30
 
-TOOL_NAMES = ("query", "context", "impact", "status", "pack", "trace", "backlinks")
+QUERY_RANKINGS = ("auto", "substring", "bm25")
+TOOL_NAMES = ("query", "context", "impact", "status", "pack", "trace", "backlinks", "affected")
 RECORD_TEMPLATE = "whykit://record/{+target}"
 DECISIONS_URI = "whykit://decisions"
 
@@ -516,6 +519,7 @@ TOOL_BASE_SCHEMAS: dict[str, str] = {
     "pack": "context-bundle.schema.json",
     "trace": "trace-report.schema.json",
     "backlinks": "backlinks-report.schema.json",
+    "affected": "affected-report.schema.json",
 }
 
 _CEILING_SCHEMA = {
@@ -600,6 +604,16 @@ def _output_schemas() -> dict[str, dict[str, Any]]:
     _extend(
         schemas["backlinks"], "WhyKit MCP backlinks", ("truncated", "max_sensitivity", "next_cursor"),
         truncated=_TRUNCATED_SCHEMA, **paged,
+    )
+    affected = schemas["affected"]
+    # Never the host paths of the vault or a repository.
+    for key in ("root", "repo"):
+        affected["properties"].pop(key)
+        affected["required"].remove(key)
+    _extend(
+        affected, "WhyKit MCP affected", ("max_sensitivity",),
+        max_sensitivity=_CEILING_SCHEMA,
+        evidence_details={"const": "withheld"},
     )
     return schemas
 
@@ -794,8 +808,10 @@ class VaultTools:
         source_id: str | None = None,
         canonical_only: bool = False,
         cursor: str | None = None,
+        ranking: str | None = None,
     ) -> dict:
         from whykit.query import query_vault
+        from whykit.retrieval import _tokens
 
         text = _validate_text(text, "text", max_chars=MAX_TEXT_CHARS)
         limit = _validate_int(limit, "limit", minimum=0, maximum=MAX_MCP_RESULTS)
@@ -808,29 +824,56 @@ class VaultTools:
         if source_id is not None and not _EVIDENCE_RE.fullmatch(source_id):
             raise ToolFailure("invalid_argument", "source_id must be an E-NNN identifier")
         canonical_only = _validate_bool(canonical_only, "canonical_only")
+        requested = _validate_text(ranking, "ranking", max_chars=MAX_FILTER_CHARS) or "substring"
+        if requested not in QUERY_RANKINGS:
+            raise ToolFailure("invalid_argument", f"ranking must be one of {', '.join(QUERY_RANKINGS)}")
         self._check_vault()
-        report = query_vault(
-            self.vault,
-            text=text,
-            doc_type=doc_type,
-            status=status,
-            owner=owner,
-            tag=tag,
-            source_id=source_id,
-            canonical_only=canonical_only,
-            # Rank every visible match; the page is cut below.
-            limit=1_000_000_000,
-            allowed_sensitivities=self.allowed,
-            vault=self.visible_index(),
-        )
-        binding = [text, doc_type, status, owner, tag, source_id, canonical_only, limit]
+        visible = self.visible_index()
+
+        def run(mode: str) -> dict:
+            return query_vault(
+                self.vault,
+                text=text,
+                doc_type=doc_type,
+                status=status,
+                owner=owner,
+                tag=tag,
+                source_id=source_id,
+                canonical_only=canonical_only,
+                # Rank every visible match; the page is cut below.
+                limit=1_000_000_000,
+                allowed_sensitivities=self.allowed,
+                vault=visible,
+                ranking=mode,
+            )
+
+        # BM25 needs at least one word; an empty query keeps listing every
+        # visible document. `auto` keeps the exact-phrase result when it has
+        # one and falls back to BM25 (any word) only when the phrase matched
+        # nothing. The default stays `substring`, so a phrase that matches
+        # nothing still returns nothing unless the caller opts in.
+        has_terms = bool(text and _tokens(text))
+        if requested == "bm25" and has_terms:
+            used = "bm25"
+            report = run(used)
+        else:
+            used = "substring"
+            report = run(used)
+            if requested == "auto" and has_terms and report["total"] == 0:
+                used = "bm25"
+                report = run(used)
+        binding = [text, doc_type, status, owner, tag, source_id, canonical_only, limit, requested]
+        query_meta = {**report["query"], "limit": limit, "ranking": used, "ranking_requested": requested}
+        if used == "substring" and report["total"] == 0 and text and len(set(_tokens(text))) > 1:
+            # Agents often send loose keywords; tell them how to widen the search.
+            query_meta["hint"] = "no document contains this exact phrase; retry with ranking='auto' to match any of its words"
         results, next_cursor, _ = self.cursors.page(
             report["results"], scope="query", binding=binding,
             keys=(item["path"] for item in report["results"]), cursor=cursor, limit=limit,
         )
         return {
             **report,
-            "query": {**report["query"], "limit": limit},
+            "query": query_meta,
             "returned": len(results),
             "results": results,
             "next_cursor": next_cursor,
@@ -1089,6 +1132,57 @@ class VaultTools:
             "next_cursor": next_cursor,
             "max_sensitivity": self.policy,
         }
+
+    @_vault_request
+    def affected(self, files: list[str], today: str | None = None, diff: str | None = None) -> dict:
+        from whykit.affected import AffectedError, build_affected, parse_unified_diff, pattern_problem
+        from whykit.agent_preflight import PreflightInputError
+
+        if not isinstance(files, list) or not files:
+            raise ToolFailure("invalid_argument", "files must be a non-empty list of repository-relative paths")
+        if len(files) > MAX_MCP_AFFECTED_FILES:
+            raise ToolFailure("invalid_argument", f"files has more than {MAX_MCP_AFFECTED_FILES} paths")
+        paths: list[str] = []
+        for value in files:
+            if not isinstance(value, str) or len(value) > MAX_TARGET_CHARS or _CONTROL_RE.search(value):
+                raise ToolFailure("invalid_argument", "each file must be a short repository-relative path")
+            path = value.removeprefix("./")
+            if pattern_problem(path) or any(char in path for char in "*?["):
+                raise ToolFailure("invalid_argument", "each file must be a repository-relative path without globs")
+            paths.append(path)
+        as_of = _validate_today(today)
+        if diff is not None and (not isinstance(diff, str) or len(diff) > MAX_MCP_DIFF_CHARS
+                                 or re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", diff)):
+            raise ToolFailure("invalid_argument", f"diff must be unified diff text of at most {MAX_MCP_DIFF_CHARS} characters")
+        lines, truncated = parse_unified_diff(diff) if diff else (None, False)
+        self._check_vault()
+        # Evidence locations live in the register; match them only when the
+        # register itself is within the ceiling.
+        register_visible = self.register_visible()
+        try:
+            report = build_affected(
+                self.vault, None, sorted(set(paths)), {"kind": "files", "base": None},
+                today=as_of, max_sensitivity=self.policy, hide_above_ceiling=True,
+                match_sources=register_visible, diff=lines, diff_truncated=truncated,
+            )
+        except (AffectedError, PreflightInputError):
+            raise ToolFailure("vault_unavailable", "the vault could not be assessed") from None
+        report.pop("root", None)
+        report.pop("repo", None)
+        if not register_visible:
+            # Register rows are internal: under a public ceiling, say nothing
+            # about the state of the evidence a decision cites.
+            for item in report["decisions"]:
+                kept = [code for code in item["problems"] if "evidence" not in code and not code.startswith("claim_")]
+                item["reasons"] = [reason for code, reason in zip(item["problems"], item["reasons"], strict=True) if code in kept]
+                item["problems"] = kept
+                item["review_signal"] = bool(kept)
+            report["caveats"] = [code for code in report["caveats"] if "evidence" not in code]
+            report["summary"]["needing_review"] = sum(1 for item in report["decisions"] if item["review_signal"])
+            report["review_required"] = bool(report["summary"]["needing_review"])
+            report["evidence_details"] = "withheld"
+        report["max_sensitivity"] = self.policy
+        return report
 
     # -- resources and prompts (SDK-free) ------------------------------------
 
@@ -1812,6 +1906,14 @@ def build_server(
         source_id: Annotated[str, Field(description="Only documents citing this E-NNN.", max_length=MAX_FILTER_CHARS)] = "",
         canonical_only: Annotated[bool, Field(description="Only `source_of_truth: true` documents.")] = False,
         cursor: Cursor = "",
+        ranking: Annotated[str, Field(
+            description=(
+                "substring (default): the exact phrase only. auto: the exact phrase first; if it "
+                "matches nothing, rank documents containing any of its words (BM25) — use this "
+                "for keyword searches. bm25: any word, ranked."
+            ),
+            max_length=MAX_FILTER_CHARS,
+        )] = "substring",
     ):
         """Ranked metadata and text search over documents within the sensitivity ceiling.
 
@@ -1821,7 +1923,7 @@ def build_server(
         return respond(
             "query", text=text, limit=limit, doc_type=type or None, status=status or None,
             owner=owner or None, tag=tag or None, source_id=source_id or None,
-            canonical_only=canonical_only, cursor=cursor or None,
+            canonical_only=canonical_only, cursor=cursor or None, ranking=ranking or None,
         )
 
     @mcp.tool(title="Read one record with its evidence", annotations=read_only)
@@ -1926,6 +2028,28 @@ def build_server(
         missing one.
         """
         return respond("backlinks", target=target, limit=limit, cursor=cursor or None)
+
+    @mcp.tool(title="Find the decisions a planned change touches", annotations=read_only)
+    def affected(
+        files: Annotated[list[str], Field(
+            description=f"Repository-relative paths you plan to change (1-{MAX_MCP_AFFECTED_FILES}), e.g. src/payments/ledger.py.",
+            min_length=1, max_length=MAX_MCP_AFFECTED_FILES,
+        )],
+        today: Annotated[str, Field(description="Evaluate as of this ISO date (YYYY-MM-DD); default today.", max_length=32)] = "",
+        diff: Annotated[str, Field(
+            description="Optional unified diff of the planned change; its added and removed lines are checked against decisions' watch_terms.",
+            max_length=MAX_MCP_DIFF_CHARS,
+        )] = "",
+    ):
+        """Live decisions whose `applies_to` scope covers the files, with review signals.
+
+        Read-only. Call before editing: it lists the accepted decisions that
+        govern those files and flags any whose sources or reviews need
+        attention, plus files no decision covers and decisions without a
+        scope. It matches paths, never meaning, and never says a change is
+        safe. Decisions above the ceiling are treated as nonexistent.
+        """
+        return respond("affected", files=list(files), today=today or None, diff=diff or None)
 
     # -- resources ------------------------------------------------------------
 

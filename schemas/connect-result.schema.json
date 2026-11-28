@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cometweb.io/schemas/whykit/connect-result.schema.json",
+  "title": "WhyKit connect result",
+  "description": "Output of `whykit connect --json`: the MCP configuration for one agent host and the state of the repository's agent instruction block.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "root",
+    "host",
+    "repo",
+    "instructions_file",
+    "action",
+    "written",
+    "mcp",
+    "block"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "host": {
+      "enum": [
+        "claude-code",
+        "cursor",
+        "vscode",
+        "codex",
+        "claude-desktop",
+        "generic"
+      ]
+    },
+    "repo": {
+      "type": "string",
+      "minLength": 1
+    },
+    "instructions_file": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action": {
+      "description": "What writing does or did to the instructions file.",
+      "enum": [
+        "created",
+        "updated",
+        "unchanged"
+      ]
+    },
+    "written": {
+      "type": "boolean"
+    },
+    "mcp": {
+      "type": "object",
+      "required": [
+        "installed",
+        "command",
+        "args",
+        "config_location",
+        "config"
+      ],
+      "properties": {
+        "installed": {
+          "type": "boolean"
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "config_location": {
+          "type": "string"
+        },
+        "config": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "block": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": true
+}

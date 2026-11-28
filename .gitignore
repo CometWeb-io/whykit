@@ -44,3 +44,6 @@ apps/explorer/src/generated/findings.json
 apps/explorer/e2e/.build/
 apps/explorer/test-results/
 apps/explorer/playwright-report/
+
+# GitHub Pages landing page build output (scripts/build-site.sh)
+_site/

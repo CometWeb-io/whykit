@@ -111,6 +111,11 @@ class OfflineTests(unittest.TestCase):
                 ("diff", "--base", "HEAD", "--root", r, "--format", "github"),
                 ("check", "--root", r, "--profile", "local", "--base", "HEAD"),
                 ("install-hooks", "--root", r),
+                ("affected", "--root", r, "--repo", str(Path(r).parent), "--files", "src/app.py"),
+                ("affected", "--root", r, "--repo", r, "--base", "HEAD", "--format", "markdown"),
+                ("scope", "suggest", "--root", r, "--repo", r),
+                ("scope", "check", "--root", r, "--repo", r),
+                ("connect", "--root", r, "--repo", str(Path(r).parent), "--host", "claude-code", "--write"),
                 ("doctor", "--root", r),
                 ("recover", "--root", r, "--json"),
                 ("evidence", "--root", r, "retire", "E-001", "--why", "Example retirement"),
@@ -259,7 +264,7 @@ class OfflineTests(unittest.TestCase):
         covered = {
             "init", "new", "lint", "status", "graph", "backlinks", "impact", "query", "retrieve", "context",
             "pack", "review", "evidence", "snapshot", "verify-snapshot", "policy", "rules",
-            "adopt", "explorer-index", "history", "check", "install-hooks", "doctor", "recover",
+            "adopt", "explorer-index", "history", "check", "install-hooks", "connect", "affected", "scope", "doctor", "recover",
             "trace", "completion", "diff", "lsp", "agent", "workspace", "artifact", "claim",
             "compile-context", "verify-context", "deep-impact", "knowledge-at", "outcome", "knowledge", "import",
         }
