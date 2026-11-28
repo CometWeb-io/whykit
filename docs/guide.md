@@ -315,7 +315,7 @@ round: which evidence it rests on, and whether that evidence can still carry it.
 
 ```bash
 whykit trace --today 2026-09-22
-whykit trace --decision D-014 --json
+whykit trace D-014 --json                  # same as --decision D-014
 whykit trace --gaps-only --strict          # CI gate: exit 1 on any gap
 whykit trace --max-age-days 180            # fallback age window for untyped policy
 ```
